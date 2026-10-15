@@ -1,0 +1,10 @@
+{
+  "id": "ink-notebook",
+  "name": "Ink Notebook",
+  "version": "1.0.0",
+  "minAppVersion": "1.8.7",
+  "description": "Handwritten notebook pages built on Excalidraw: flip between ink and text with a bookmark, transcribe handwriting with Azure OCR, embed your diagrams live, annotate PDFs, optimised for e-ink tablets like Boox.",
+  "author": "Stefan Mayer",
+  "authorUrl": "https://github.com/stefanmayer06",
+  "isDesktopOnly": false
+}
