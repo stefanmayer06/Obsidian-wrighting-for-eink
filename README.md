@@ -46,11 +46,11 @@ You need **Obsidian 1.8.7+** and the **Excalidraw** plugin (Community plugins �
 
 ### Option A – BRAT (easiest, also on the Boox)
 1. In Obsidian: *Settings → Community plugins → Browse*, install and enable **BRAT**.
-2. *Settings → BRAT → Add beta plugin* and enter `stefanmayer06/obsidian-wrighting-for-eink`.
+2. *Settings → BRAT → Add beta plugin* and enter `stefanmayer06/Obsidian-wrighting-for-eink`.
 3. Enable **Ink Notebook** under *Community plugins*.
 
 ### Option B – manual
-1. Download `main.js`, `manifest.json` and `styles.css` from the [latest release](https://github.com/stefanmayer06/obsidian-wrighting-for-eink/releases).
+1. Download `main.js`, `manifest.json` and `styles.css` from the [latest release](https://github.com/stefanmayer06/Obsidian-wrighting-for-eink/releases).
 2. Copy them to `<your vault>/.obsidian/plugins/ink-notebook/`.
 3. Restart Obsidian and enable **Ink Notebook**.
 
@@ -147,6 +147,8 @@ npm run build     # type-check + bundle main.js
 ```
 
 The pure logic (OCR parsing, classification, layout, transcript merging, PDF maths) lives in `src/core` and is covered by unit tests; Obsidian/Excalidraw integration is in `src/obsidian`.
+
+**Releasing:** bump `version` in `manifest.json`/`package.json` (and add it to `versions.json`), then on GitHub open *Actions → Build & release → Run workflow* (or push a tag like `1.0.1`). The workflow runs the tests, builds and publishes a release with `main.js`, `manifest.json` and `styles.css` – which is what BRAT and manual installs download.
 
 `e2e/` contains end-to-end tests that run the plugin inside the real Obsidian desktop app with the real Excalidraw plugin and a fake Azure server (see `e2e/README.md`).
 

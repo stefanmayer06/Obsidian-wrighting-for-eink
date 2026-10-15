@@ -16,7 +16,7 @@ import {
 import { testImagePng } from "./azureClient";
 
 export const AZURE_PORTAL_URL = "https://portal.azure.com/#create/Microsoft.CognitiveServicesComputerVision";
-export const README_URL = "https://github.com/stefanmayer06/obsidian-wrighting-for-eink#readme";
+export const README_URL = "https://github.com/stefanmayer06/Obsidian-wrighting-for-eink#readme";
 
 /** Opens Excalidraw in Obsidian's community plugin browser. */
 export function openExcalidrawInstall(app: App): void {
