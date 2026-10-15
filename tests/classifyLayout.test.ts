@@ -110,6 +110,16 @@ describe("classifyScene", () => {
     expect(c.diagrams[0].elementIds).toEqual(["inFrame"]);
   });
 
+  it("ignores page borders around PDF pages", () => {
+    const els: ExElement[] = [
+      shape("pg", "image", 0, 0, 800, 1100, { locked: true, customData: { inkNotebook: { role: "pdf-page", pdf: "a.pdf", page: 1 } } }),
+      shape("border", "rectangle", 0, 0, 800, 1100, { locked: true, customData: { inkNotebook: { role: "page-border" } } }),
+    ];
+    const c = classifyScene(els, [], new Set());
+    expect(c.diagrams).toEqual([]);
+    expect(c.pages).toHaveLength(1);
+  });
+
   it("detects diagram frame names", () => {
     expect(isDiagramFrameName("Diagram 1")).toBe(true);
     expect(isDiagramFrameName("figure: flow")).toBe(true);
@@ -134,6 +144,40 @@ describe("classifyScene", () => {
     // only the first line touches the rectangle's margin
     expect(c.diagrams[0].labels).toEqual(["first line"]);
     expect(c.lines.map((l) => l.text)).toEqual(["second line", "third line"]);
+  });
+
+  it("still recognises handwriting when OCR word boxes are tighter than the strokes", () => {
+    // strokes are 30 high, but OCR reports 20-high word boxes in the middle of them
+    const els = [stroke("w1", 0, 100, 100, 30), stroke("w2", 110, 100, 100, 30), stroke("w3", 0, 145, 150, 30)];
+    const tight = [
+      line("hello there", { x: 2, y: 105, w: 206, h: 20 }),
+      line("again", { x: 2, y: 150, w: 146, h: 20 }),
+    ];
+    const c = classifyScene(els, tight, new Set());
+    expect([...c.textStrokeIds].sort()).toEqual(["w1", "w2", "w3"]);
+    expect(c.diagrams).toEqual([]);
+    expect(c.lines.map((l) => l.strokeIds.sort())).toEqual([["w1", "w2"], ["w3"]]);
+  });
+
+  it("ignores a huge 'word' box that covers a drawing", () => {
+    const els = [
+      stroke("a", 0, 0, 100, 30),
+      stroke("b", 0, 40, 100, 30),
+      boxStroke("frame", 300, 0, 200, 150),
+      stroke("label", 350, 60, 100, 30),
+    ];
+    const lines = [
+      line("one", { x: 0, y: 0, w: 100, h: 30 }),
+      line("two", { x: 0, y: 40, w: 100, h: 30 }),
+      { text: "box label", box: { x: 300, y: 0, w: 200, h: 150 }, words: [
+        { text: "box", confidence: 0.9, box: { x: 300, y: 0, w: 200, h: 150 } },
+        { text: "label", confidence: 0.9, box: { x: 350, y: 60, w: 100, h: 30 } },
+      ] },
+    ];
+    const c = classifyScene(els, lines, new Set());
+    expect(c.textStrokeIds.has("frame")).toBe(false);
+    expect(c.diagrams).toHaveLength(1);
+    expect(c.diagrams[0].elementIds).toContain("frame");
   });
 
   it("turns a long thin hand-drawn line into a rule", () => {

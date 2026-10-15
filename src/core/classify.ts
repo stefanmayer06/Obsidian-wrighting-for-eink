@@ -120,7 +120,16 @@ function parsePdfLink(link: string | null | undefined): { path: string; page: nu
 
 interface WordRef {
   lineIndex: number;
+  /** padded box used for hit testing */
   box: Rect;
+  /** the box as recognised */
+  core: Rect;
+}
+
+function distanceToRect(r: Rect, p: { x: number; y: number }): number {
+  const dx = Math.max(r.x - p.x, 0, p.x - (r.x + r.w));
+  const dy = Math.max(r.y - p.y, 0, p.y - (r.y + r.h));
+  return Math.hypot(dx, dy);
 }
 
 /**
@@ -145,7 +154,7 @@ export function classifyScene(
     if (!el || el.isDeleted) continue;
     elementById.set(el.id, el);
     const role = getInkData(el)?.role;
-    if (role === "region" || role === "typed") continue;
+    if (role === "region" || role === "typed" || role === "page-border") continue;
     if (role === "paper" || role === "pdf-page" || role === "image-page") {
       const data = getInkData(el);
       pages.push({
@@ -211,13 +220,24 @@ export function classifyScene(
   });
 
   const wordIndex = new GridIndex<WordRef>(Math.max(40, medianH * 2));
-  usableLines.forEach((line, lineIndex) => {
-    const words = line.words.filter((w) => w.confidence >= opts.minWordConfidence);
+  const lineIndex = new GridIndex<WordRef>(Math.max(40, medianH * 2));
+  const wordHeights = usableLines.flatMap((l) => l.words.map((w) => w.box.h)).filter((h) => h > 0);
+  const medianWordH = median(wordHeights) || medianH;
+  usableLines.forEach((line, li) => {
+    // a "word" much taller than the others is a drawing OCR tried to read – ignore it
+    const words = line.words.filter(
+      (w) => w.confidence >= opts.minWordConfidence && !(wordHeights.length >= 3 && w.box.h > 3 * medianWordH),
+    );
     const boxes = words.length > 0 ? words.map((w) => w.box) : line.words.length === 0 ? [line.box] : [];
     for (const b of boxes) {
-      const padX = Math.max(3, b.h * 0.15);
-      const padY = Math.max(3, b.h * 0.25);
-      wordIndex.insert(inflate(b, padX, padY), { lineIndex, box: inflate(b, padX, padY) });
+      const padX = Math.max(4, b.h * 0.2);
+      const padY = Math.max(4, b.h * 0.35);
+      const box = inflate(b, padX, padY);
+      wordIndex.insert(box, { lineIndex: li, box, core: b });
+    }
+    if (boxes.length > 0 && line.box.h <= 3 * medianH) {
+      const box = inflate(line.box, Math.max(4, line.box.h * 0.2), Math.max(4, line.box.h * 0.35));
+      lineIndex.insert(box, { lineIndex: li, box, core: line.box });
     }
   });
 
@@ -235,7 +255,7 @@ export function classifyScene(
       continue;
     }
     const candidates = wordIndex.query(r);
-    if (candidates.length === 0) {
+    if (candidates.length === 0 && lineIndex.query(r).length === 0) {
       nonTextStrokes.push(s);
       continue;
     }
@@ -246,11 +266,15 @@ export function classifyScene(
     let hits = 0;
     for (let i = 0; i < pts.length; i += step) {
       total++;
+      // the point belongs to the closest recognised word whose padded box contains it
       let hitLine = -1;
+      let bestDist = Infinity;
       for (const c of candidates) {
-        if (containsPoint(c.box, pts[i])) {
+        if (!containsPoint(c.box, pts[i])) continue;
+        const d = distanceToRect(c.core, pts[i]);
+        if (d < bestDist) {
+          bestDist = d;
           hitLine = c.lineIndex;
-          break;
         }
       }
       if (hitLine >= 0) {
@@ -261,7 +285,22 @@ export function classifyScene(
     // Dots and tiny marks (i-dots, punctuation) count when their centre is on a word.
     const tiny = r.w <= medianH * 0.4 && r.h <= medianH * 0.4;
     const ratio = total > 0 ? hits / total : 0;
-    if (ratio >= opts.textPointRatio || (tiny && hits > 0)) {
+    // Fallback for tight word boxes: a normal-sized stroke lying almost entirely on a recognised line.
+    let onLine = false;
+    if (ratio < opts.textPointRatio && r.h <= 2 * medianH) {
+      const lineCands = lineIndex.query(r);
+      if (lineCands.length > 0) {
+        let inLine = 0;
+        let n = 0;
+        for (let i = 0; i < pts.length; i += step) {
+          n++;
+          if (lineCands.some((c) => containsPoint(c.box, pts[i]))) inLine++;
+        }
+        onLine = n > 0 && inLine / n >= 0.85;
+        if (onLine && hitsPerLine.size === 0) hitsPerLine.set(lineCands[0].lineIndex, 1);
+      }
+    }
+    if (ratio >= opts.textPointRatio || (tiny && hits > 0) || onLine) {
       textStrokeIds.add(s.id);
       let best = -1;
       let bestHits = -1;

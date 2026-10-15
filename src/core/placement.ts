@@ -8,7 +8,7 @@ const DEFAULT_CARD_X = 40;
 export function cardPosition(elements: ReadonlyArray<ExElement>, preferredWidth: number): { x: number; y: number; width: number } {
   const content = elements.filter((e) => {
     const role = getInkData(e)?.role;
-    return !e.isDeleted && role !== "region" && role !== "paper" && role !== "pdf-page" && role !== "image-page" && role !== "typed";
+    return !e.isDeleted && role !== "region" && role !== "paper" && role !== "pdf-page" && role !== "image-page" && role !== "typed" && role !== "page-border";
   });
   const pages: Rect[] = elements
     .filter((e) => {

@@ -15,7 +15,8 @@
   --ink-notch: 12px;
   position: absolute;
   right: 0;
-  top: 22%;
+  /* below Excalidraw's tool panel in the top right corner */
+  top: clamp(190px, 28%, 45%);
   z-index: var(--layer-popover, 30);
   display: flex;
   flex-direction: column;
@@ -28,14 +29,15 @@
 }
 
 .ink-bookmarks.ink-pos-middle {
-  top: 44%;
+  top: 46%;
 }
 
 .ink-bookmarks.ink-pos-bottom {
   top: 66%;
 }
 
-.ink-bookmark {
+/* doubled class: must beat Obsidian's default button styles */
+.ink-bookmarks .ink-bookmark.ink-bookmark {
   pointer-events: auto;
   position: relative;
   display: flex;
@@ -61,7 +63,7 @@
 }
 
 /* paper-coloured inside, leaving a 2px "ink" outline that follows the notch */
-.ink-bookmark::before {
+.ink-bookmarks .ink-bookmark::before {
   content: "";
   position: absolute;
   top: 2px;
@@ -72,27 +74,29 @@
   clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%, calc(var(--ink-notch) - 1px) 50%);
 }
 
-.ink-bookmark > * {
+.ink-bookmarks .ink-bookmark > * {
   position: relative;
   z-index: 1;
 }
 
-.ink-bookmark:hover::before {
-  background: var(--background-modifier-hover);
+@media (hover: hover) {
+  .ink-bookmarks .ink-bookmark:hover::before {
+    background: var(--background-secondary);
+  }
 }
 
-.ink-bookmark:focus-visible {
+.ink-bookmarks .ink-bookmark:focus-visible {
   outline: 3px solid var(--interactive-accent);
   outline-offset: -5px;
 }
 
-.ink-bookmark.is-active {
+.ink-bookmarks .ink-bookmark.ink-bookmark.is-active {
   color: var(--ink-ribbon-paper);
   padding-left: calc(var(--ink-notch) + 22px);
   cursor: default;
 }
 
-.ink-bookmark.is-active::before {
+.ink-bookmarks .ink-bookmark.is-active::before {
   display: none;
 }
 
@@ -106,12 +110,12 @@
   stroke-width: 2.2;
 }
 
-.ink-bookmark.is-missing {
+.ink-bookmarks .ink-bookmark.is-missing {
   opacity: 0.85;
 }
 
-.ink-bookmark.is-missing::before {
-  background: repeating-linear-gradient(135deg, var(--ink-ribbon-paper) 0 6px, var(--background-modifier-hover) 6px 8px);
+.ink-bookmarks .ink-bookmark.is-missing::before {
+  background: repeating-linear-gradient(135deg, var(--ink-ribbon-paper) 0 6px, var(--background-secondary-alt) 6px 8px);
 }
 
 .ink-bookmark-badge {
@@ -141,7 +145,7 @@
   gap: 10px;
 }
 
-.ink-large-targets .ink-bookmark {
+.ink-large-targets .ink-bookmarks .ink-bookmark.ink-bookmark {
   font-size: 15px;
   min-width: 60px;
 }
@@ -174,10 +178,20 @@
   vertical-align: middle;
 }
 
+/* the link to the drawing lives in the properties – the bookmarks replace it visually */
+.ink-text-page .metadata-property[data-property-key="ink-drawing"],
+.ink-text-page .metadata-property[data-property-key="ink-pdf"] {
+  display: none;
+}
+
+.ink-text-page .metadata-container:not(:has(.metadata-property:not([data-property-key="ink-drawing"]):not([data-property-key="ink-pdf"]))) {
+  display: none;
+}
+
 /* keep content clear of the bookmarks on narrow screens */
 .ink-has-bookmarks.ink-text-page .markdown-reading-view .markdown-preview-view,
 .ink-has-bookmarks.ink-text-page .markdown-source-view.mod-cm6 .cm-scroller {
-  padding-right: max(var(--file-margins, 32px), 64px);
+  padding-right: 72px;
 }
 
 /* ---------- Setup & settings -------------------------------------------- */

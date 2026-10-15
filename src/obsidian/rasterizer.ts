@@ -31,15 +31,10 @@ export async function renderStrokesPng(plan: RenderPlan, strokes: ReadonlyArray<
     }
     ctx.lineWidth = width;
     ctx.beginPath();
+    // exact polyline: the image must cover every recorded point, because the
+    // OCR word boxes are later compared against these points
     ctx.moveTo(pts[0].x, pts[0].y);
-    // smooth with quadratic curves through midpoints
-    for (let i = 1; i < pts.length - 1; i++) {
-      const mx = (pts[i].x + pts[i + 1].x) / 2;
-      const my = (pts[i].y + pts[i + 1].y) / 2;
-      ctx.quadraticCurveTo(pts[i].x, pts[i].y, mx, my);
-    }
-    const last = pts[pts.length - 1];
-    ctx.lineTo(last.x, last.y);
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
     ctx.stroke();
   }
   const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));

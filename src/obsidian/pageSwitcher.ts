@@ -71,8 +71,9 @@ export class PageSwitcher {
         createText: true,
       });
       textFile = result.text;
-      if (result.preservedEdits > 0 && result.changed) {
-        // nothing to tell – edits are preserved silently
+      if (result.pending > 0 && (result.status === "partial" || result.status === "error")) {
+        // Azure was too slow (or hiccuped): keep going in the background and update the page soon
+        window.setTimeout(() => void this.plugin.processQueue(), 4000);
       }
     } catch (e) {
       this.reportError("Could not update the text page", e);
@@ -101,7 +102,14 @@ export class PageSwitcher {
     const view = await waitForExcalidrawView(leaf, drawing.path);
     if (!view) return;
     try {
-      await this.plugin.sync.syncTextToInk(text, drawing, view);
+      const changed = await this.plugin.sync.syncTextToInk(text, drawing, view);
+      if (changed) {
+        // make sure the change survived the end of Excalidraw's loading; re-apply once if not
+        await new Promise((r) => window.setTimeout(r, 1200));
+        if (leaf.view === view && !(await this.plugin.sync.typedCardInSync(text, view))) {
+          await this.plugin.sync.syncTextToInk(text, drawing, view);
+        }
+      }
     } catch (e) {
       this.reportError("Could not copy typed notes to the drawing", e);
     }

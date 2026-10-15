@@ -45,7 +45,7 @@ export interface ExElement {
 }
 
 /** Ink Notebook metadata stored in `element.customData.inkNotebook`. */
-export type InkRole = "region" | "typed" | "paper" | "pdf-page" | "image-page";
+export type InkRole = "region" | "typed" | "paper" | "pdf-page" | "image-page" | "page-border";
 
 export interface InkCustomData {
   role: InkRole;

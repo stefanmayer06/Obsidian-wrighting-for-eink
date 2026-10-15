@@ -12,6 +12,7 @@ import {
   findExcalidrawView,
   getEA,
   newElementId,
+  NO_UNDO,
   readSceneFromFile,
   release,
   saveView,
@@ -57,6 +58,8 @@ export interface InkToTextResult {
 
 export class SyncEngine {
   private locks = new Map<string, Promise<unknown>>();
+  /** drawing path -> drawing mtime at the last complete (nothing pending) sync */
+  private lastComplete = new Map<string, number>();
   readonly status = new Map<string, PageStatus>();
   onStatusChange: () => void = () => {};
 
@@ -86,6 +89,17 @@ export class SyncEngine {
     } catch (e) {
       console.error(e);
     }
+  }
+
+  /** True if the drawing has not changed since it was last fully synced. */
+  isUpToDate(drawing: TFile): boolean {
+    const m = this.lastComplete.get(drawing.path);
+    return m !== undefined && drawing.stat.mtime <= m;
+  }
+
+  forget(path: string): void {
+    this.lastComplete.delete(path);
+    this.status.delete(path);
   }
 
   statusOf(path: string): PageStatus | undefined {
@@ -201,6 +215,8 @@ export class SyncEngine {
                 ? "not-configured"
                 : "pending";
       this.setStatus(drawing.path, state, outcome.error);
+      if (pending === 0) this.lastComplete.set(drawing.path, drawing.stat.mtime);
+      else this.lastComplete.delete(drawing.path);
       return { text, status: outcome.status, pending, changed, preservedEdits };
     } catch (e) {
       this.setStatus(drawing.path, "error", e instanceof Error ? e.message : String(e));
@@ -236,7 +252,7 @@ export class SyncEngine {
         m.locked = true;
         m.customData = { ...(m.customData ?? {}), [INK_CUSTOM_DATA_KEY]: { role: "region", kind: "diagram" } satisfies InkCustomData };
       }
-      if (updates.length > 0 || plan.create.length > 0) await ea.addElementsToView(false, true, false);
+      if (updates.length > 0 || plan.create.length > 0) await ea.addElementsToView(false, true, false, false, NO_UNDO);
       else if (removals.length > 0) await saveView(view);
     } finally {
       release(ea);
@@ -252,7 +268,7 @@ export class SyncEngine {
       const m = ea.getElement(cardId);
       const data = getInkData(card) ?? { role: "typed" };
       m.customData = { ...(m.customData ?? {}), [INK_CUSTOM_DATA_KEY]: { ...data, syncedHash: hash } };
-      await ea.addElementsToView(false, true, true);
+      await ea.addElementsToView(false, true, true, false, NO_UNDO);
     } finally {
       release(ea);
     }
@@ -302,11 +318,19 @@ export class SyncEngine {
       m.rawText = typed;
       m.customData = { ...(m.customData ?? {}), [INK_CUSTOM_DATA_KEY]: { role: "typed", syncedHash: hash } satisfies InkCustomData };
       // let Excalidraw re-wrap the text to the card width
-      await ea.addElementsToView(false, true, true, true);
+      await ea.addElementsToView(false, true, true, true, NO_UNDO);
       return true;
     } finally {
       release(ea);
     }
+  }
+
+  /** Does the typed card on the drawing show the text page's typed notes? */
+  async typedCardInSync(text: TFile, view: ExcalidrawViewLike): Promise<boolean> {
+    const typed = extractTypedNotes(await this.app.vault.read(text));
+    const card = viewElements(view).find((e) => getInkData(e)?.role === "typed");
+    if (!card) return !typed;
+    return typedHash(elementText(card)) === typedHash(typed);
   }
 
   private async createCard(view: ExcalidrawViewLike, elements: ExElement[], typed: string, hash: string): Promise<void> {
@@ -323,7 +347,7 @@ export class SyncEngine {
       const id = ea.addText(pos.x, pos.y, typed, { width: pos.width, autoResize: false });
       const m = ea.getElement(id);
       m.customData = { ...(m.customData ?? {}), [INK_CUSTOM_DATA_KEY]: { role: "typed", syncedHash: hash } satisfies InkCustomData };
-      await ea.addElementsToView(false, true, true, true);
+      await ea.addElementsToView(false, true, true, true, NO_UNDO);
     } finally {
       release(ea);
     }

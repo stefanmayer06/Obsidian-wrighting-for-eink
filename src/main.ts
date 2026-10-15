@@ -23,6 +23,9 @@ import { annotateImage, annotatePdf, exportAnnotatedImage, exportAnnotatedPdf, f
 import { getInkData } from "./types/excalidraw";
 import { elementRect, unionAll } from "./core/geometry";
 import { transcriptEditorExtension } from "./obsidian/editorExtension";
+import { classifyScene } from "./core/classify";
+import { planOcrUnits } from "./core/rasterPlan";
+import { layoutTranscript } from "./core/layout";
 
 const IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "webp", "gif", "bmp", "svg"];
 
@@ -87,6 +90,7 @@ export default class InkNotebookPlugin extends Plugin {
     this.registerEvent(
       this.app.vault.on("delete", (file) => {
         this.queueRemove(file.path);
+        this.sync.forget(file.path);
         refreshBookmarks();
       }),
     );
@@ -150,6 +154,27 @@ export default class InkNotebookPlugin extends Plugin {
       new SetupWizard(this).open();
     });
     new Notice(frag, 10000);
+  }
+
+  /** Pure core functions, exposed for troubleshooting from the developer console. */
+  readonly internals = { classifyScene, planOcrUnits, layoutTranscript };
+
+  // ------------------------------------------------------------------ public actions
+
+  annotatePdf(file?: TFile | null): Promise<void> {
+    return annotatePdf(this, file ?? null);
+  }
+
+  annotateImage(file?: TFile | null): Promise<void> {
+    return annotateImage(this, file ?? null);
+  }
+
+  exportAnnotatedPdf(leaf?: WorkspaceLeaf | null): Promise<void> {
+    return exportAnnotatedPdf(this, leaf ?? null);
+  }
+
+  exportAnnotatedImage(leaf?: WorkspaceLeaf | null): Promise<void> {
+    return exportAnnotatedImage(this, leaf ?? null);
   }
 
   // ------------------------------------------------------------------ queue
@@ -271,6 +296,7 @@ export default class InkNotebookPlugin extends Plugin {
         const file = this.app.vault.getAbstractFileByPath(path);
         if (!(file instanceof TFile) || !this.pairs.isDrawing(file) || !this.pairs.textFor(file)) return;
         if (findExcalidrawView(this.app, file)) return; // reopened meanwhile
+        if (this.sync.isUpToDate(file)) return; // e.g. just synced by flipping the bookmark
         void this.sync.syncInkToText(file, { view: null, network: true }).catch((e) => console.warn("Ink Notebook: background sync failed", e));
       }, 1500);
     }
@@ -376,13 +402,13 @@ export default class InkNotebookPlugin extends Plugin {
       id: "annotate-pdf",
       name: "Annotate a PDF…",
       icon: "file-text",
-      callback: () => run(annotatePdf(this, null), "Could not annotate the PDF"),
+      callback: () => run(this.annotatePdf(), "Could not annotate the PDF"),
     });
     this.addCommand({
       id: "annotate-image",
       name: "Annotate an image…",
       icon: "image",
-      callback: () => run(annotateImage(this, null), "Could not annotate the image"),
+      callback: () => run(this.annotateImage(), "Could not annotate the image"),
     });
     this.addCommand({
       id: "export-annotated-pdf",
@@ -393,7 +419,7 @@ export default class InkNotebookPlugin extends Plugin {
         const v = leaf?.view;
         if (!isExcalidrawView(v) || !v.file) return false;
         if (findPdfPages(this, viewElements(v), v.file.path).length === 0) return false;
-        if (!checking) run(exportAnnotatedPdf(this, leaf), "Export failed");
+        if (!checking) run(this.exportAnnotatedPdf(leaf), "Export failed");
         return true;
       },
     });
@@ -406,7 +432,7 @@ export default class InkNotebookPlugin extends Plugin {
         const v = leaf?.view;
         if (!isExcalidrawView(v)) return false;
         if (!viewElements(v).some((e) => getInkData(e)?.role === "image-page")) return false;
-        if (!checking) run(exportAnnotatedImage(this, leaf), "Export failed");
+        if (!checking) run(this.exportAnnotatedImage(leaf), "Export failed");
         return true;
       },
     });
@@ -454,14 +480,14 @@ export default class InkNotebookPlugin extends Plugin {
             i
               .setTitle("Annotate with Ink Notebook")
               .setIcon("pencil-line")
-              .onClick(() => void annotatePdf(this, file)),
+              .onClick(() => void this.annotatePdf(file)),
           );
         } else if (IMAGE_EXTENSIONS.includes(ext)) {
           menu.addItem((i) =>
             i
               .setTitle("Annotate with Ink Notebook")
               .setIcon("pencil-line")
-              .onClick(() => void annotateImage(this, file)),
+              .onClick(() => void this.annotateImage(file)),
           );
         } else if (this.pairs.isDrawing(file) && !this.pairs.textFor(file)) {
           menu.addItem((i) =>

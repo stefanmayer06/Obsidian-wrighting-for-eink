@@ -19,7 +19,11 @@ type Any = any;
 export interface ExcalidrawViewLike extends View {
   file: TFile | null;
   excalidrawAPI?: Any;
-  semaphores?: { viewloaded?: boolean; viewunload?: boolean } | null;
+  semaphores?: { viewloaded?: boolean; viewunload?: boolean; justLoaded?: boolean } | null;
+  /** true once the drawing has been loaded into the canvas */
+  isLoaded?: boolean;
+  /** set when Excalidraw has finished loading embedded images (0 = not yet) */
+  lastSceneLoadTime?: number;
   forceSave?: (silent?: boolean, waitIfBusy?: boolean) => Promise<void>;
   save?: (preventReload?: boolean, forcesave?: boolean) => Promise<void>;
   getViewElements?: () => readonly ExElement[];
@@ -43,6 +47,7 @@ export interface EA {
     save?: boolean,
     newElementsOnTop?: boolean,
     shouldRestoreElements?: boolean,
+    captureUpdate?: string,
   ): Promise<boolean>;
   deleteViewElements(elements: readonly ExElement[]): boolean;
   addRect(x: number, y: number, w: number, h: number, id?: string): string;
@@ -150,7 +155,7 @@ export function findExcalidrawView(app: App, file: TFile): ExcalidrawViewLike | 
 }
 
 export function isViewReady(view: ExcalidrawViewLike): boolean {
-  return !!view.excalidrawAPI && !!view.semaphores?.viewloaded && !view.semaphores?.viewunload;
+  return !!view.excalidrawAPI && !!view.semaphores?.viewloaded && !view.semaphores?.viewunload && view.isLoaded !== false;
 }
 
 const sleep = (ms: number) => new Promise<void>((resolve) => window.setTimeout(resolve, ms));
@@ -161,8 +166,14 @@ export async function waitForExcalidrawView(leaf: WorkspaceLeaf, path: string, t
   while (Date.now() - start < timeoutMs) {
     const v = leaf.view;
     if (isExcalidrawView(v) && v.file?.path === path && isViewReady(v)) {
-      // give Excalidraw a moment to finish loading the scene into the canvas
-      await sleep(150);
+      // Excalidraw clears "justLoaded" on the first change after the scene is in the canvas;
+      // editing before that can be overwritten by the tail end of loading.
+      const settle = Date.now();
+      while (v.semaphores?.justLoaded && Date.now() - settle < 3000) await sleep(100);
+      // When embedded images (paper, PDF pages) finish loading, Excalidraw refreshes the
+      // scene; edits made before that can be lost, so wait for it (older versions: no field).
+      while (v.lastSceneLoadTime === 0 && Date.now() - settle < 6000) await sleep(100);
+      await sleep(300);
       return v;
     }
     await sleep(100);
@@ -199,6 +210,13 @@ export async function readSceneFromFile(app: App, file: TFile): Promise<ExElemen
     release(ea);
   }
 }
+
+/**
+ * Excalidraw's "do not record in undo history" capture mode. Our helper changes
+ * (diagram regions, the typed-notes card) should not be undone by the user's
+ * next undo; older Excalidraw versions simply ignore the argument.
+ */
+export const NO_UNDO = "NEVER";
 
 /** Random id compatible with Excalidraw ids. */
 export function newElementId(): string {

@@ -129,6 +129,17 @@ export async function annotatePdf(plugin: InkNotebookPlugin, file?: TFile | null
             ...(el.customData ?? {}),
             [INK_CUSTOM_DATA_KEY]: { role: "pdf-page", pdf: pdf.path, page: n, sourceWidth: size.w, sourceHeight: size.h } satisfies InkCustomData,
           };
+          // a thin, locked border so the white page stands out on the white canvas
+          ea.style.strokeColor = "#9e9e9e";
+          ea.style.backgroundColor = "transparent";
+          ea.style.strokeWidth = 1;
+          ea.style.roughness = 0;
+          ea.style.strokeStyle = "solid";
+          const borderId = ea.addRect(0, y, width, h);
+          const border = ea.getElement(borderId);
+          border.locked = true;
+          border.roundness = null;
+          border.customData = { ...(border.customData ?? {}), [INK_CUSTOM_DATA_KEY]: { role: "page-border" } satisfies InkCustomData };
           y += h + PAGE_GAP;
         }
       },
@@ -174,7 +185,7 @@ function overlayFor(elements: ReadonlyArray<ExElement>, page: Rect, pageIds: Set
   return elements.filter((e) => {
     if (e.isDeleted || pageIds.has(e.id)) return false;
     const role = getInkData(e)?.role;
-    if (role === "region" || role === "paper" || role === "pdf-page" || role === "image-page") return false;
+    if (role === "region" || role === "paper" || role === "pdf-page" || role === "image-page" || role === "page-border") return false;
     if ((e.type === "frame" || e.type === "magicframe") && e.frameRole === "marker") return false;
     const r = elementRect(e);
     if (!intersects(r, page)) return false;
