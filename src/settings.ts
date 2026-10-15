@@ -31,6 +31,8 @@ export interface InkSettings {
   highlightUncertain: boolean;
   uncertainThreshold: number;
   diagramSensitivity: DiagramSensitivity;
+  /** Make handwritten [[links]] clickable on the ink page. */
+  linkHandwriting: boolean;
 
   // ---- typed notes ----
   syncTypedNotes: boolean;
@@ -72,6 +74,7 @@ export const DEFAULT_SETTINGS: InkSettings = {
   highlightUncertain: true,
   uncertainThreshold: 0.6,
   diagramSensitivity: "normal",
+  linkHandwriting: true,
 
   syncTypedNotes: true,
   typedFontFamily: 6,
@@ -128,6 +131,7 @@ export function loadSettings(raw: unknown): InkSettings {
     highlightUncertain: bool(r.highlightUncertain, d.highlightUncertain),
     uncertainThreshold: numberIn(r.uncertainThreshold, 0, 1, d.uncertainThreshold),
     diagramSensitivity: oneOf(r.diagramSensitivity, ["low", "normal", "high"] as const, d.diagramSensitivity),
+    linkHandwriting: bool(r.linkHandwriting, d.linkHandwriting),
 
     syncTypedNotes: bool(r.syncTypedNotes, d.syncTypedNotes),
     typedFontFamily: numberIn(r.typedFontFamily, 1, 10, d.typedFontFamily),

@@ -132,10 +132,13 @@ export class BookmarkManager {
     const text = make("ink-bookmark-text", "file-text", "Text");
     const badge = text.b.createSpan({ cls: "ink-bookmark-badge" });
 
+    // a long press opens the menu; the click/contextmenu events that follow it are ignored
+    let longPressAt = 0;
+    const justLongPressed = () => Date.now() - longPressAt < 800;
     const onClick = (target: "ink" | "text") => (evt: MouseEvent) => {
       evt.preventDefault();
       evt.stopPropagation();
-      if (this.busy.has(leaf)) return;
+      if (justLongPressed() || this.busy.has(leaf)) return;
       const file = (leaf.view as { file?: never }).file;
       if (!file) return;
       const info = this.plugin.pairs.pairOf(file);
@@ -152,6 +155,7 @@ export class BookmarkManager {
     root.addEventListener("contextmenu", (evt) => {
       evt.preventDefault();
       evt.stopPropagation();
+      if (justLongPressed()) return;
       this.showMenu(leaf, evt);
     });
     let pressTimer: number | null = null;
@@ -160,6 +164,7 @@ export class BookmarkManager {
       (evt) => {
         pressTimer = window.setTimeout(() => {
           pressTimer = null;
+          longPressAt = Date.now();
           const t = evt.touches[0];
           this.showMenu(leaf, new MouseEvent("contextmenu", { clientX: t?.clientX ?? 0, clientY: t?.clientY ?? 0 }));
         }, 600);

@@ -33,6 +33,8 @@ export interface ParsedNote {
   frontmatter: string;
   /** Text between frontmatter and region start (or the whole body if there is no region). */
   before: string;
+  /** Number of lines before the region start marker (0 = region is the first line). */
+  beforeLineCount: number;
   /** Text inside the region (between the marker lines). */
   inner: string;
   /** Text after the region end marker. */
@@ -68,38 +70,57 @@ export function decodeState(text: string): StateEntry[] | null {
 }
 
 export function splitFrontmatter(md: string): { frontmatter: string; body: string } {
-  const text = md.replace(/\r\n/g, "\n");
-  if (!text.startsWith("---\n")) return { frontmatter: "", body: text };
-  const end = text.indexOf("\n---", 3);
-  if (end < 0) return { frontmatter: "", body: text };
-  let close = end + 4;
-  // the closing fence must be a full line
-  if (text.length > close && text[close] !== "\n") return { frontmatter: "", body: text };
-  if (text[close] === "\n") close++;
-  return { frontmatter: text.slice(0, close), body: text.slice(close) };
+  let text = md.replace(/\r\n/g, "\n");
+  let bom = "";
+  if (text.startsWith("\uFEFF")) {
+    bom = "\uFEFF";
+    text = text.slice(1);
+  }
+  const lines = text.split("\n");
+  if (!/^---\s*$/.test(lines[0] ?? "")) return { frontmatter: "", body: bom + text };
+  for (let i = 1; i < lines.length; i++) {
+    if (/^(---|\.\.\.)\s*$/.test(lines[i])) {
+      return { frontmatter: `${bom}${lines.slice(0, i + 1).join("\n")}\n`, body: lines.slice(i + 1).join("\n") };
+    }
+  }
+  return { frontmatter: "", body: bom + text };
+}
+
+const FENCE_RE = /^\s*(```|~~~)/;
+
+/** Indices of marker lines, ignoring anything inside fenced code blocks. */
+function markerLines(lines: ReadonlyArray<string>): { starts: number[]; ends: number[] } {
+  const starts: number[] = [];
+  const ends: number[] = [];
+  let inFence = false;
+  lines.forEach((l, i) => {
+    if (FENCE_RE.test(l)) {
+      inFence = !inFence;
+      return;
+    }
+    if (inFence) return;
+    if (START_RE.test(l.trim())) starts.push(i);
+    else if (END_RE.test(l.trim())) ends.push(i);
+  });
+  return { starts, ends };
 }
 
 export function parseNote(md: string): ParsedNote {
   const { frontmatter, body } = splitFrontmatter(md);
   const lines = body.split("\n");
-  const starts: number[] = [];
-  const ends: number[] = [];
-  lines.forEach((l, i) => {
-    if (START_RE.test(l.trim())) starts.push(i);
-    else if (END_RE.test(l.trim())) ends.push(i);
-  });
-  if (starts.length === 0 && ends.length === 0) {
-    return { frontmatter, before: body, inner: "", after: "", regionRaw: "", hasRegion: false, damaged: false, state: null };
-  }
-  if (starts.length !== 1 || ends.length !== 1 || ends[0] < starts[0]) {
-    return { frontmatter, before: body, inner: "", after: "", regionRaw: "", hasRegion: false, damaged: true, state: null };
-  }
+  const { starts, ends } = markerLines(lines);
+  const none = { frontmatter, before: body, beforeLineCount: lines.length, inner: "", after: "", regionRaw: "", hasRegion: false, state: null };
+  if (starts.length === 0 && ends.length === 0) return { ...none, damaged: false };
+  // the first start marker and the first end marker after it form the region;
+  // any other marker lines are left alone as (invisible) text
   const s = starts[0];
-  const e = ends[0];
+  const e = s === undefined ? undefined : ends.find((i) => i > s);
+  if (s === undefined || e === undefined) return { ...none, damaged: true };
   const m = END_RE.exec(lines[e].trim());
   return {
     frontmatter,
     before: lines.slice(0, s).join("\n"),
+    beforeLineCount: s,
     inner: lines.slice(s + 1, e).join("\n"),
     after: lines.slice(e + 1).join("\n"),
     regionRaw: lines.slice(s, e + 1).join("\n"),
@@ -115,7 +136,7 @@ export function splitBlocks(inner: string): string[] {
   let cur: string[] = [];
   let inFence = false;
   for (const line of inner.replace(/\r\n/g, "\n").split("\n")) {
-    if (/^\s*(```|~~~)/.test(line)) inFence = !inFence;
+    if (FENCE_RE.test(line)) inFence = !inFence;
     if (!inFence && line.trim() === "") {
       if (cur.length > 0) blocks.push(cur.join("\n"));
       cur = [];
@@ -159,15 +180,27 @@ export interface MergeResult {
 }
 
 const USER_PREFIX = "u";
+/** Key of the generated status callout block. */
+export const STATUS_KEY = "status";
 
 /**
  * Merge newly generated blocks with the current region content, preserving the
  * user's corrections, deletions and insertions.
  */
+export interface MergeOptions {
+  /**
+   * Keep blocks (and the user's corrections/deletions) whose key is missing from
+   * this generation. Used while some ink could not be recognised (offline, timeout),
+   * so a partial result never throws away earlier work.
+   */
+  keepMissing?: boolean;
+}
+
 export function mergeTranscript(
   currentInner: string,
   prevState: ReadonlyArray<StateEntry> | null,
   generated: ReadonlyArray<TranscriptBlock>,
+  options: MergeOptions = {},
 ): MergeResult {
   const cur = splitBlocks(currentInner);
   const curHashes = cur.map(blockHash);
@@ -185,11 +218,17 @@ export function mergeTranscript(
 
   const corrected = new Map<string, string>();
   const deleted = new Set<string>(prevDeleted);
-  /** user blocks keyed by the key of the block they follow ("" = start) */
-  const insertions = new Map<string, string[]>();
-  const addInsertion = (anchor: string, text: string) => {
+  /** current text of previous generated entries (matched or paired) */
+  const currentTextOf = new Map<string, string>();
+  /** blocks to emit after a key ("" = start): user insertions, or kept blocks with their entry */
+  interface Carried {
+    text: string;
+    entry?: StateEntry;
+  }
+  const insertions = new Map<string, Carried[]>();
+  const addInsertion = (anchor: string, text: string, entry?: StateEntry) => {
     const list = insertions.get(anchor) ?? [];
-    list.push(text);
+    list.push({ text, entry });
     insertions.set(anchor, list);
   };
 
@@ -214,7 +253,10 @@ export function mergeTranscript(
   pairs.forEach(([pi, ci]) => {
     const e = prev[pi];
     if (e.key.startsWith(USER_PREFIX)) addInsertion(anchorOfPrev[pi], cur[ci]);
-    else if (e.gen && e.gen !== e.emit) corrected.set(e.key, cur[ci]);
+    else {
+      currentTextOf.set(e.key, cur[ci]);
+      if (e.gen && e.gen !== e.emit) corrected.set(e.key, cur[ci]);
+    }
   });
 
   // 2. gaps between anchors: pair unmatched previous entries with unmatched current blocks
@@ -231,7 +273,10 @@ export function mergeTranscript(
       const e = prev[gapPrev[k]];
       const text = cur[gapCur[k]];
       if (e.key.startsWith(USER_PREFIX)) addInsertion(anchorOfPrev[gapPrev[k]], text);
-      else corrected.set(e.key, text);
+      else {
+        corrected.set(e.key, text);
+        currentTextOf.set(e.key, text);
+      }
     }
     for (let k = pairCount; k < gapPrev.length; k++) {
       const e = prev[gapPrev[k]];
@@ -243,6 +288,25 @@ export function mergeTranscript(
       // Without saved state, blocks identical to newly generated ones are not user insertions.
       if (!prevState && gen.some((g) => blockHash(g.md) === blockHash(text))) continue;
       addInsertion(anchor, text);
+    }
+  }
+
+  // 2b. while ink is pending, keep blocks that were not regenerated this time
+  const carriedDeleted: StateEntry[] = [];
+  if (options.keepMissing) {
+    let lastGenKey = "";
+    for (const e of prev) {
+      if (e.key.startsWith(USER_PREFIX)) continue;
+      if (!genKeys.has(e.key) && !deleted.has(e.key)) {
+        const text = currentTextOf.get(e.key);
+        if (text !== undefined) addInsertion(lastGenKey, text, { key: e.key, gen: e.gen, emit: blockHash(text) });
+      }
+      lastGenKey = e.key;
+    }
+    for (const key of deleted) {
+      if (genKeys.has(key)) continue;
+      const e = (prevState ?? []).find((x) => x.key === key);
+      if (e) carriedDeleted.push({ key, gen: e.gen, emit: "-" });
     }
   }
 
@@ -258,25 +322,37 @@ export function mergeTranscript(
     }
     return "";
   };
-  const resolvedInsertions = new Map<string, string[]>();
-  for (const [anchor, texts] of insertions) {
+  const resolvedInsertions = new Map<string, Carried[]>();
+  for (const [anchor, items] of insertions) {
     const a = resolveAnchor(anchor);
-    resolvedInsertions.set(a, [...(resolvedInsertions.get(a) ?? []), ...texts]);
+    resolvedInsertions.set(a, [...(resolvedInsertions.get(a) ?? []), ...items]);
   }
 
   const blocks: string[] = [];
   const state: StateEntry[] = [];
   let preservedEdits = 0;
   const emitUser = (anchor: string) => {
-    for (const text of resolvedInsertions.get(anchor) ?? []) {
-      const h = blockHash(text);
-      blocks.push(text);
-      state.push({ key: `${USER_PREFIX}${h}`, gen: "", emit: h });
-      preservedEdits++;
+    for (const item of resolvedInsertions.get(anchor) ?? []) {
+      blocks.push(item.text);
+      if (item.entry) {
+        state.push(item.entry);
+      } else {
+        const h = blockHash(item.text);
+        state.push({ key: `${USER_PREFIX}${h}`, gen: "", emit: h });
+        preservedEdits++;
+      }
     }
   };
+  // a status callout ("waiting for a connection" …) always stays at the very top
+  const statusFirst = gen.length > 0 && gen[0].key === STATUS_KEY ? gen[0] : null;
+  if (statusFirst) {
+    blocks.push(statusFirst.md.trim());
+    const h = blockHash(statusFirst.md);
+    state.push({ key: STATUS_KEY, gen: h, emit: h });
+  }
   emitUser("");
   for (const g of gen) {
+    if (g === statusFirst) continue;
     const genHash = blockHash(g.md);
     if (deleted.has(g.key)) {
       state.push({ key: g.key, gen: genHash, emit: "-" });
@@ -292,6 +368,7 @@ export function mergeTranscript(
     }
     emitUser(g.key);
   }
+  state.push(...carriedDeleted);
   return { blocks, state, preservedEdits };
 }
 
@@ -314,9 +391,8 @@ export function writeRegion(md: string, blocks: ReadonlyArray<string>, state: Re
   const parsed = parseNote(md);
   const region = renderRegion(blocks, state);
   if (parsed.hasRegion) {
-    const before = parsed.before;
-    const after = parsed.after;
-    return `${parsed.frontmatter}${before}${before && !before.endsWith("\n") ? "\n" : ""}${region}\n${after}`;
+    const before = parsed.beforeLineCount > 0 ? `${parsed.before}\n` : "";
+    return `${parsed.frontmatter}${before}${region}\n${parsed.after}`;
   }
   // No (valid) region: put it at the top; keep the existing body below as typed notes.
   const body = trimBlankEdges(parsed.before);
@@ -328,9 +404,8 @@ export function writeRegion(md: string, blocks: ReadonlyArray<string>, state: Re
  * without losing the user's text.
  */
 export function stripMarkers(md: string): string {
-  return md
-    .replace(/\r\n/g, "\n")
-    .split("\n")
-    .filter((l) => !START_RE.test(l.trim()) && !END_RE.test(l.trim()))
-    .join("\n");
+  const lines = md.replace(/\r\n/g, "\n").split("\n");
+  const { starts, ends } = markerLines(lines);
+  const drop = new Set([...starts, ...ends]);
+  return lines.filter((_, i) => !drop.has(i)).join("\n");
 }

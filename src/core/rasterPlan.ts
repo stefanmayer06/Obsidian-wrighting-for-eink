@@ -71,11 +71,29 @@ export interface OcrUnit {
   plan: RenderPlan;
 }
 
-/** Signature of a stroke for caching: changes whenever the stroke changes. */
+/**
+ * Signature of a stroke for caching. It only depends on the stroke's geometry,
+ * so changing its colour or attaching a link does not cause a new OCR request.
+ */
 export function strokeSignature(el: ExElement): string {
   const pts = el.points ?? [];
   const last = pts.length > 0 ? pts[pts.length - 1] : [0, 0];
-  return `${el.id}:${el.version ?? 0}:${Math.round(el.x)}:${Math.round(el.y)}:${pts.length}:${Math.round(last[0])}:${Math.round(last[1])}:${el.angle ?? 0}`;
+  const mid = pts.length > 2 ? pts[Math.floor(pts.length / 2)] : [0, 0];
+  const r = (n: number) => Math.round(n * 10) / 10;
+  return [
+    el.id,
+    r(el.x),
+    r(el.y),
+    r(el.width ?? 0),
+    r(el.height ?? 0),
+    pts.length,
+    r(mid[0]),
+    r(mid[1]),
+    r(last[0]),
+    r(last[1]),
+    r(el.angle ?? 0),
+    el.strokeWidth ?? 1,
+  ].join(":");
 }
 
 /** Elements that can contain handwriting. */

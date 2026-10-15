@@ -259,6 +259,12 @@ describe("layoutTranscript", () => {
     ]);
   });
 
+  it("keeps a text element with blank lines as one block", () => {
+    const els = [textEl("t", "milk\n\neggs", 0, 0)];
+    const blocks = layoutTranscript(classifyScene(els, [], new Set()), () => null, layoutOpts);
+    expect(blocks.map((b) => b.md)).toEqual(["milk\neggs"]);
+  });
+
   it("puts same-row lines together left to right", () => {
     const els = [stroke("r", 300, 0, 100, 30), stroke("l", 0, 2, 100, 30)];
     const lines = [line("right", { x: 300, y: 0, w: 100, h: 30 }), line("left", { x: 0, y: 2, w: 100, h: 30 })];

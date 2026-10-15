@@ -106,7 +106,7 @@ export class PageSwitcher {
       if (changed) {
         // make sure the change survived the end of Excalidraw's loading; re-apply once if not
         await new Promise((r) => window.setTimeout(r, 1200));
-        if (leaf.view === view && !(await this.plugin.sync.typedCardInSync(text, view))) {
+        if (leaf.view === view && view.file?.path === drawing.path && !(await this.plugin.sync.typedCardInSync(text, view))) {
           await this.plugin.sync.syncTextToInk(text, drawing, view);
         }
       }

@@ -20,7 +20,7 @@ Write by hand on the **ink page**, tap the **Text** bookmark, and read the same 
 ## Features
 
 - **Bookmark switcher** – two ribbon bookmarks on the right edge of every ink page: *Ink* (the drawing) and *Text* (the Markdown page). Tap to flip the page in the same tab. Long‑press (or right‑click) for more: transcribe now, re‑transcribe, open side by side.
-- **Handwriting → text with Azure AI Vision** – supports both *Image Analysis 4.0* and *Read 3.2* (picked automatically). Lines become paragraphs, `-`/`•` lines become lists, `[ ]` becomes a task, bigger writing becomes a heading, handwritten `[[links]]` become real Obsidian links. Uncertain words can be highlighted for proofreading.
+- **Handwriting → text with Azure AI Vision** – supports both *Image Analysis 4.0* and *Read 3.2* (picked automatically). Lines become paragraphs, `-`/`•` lines become lists, `[ ]` becomes a task, bigger writing becomes a heading, handwritten `[[links]]` become real Obsidian links – on the text page, and as a tappable link icon right on your handwriting on the ink page. Uncertain words can be highlighted for proofreading.
 - **Drawings embedded live** – flowcharts, boxes, arrows and sketches are detected automatically and embedded on the text page with Excalidraw's area embeds (`![[page.excalidraw#^area=…]]`). Change the drawing and the text page shows the change. Put something in a frame named *Diagram …* (or use *Turn the selection into a diagram*) to force it.
 - **Your edits are kept** – fix a recognition mistake directly on the text page; the correction stays until you change that handwriting. Deleted or added paragraphs are remembered too.
 - **Typed notes on the drawing** – anything you type on the text page (outside the transcript) appears on the ink page as a text card, and edits to that card flow back.
@@ -79,7 +79,7 @@ Privacy: only your handwriting strokes are rendered and sent (black on white –
 | Transcribe again | Long‑press the bookmark → *Transcribe handwriting now* (normally this happens automatically when you flip or leave the drawing) |
 | Start over | *Re‑transcribe from scratch* discards edits made inside the transcript |
 | Side by side | Long‑press the bookmark → *Open ink and text side by side* (typed notes update live) |
-| Link pages | Write `[[Page name]]` by hand, or type links in Excalidraw text or on the text page |
+| Link pages | Write `[[Page name]]` by hand (after the next flip it gets a link icon you can tap), or type links in Excalidraw text or on the text page |
 | Diagrams | Draw anything – it is detected. To force: frame named *Diagram …*, or select strokes → command **Turn the selection into a diagram** |
 | More paper | Command **Add a new paper page to this ink page** |
 | Annotate a PDF | Right‑click a PDF → *Annotate with Ink Notebook*, or command **Annotate a PDF…** |
@@ -106,7 +106,7 @@ The two `%% … %%` lines mark the transcript; in Live Preview they are shown as
 ## Settings
 
 - **Pages** – folder, paper style, ask for a name, open the text page in reading or editing view, keep names in sync on rename/move.
-- **Handwriting recognition** – endpoint, key, API version, language hint, highlight uncertain words, transcribe while writing, how long to wait when flipping, requests per minute, diagram detection sensitivity, offline queue and cache.
+- **Handwriting recognition** – endpoint, key, API version, language hint, highlight uncertain words, transcribe while writing, how long to wait when flipping, requests per minute, clickable handwritten links, diagram detection sensitivity, offline queue and cache.
 - **Typed notes** – show them on the ink page, font and width of the card.
 - **Display & e‑ink** – e‑ink mode (automatic / on / off), large touch targets, Excalidraw stylus settings, bookmark position, bookmark on all drawings.
 - **PDF annotation** – page width on the ink page, how many pages to import without asking.
@@ -137,6 +137,8 @@ npm run build     # type-check + bundle main.js
 ```
 
 The pure logic (OCR parsing, classification, layout, transcript merging, PDF maths) lives in `src/core` and is covered by unit tests; Obsidian/Excalidraw integration is in `src/obsidian`.
+
+`e2e/` contains end-to-end tests that run the plugin inside the real Obsidian desktop app with the real Excalidraw plugin and a fake Azure server (see `e2e/README.md`).
 
 ## License
 

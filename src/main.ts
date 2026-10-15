@@ -81,6 +81,7 @@ export default class InkNotebookPlugin extends Plugin {
     this.registerEvent(this.app.workspace.on("layout-change", onLayout));
     this.registerEvent(this.app.workspace.on("active-leaf-change", onLayout));
     this.registerEvent(this.app.workspace.on("file-open", onLayout));
+    this.registerEvent(this.app.workspace.on("file-open", (file) => this.refreshStaleTextPage(file)));
     this.registerEvent(
       this.app.metadataCache.on("changed", (file) => {
         if (this.pairs.isTextPage(file) || this.pairs.isDrawing(file)) refreshBookmarks();
@@ -217,7 +218,7 @@ export default class InkNotebookPlugin extends Plugin {
         }
         try {
           const r = await this.sync.syncInkToText(file, { view: findExcalidrawView(this.app, file), network: true });
-          if (r.pending === 0) done++;
+          if (r.text && r.pending === 0) done++;
           if (r.status === "offline") break;
         } catch (e) {
           console.warn("Ink Notebook: queued transcription failed", path, e);
@@ -280,6 +281,21 @@ export default class InkNotebookPlugin extends Plugin {
         }, 6000),
       );
     }
+  }
+
+  /**
+   * Opening a text page whose drawing changed after the transcript was written
+   * (e.g. synced from another device) refreshes it in the background.
+   */
+  private refreshStaleTextPage(file: TFile | null): void {
+    if (!file || !this.pairs.isTextPage(file)) return;
+    const drawing = this.pairs.drawingFor(file);
+    if (!drawing || drawing.stat.mtime <= file.stat.mtime + 2000) return;
+    if (findExcalidrawView(this.app, drawing)) return; // the open drawing syncs itself
+    if (this.sync.isUpToDate(drawing)) return;
+    window.setTimeout(() => {
+      void this.sync.syncInkToText(drawing, { view: null, network: true }).catch((e) => console.warn("Ink Notebook: refresh failed", e));
+    }, 500);
   }
 
   /** When a drawing is closed (navigated away) update its text page in the background. */

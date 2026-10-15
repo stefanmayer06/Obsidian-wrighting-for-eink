@@ -150,7 +150,8 @@ export function layoutTranscript(
     while (i < items.length) {
       const it = items[i];
       if (it.kind === "text") {
-        const text = it.text.text.replace(/\r\n/g, "\n").trim();
+        // one block: blank lines inside a text element would split it into several blocks
+        const text = it.text.text.replace(/\r\n/g, "\n").replace(/\n[ \t]*\n+/g, "\n").trim();
         blocks.push({ key: `t${shortHash(`${it.text.id}\n${text}`, 8)}`, md: text });
         i++;
         continue;

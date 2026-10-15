@@ -145,13 +145,21 @@ export function isExcalidrawView(view: View | null | undefined): view is Excalid
   return !!view && view.getViewType() === EXCALIDRAW_VIEW_TYPE;
 }
 
-/** Find an open, loaded Excalidraw view showing the file. */
-export function findExcalidrawView(app: App, file: TFile): ExcalidrawViewLike | null {
+/**
+ * Find an open, loaded Excalidraw view showing the file.
+ * With `settled`, the view must also have finished loading its embedded images
+ * (only then is it safe to change elements, see waitForExcalidrawView).
+ */
+export function findExcalidrawView(app: App, file: TFile, settled = false): ExcalidrawViewLike | null {
   for (const leaf of app.workspace.getLeavesOfType(EXCALIDRAW_VIEW_TYPE)) {
     const v = leaf.view;
-    if (isExcalidrawView(v) && v.file?.path === file.path && isViewReady(v)) return v;
+    if (isExcalidrawView(v) && v.file?.path === file.path && isViewReady(v) && (!settled || isViewSettled(v))) return v;
   }
   return null;
+}
+
+export function isViewSettled(view: ExcalidrawViewLike): boolean {
+  return !view.semaphores?.justLoaded && view.lastSceneLoadTime !== 0;
 }
 
 export function isViewReady(view: ExcalidrawViewLike): boolean {

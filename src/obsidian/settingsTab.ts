@@ -155,6 +155,15 @@ export class InkSettingTab extends PluginSettingTab {
         }),
       );
     new Setting(containerEl)
+      .setName("Clickable handwritten links")
+      .setDesc("A handwritten [[Page]] gets a link icon on the ink page, so you can jump to the page from your handwriting.")
+      .addToggle((t) =>
+        t.setValue(s.linkHandwriting).onChange(async (v) => {
+          s.linkHandwriting = v;
+          await save();
+        }),
+      );
+    new Setting(containerEl)
       .setName("Diagram detection")
       .setDesc("How eagerly drawings (not text) are turned into embedded diagrams on the text page. Tip: put a drawing in a frame named \"Diagram …\" to force it.")
       .addDropdown((d) =>

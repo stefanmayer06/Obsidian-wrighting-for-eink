@@ -3,7 +3,7 @@ import { detectDevice } from "../src/core/device";
 import { paperSvg, PAPER_STYLES, isPaperStyle } from "../src/core/paper";
 import { applyTransform, displayedSize, normalizeRotation, parsePageRange, unrotateTransform } from "../src/core/pdfMath";
 import { imageRectToScene, makeRenderPlan, planOcrUnits, sceneToImage, DEFAULT_RASTER_LIMITS } from "../src/core/rasterPlan";
-import { applyTypedNotes, extractTypedNotes, typedHash } from "../src/core/typedNotes";
+import { applyTypedNotes, decideTypedSync, extractTypedNotes, typedHash } from "../src/core/typedNotes";
 import { START_MARKER, parseNote } from "../src/core/transcript";
 import { stroke } from "./helpers";
 
@@ -99,10 +99,13 @@ describe("raster planning", () => {
     const units = planOcrUnits(strokes, 150);
     expect(units.map((u) => u.elementIds)).toEqual([["a", "b"], ["c"]]);
     expect(planOcrUnits(strokes, 150).map((u) => u.key)).toEqual(units.map((u) => u.key));
-    const moved = [strokes[0], { ...strokes[1], version: 99 }, strokes[2]];
+    const moved = [strokes[0], { ...strokes[1], x: strokes[1].x + 3 }, strokes[2]];
     const units2 = planOcrUnits(moved, 150);
     expect(units2[0].key).not.toBe(units[0].key);
     expect(units2[1].key).toBe(units[1].key);
+    // non-geometric changes (version bump, link, colour) keep the cache key
+    const relinked = [{ ...strokes[0], version: 99, link: "[[X]]", strokeColor: "#f00" }, strokes[1], strokes[2]];
+    expect(planOcrUnits(relinked, 150)[0].key).toBe(units[0].key);
   });
 
   it("splits very tall units into bands", () => {
@@ -118,8 +121,8 @@ describe("typed notes", () => {
   const region = `${START_MARKER}\nfrom ink\n%% ink-notebook:end v1 %%`;
   const fm = "---\na: 1\n---\n";
 
-  it("extracts text outside the region, without comments", () => {
-    expect(extractTypedNotes(`${fm}${region}\n\nHello [[World]]\n%% secret %%\n`)).toBe("Hello [[World]]");
+  it("extracts text outside the region (losslessly)", () => {
+    expect(extractTypedNotes(`${fm}${region}\n\nHello [[World]]\n%% secret %%\n`)).toBe("Hello [[World]]\n%% secret %%");
     expect(extractTypedNotes(`${fm}top\n${region}\nbottom`)).toBe("top\n\nbottom");
     expect(extractTypedNotes("no region here")).toBe("no region here");
   });
@@ -138,7 +141,36 @@ describe("typed notes", () => {
     expect(out).toBe(`${fm}intro\n\n${region}\n\nnew end\n`);
   });
 
-  it("hashes ignore trailing whitespace and comments", () => {
-    expect(typedHash("a  \nb %%x%%")).toBe(typedHash("a\nb"));
+  it("hashes ignore trailing whitespace", () => {
+    expect(typedHash("a  \nb\n\n")).toBe(typedHash("a\nb"));
+  });
+
+  it("round-trips comments and hard line breaks through the card", () => {
+    const md = `${fm}${region}\n\nline one  \nline two\n%% private reminder %%\n`;
+    const typed = extractTypedNotes(md);
+    expect(typed).toBe("line one  \nline two\n%% private reminder %%");
+    const out = applyTypedNotes(md, typed.replace("line two", "line 2"));
+    expect(out).toContain("line one  \nline 2\n%% private reminder %%");
+  });
+
+  it("only keeps the above/below split at a line boundary", () => {
+    const md = `${fm}Hello\n\n${region}\n\nBye\n`;
+    const out = applyTypedNotes(md, "Hello world\n\nBye");
+    expect(out).toBe(`${fm}Hello world\n\n${region}\n\nBye\n`);
+    expect(extractTypedNotes(out)).toBe("Hello world\n\nBye");
+  });
+});
+
+describe("typed notes 3-way sync", () => {
+  const h = (t: string) => typedHash(t);
+  it("decides who wins", () => {
+    expect(decideTypedSync(null, h(""), undefined)).toBe("none");
+    expect(decideTypedSync(null, h("new"), undefined)).toBe("push");
+    expect(decideTypedSync(h("a"), h("a"), h("a"))).toBe("none");
+    expect(decideTypedSync(h("a"), h("a"), h("old"))).toBe("mark");
+    expect(decideTypedSync(h("card edit"), h("a"), h("a"))).toBe("pull");
+    expect(decideTypedSync(h("a"), h("text edit"), h("a"))).toBe("push");
+    expect(decideTypedSync(h("card edit"), h("text edit"), h("a"))).toBe("conflict");
+    expect(decideTypedSync(h("x"), h("y"), undefined)).toBe("push");
   });
 });

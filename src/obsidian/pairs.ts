@@ -182,7 +182,8 @@ export class PairManager {
   async onRename(file: TAbstractFile, oldPath: string, keepNamesInSync: boolean): Promise<void> {
     if (!(file instanceof TFile) || this.renaming.has(file.path)) return;
     const oldBase = oldPath.split("/").pop()?.replace(/\.md$/i, "") ?? "";
-    const oldFolder = oldPath.includes("/") ? oldPath.slice(0, oldPath.lastIndexOf("/")) : "";
+    const folderOf = (path: string) => (path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "");
+    const oldFolder = folderOf(oldPath);
     const pairInfo = this.pairOf(file);
     if (!pairInfo) return;
     const { drawing, text } = pairInfo.pair;
@@ -191,8 +192,8 @@ export class PairManager {
     if (keepNamesInSync) {
       const partnerBase = pairInfo.role === "ink" ? partner.basename : drawingBaseName(partner);
       const oldPlainBase = oldBase.replace(/\.excalidraw$/i, "");
-      const partnerFolder = partner.parent?.path ?? "";
-      if (partnerBase === oldPlainBase && partnerFolder === (oldFolder || (partner.parent?.path ?? ""))) {
+      // only rename a partner that sat next to the renamed file under the same name
+      if (partnerBase === oldPlainBase && folderOf(partner.path) === oldFolder) {
         const newPlain = pairInfo.role === "ink" ? drawingBaseName(file) : file.basename;
         const folder = file.parent?.path ?? "";
         const target = normalizePath(`${folder}/${newPlain}${pairInfo.role === "ink" ? "" : ".excalidraw"}.md`);

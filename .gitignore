@@ -5,3 +5,11 @@ data.json
 ocr-cache.json
 .DS_Store
 coverage/
+e2e/bin/
+e2e/vault/
+e2e/config/
+e2e/shots/
+e2e/node_modules/
+e2e/*.log
+e2e/*.pid
+e2e/state.json
