@@ -1,0 +1,359 @@
+/* ==========================================================================
+   Ink Notebook
+   ========================================================================== */
+
+/* ---------- Bookmark switcher -------------------------------------------- */
+
+.ink-has-bookmarks {
+  position: relative;
+}
+
+.ink-bookmarks {
+  --ink-ribbon-ink: var(--text-normal);
+  --ink-ribbon-paper: var(--background-primary);
+  --ink-ribbon-height: 44px;
+  --ink-notch: 12px;
+  position: absolute;
+  right: 0;
+  top: 22%;
+  z-index: var(--layer-popover, 30);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: manipulation;
+}
+
+.ink-bookmarks.ink-pos-middle {
+  top: 44%;
+}
+
+.ink-bookmarks.ink-pos-bottom {
+  top: 66%;
+}
+
+.ink-bookmark {
+  pointer-events: auto;
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: var(--ink-ribbon-height);
+  min-width: 52px;
+  margin: 0;
+  padding: 0 12px 0 calc(var(--ink-notch) + 8px);
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  background: var(--ink-ribbon-ink);
+  color: var(--ink-ribbon-ink);
+  font-family: var(--font-interface);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  /* ribbon with a swallowtail notch pointing into the page */
+  clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%, var(--ink-notch) 50%);
+  transition: padding-left 120ms ease;
+}
+
+/* paper-coloured inside, leaving a 2px "ink" outline that follows the notch */
+.ink-bookmark::before {
+  content: "";
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  left: 2px;
+  right: 0;
+  background: var(--ink-ribbon-paper);
+  clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%, calc(var(--ink-notch) - 1px) 50%);
+}
+
+.ink-bookmark > * {
+  position: relative;
+  z-index: 1;
+}
+
+.ink-bookmark:hover::before {
+  background: var(--background-modifier-hover);
+}
+
+.ink-bookmark:focus-visible {
+  outline: 3px solid var(--interactive-accent);
+  outline-offset: -5px;
+}
+
+.ink-bookmark.is-active {
+  color: var(--ink-ribbon-paper);
+  padding-left: calc(var(--ink-notch) + 22px);
+  cursor: default;
+}
+
+.ink-bookmark.is-active::before {
+  display: none;
+}
+
+.ink-bookmark-icon {
+  display: inline-flex;
+}
+
+.ink-bookmark-icon svg {
+  width: 18px;
+  height: 18px;
+  stroke-width: 2.2;
+}
+
+.ink-bookmark.is-missing {
+  opacity: 0.85;
+}
+
+.ink-bookmark.is-missing::before {
+  background: repeating-linear-gradient(135deg, var(--ink-ribbon-paper) 0 6px, var(--background-modifier-hover) 6px 8px);
+}
+
+.ink-bookmark-badge {
+  position: absolute;
+  top: 3px;
+  left: calc(var(--ink-notch) + 2px);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.ink-bookmark-badge.is-error {
+  color: var(--text-error);
+}
+
+.ink-bookmark.is-active .ink-bookmark-badge.is-error {
+  color: var(--ink-ribbon-paper);
+}
+
+.ink-bookmarks.is-busy .ink-bookmark {
+  cursor: progress;
+}
+
+.ink-large-targets .ink-bookmarks {
+  --ink-ribbon-height: 54px;
+  --ink-notch: 14px;
+  gap: 10px;
+}
+
+.ink-large-targets .ink-bookmark {
+  font-size: 15px;
+  min-width: 60px;
+}
+
+.ink-large-targets .ink-bookmark-icon svg {
+  width: 22px;
+  height: 22px;
+}
+
+/* ---------- Text page --------------------------------------------------- */
+
+.callout[data-callout="ink-status"] {
+  --callout-color: 128, 128, 128;
+  --callout-icon: lucide-pencil-line;
+}
+
+.ink-transcript-marker.ink-transcript-start {
+  display: inline-block;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-faint);
+  letter-spacing: 0.02em;
+  padding: 2px 0;
+}
+
+.ink-transcript-marker.ink-transcript-end {
+  display: inline-block;
+  width: 100%;
+  height: 0;
+  border-bottom: 1px dashed var(--background-modifier-border);
+  vertical-align: middle;
+}
+
+/* keep content clear of the bookmarks on narrow screens */
+.ink-has-bookmarks.ink-text-page .markdown-reading-view .markdown-preview-view,
+.ink-has-bookmarks.ink-text-page .markdown-source-view.mod-cm6 .cm-scroller {
+  padding-right: max(var(--file-margins, 32px), 64px);
+}
+
+/* ---------- Setup & settings -------------------------------------------- */
+
+.ink-modal.ink-setup {
+  width: min(680px, 96vw);
+}
+
+.ink-step {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  padding: 8px 14px 4px;
+  margin: 12px 0;
+}
+
+.ink-step-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 600;
+  margin: 4px 0 6px;
+}
+
+.ink-step-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 2px solid var(--text-normal);
+  font-size: 13px;
+}
+
+.ink-ok {
+  color: var(--text-success);
+}
+
+.ink-warn {
+  color: var(--text-warning);
+}
+
+.ink-test-status {
+  font-size: var(--font-ui-small);
+  min-height: 1.2em;
+}
+
+.ink-test-status.is-ok {
+  color: var(--text-success);
+}
+
+.ink-test-status.is-error {
+  color: var(--text-error);
+}
+
+.ink-wide-input {
+  width: min(360px, 60vw);
+}
+
+.ink-links {
+  margin-bottom: 6px;
+}
+
+.ink-block-desc {
+  margin-bottom: 8px;
+}
+
+/* ---------- E-ink mode --------------------------------------------------- */
+/* Turned on automatically on Boox / e-ink devices (or manually in settings). */
+
+body.ink-eink *,
+body.ink-eink *::before,
+body.ink-eink *::after {
+  transition: none !important;
+  animation: none !important;
+  scroll-behavior: auto !important;
+  box-shadow: none !important;
+  text-shadow: none !important;
+}
+
+body.ink-eink.theme-light {
+  --background-primary: #ffffff;
+  --background-primary-alt: #ffffff;
+  --background-secondary: #ffffff;
+  --background-secondary-alt: #f2f2f2;
+  --background-modifier-border: #000000;
+  --background-modifier-border-hover: #000000;
+  --background-modifier-hover: #e6e6e6;
+  --background-modifier-active-hover: #d9d9d9;
+  --text-normal: #000000;
+  --text-muted: #1a1a1a;
+  --text-faint: #3d3d3d;
+  --text-accent: #000000;
+  --text-accent-hover: #000000;
+  --interactive-accent: #000000;
+  --interactive-accent-hover: #262626;
+  --text-on-accent: #ffffff;
+  --link-color: #000000;
+  --link-color-hover: #000000;
+  --link-unresolved-color: #3d3d3d;
+  --text-highlight-bg: rgba(0, 0, 0, 0.14);
+  --text-selection: rgba(0, 0, 0, 0.2);
+  --scrollbar-thumb-bg: #000000;
+  --divider-color: #000000;
+  --tab-outline-color: #000000;
+}
+
+body.ink-eink.theme-dark {
+  --background-primary: #000000;
+  --background-secondary: #000000;
+  --background-modifier-border: #ffffff;
+  --text-normal: #ffffff;
+  --text-muted: #e6e6e6;
+  --text-faint: #c2c2c2;
+  --interactive-accent: #ffffff;
+  --text-on-accent: #000000;
+  --link-color: #ffffff;
+}
+
+body.ink-eink a,
+body.ink-eink .internal-link,
+body.ink-eink .cm-hmd-internal-link {
+  text-decoration: underline;
+  text-decoration-thickness: 1.5px;
+}
+
+body.ink-eink mark,
+body.ink-eink .cm-highlight {
+  background: transparent;
+  color: inherit;
+  text-decoration: underline dotted 2px;
+  text-underline-offset: 3px;
+}
+
+body.ink-eink .cm-cursor {
+  border-left-width: 3px !important;
+}
+
+body.ink-eink .notice {
+  border: 2px solid var(--text-normal);
+  background: var(--background-primary);
+  color: var(--text-normal);
+}
+
+body.ink-eink .modal,
+body.ink-eink .menu,
+body.ink-eink .suggestion-container,
+body.ink-eink .popover {
+  border: 2px solid var(--text-normal);
+}
+
+body.ink-eink .ink-bookmarks {
+  --ink-ribbon-ink: #000000;
+  --ink-ribbon-paper: #ffffff;
+}
+
+body.ink-eink.theme-dark .ink-bookmarks {
+  --ink-ribbon-ink: #ffffff;
+  --ink-ribbon-paper: #000000;
+}
+
+/* Excalidraw UI: no floating shadows, crisp outlines */
+body.ink-eink .excalidraw {
+  --shadow-island: none;
+  --button-hover-bg: #e6e6e6;
+  --color-primary: #000000;
+  --color-primary-darker: #000000;
+  --color-primary-darkest: #000000;
+  --color-primary-light: #d9d9d9;
+}
+
+body.ink-eink .excalidraw .Island {
+  border: 1px solid #000000;
+}
+
+body.ink-large-targets .ink-modal button,
+body.ink-large-targets .ink-settings button {
+  min-height: 40px;
+}
