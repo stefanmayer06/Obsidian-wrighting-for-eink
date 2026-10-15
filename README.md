@@ -17,6 +17,16 @@ Write by hand on the **ink page**, tap the **Text** bookmark, and read the same 
  └──────────────────────────────┘   └──────────────────────────────┘
 ```
 
+## Screenshots
+
+Taken by the automated end-to-end tests in real Obsidian + Excalidraw (the "handwriting" is generated test strokes).
+
+| Ink page | Text page (e-ink mode, mobile layout) |
+| --- | --- |
+| ![Ink page with handwriting, a diagram and the typed-notes card](docs/ink-page.png) | ![Text page with transcript, live diagram embed and typed notes](docs/text-page-eink.png) |
+| **PDF annotation** | **Setup assistant** |
+| ![Annotating PDF pages](docs/pdf-annotation.png) | ![Setup assistant](docs/setup-assistant.png) |
+
 ## Features
 
 - **Bookmark switcher** – two ribbon bookmarks on the right edge of every ink page: *Ink* (the drawing) and *Text* (the Markdown page). Tap to flip the page in the same tab. Long‑press (or right‑click) for more: transcribe now, re‑transcribe, open side by side.

@@ -191,7 +191,7 @@
 /* keep content clear of the bookmarks on narrow screens */
 .ink-has-bookmarks.ink-text-page .markdown-reading-view .markdown-preview-view,
 .ink-has-bookmarks.ink-text-page .markdown-source-view.mod-cm6 .cm-scroller {
-  padding-right: 72px;
+  padding-right: 88px;
 }
 
 /* ---------- Setup & settings -------------------------------------------- */

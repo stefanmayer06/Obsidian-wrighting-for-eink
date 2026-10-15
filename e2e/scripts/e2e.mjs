@@ -595,8 +595,10 @@ steps.livePreview = async () => {
     return {
       label: root?.querySelector(".ink-transcript-start")?.textContent ?? null,
       rawVisible: (root?.querySelector(".cm-content")?.textContent ?? "").includes("ink-notebook:end"),
+      labelVisible: (root?.querySelector(".cm-content")?.textContent ?? "").includes("%% Start %%"),
     };
   });
+  check("diagram label comment hidden in Live Preview", info.labelVisible === false, JSON.stringify(info));
   check("start marker rendered as label", !!info.label && info.label.includes("handwriting"), JSON.stringify(info));
   check("end marker state hidden", info.rawVisible === false, JSON.stringify(info));
   await shot("11-live-preview.png");

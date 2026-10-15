@@ -10,6 +10,9 @@ import { editorLivePreviewField } from "obsidian";
 
 const START_RE = /^%%\s*ink-notebook:start\b.*%%\s*$/;
 const END_RE = /^%%\s*ink-notebook:end\b.*%%\s*$/;
+/** an embed of a drawing area/frame, followed by its hidden "labels" comment line */
+const EMBED_RE = /^!\[\[[^\]]*#\^(area|frame|group)=[^\]]*\]\]\s*$/;
+const COMMENT_LINE_RE = /^%%[^%].*%%\s*$/;
 
 class MarkerWidget extends WidgetType {
   constructor(private kind: "start" | "end") {
@@ -43,6 +46,7 @@ function build(view: EditorView): DecorationSet {
   }
   if (!livePreview) return builder.finish();
   const doc = view.state.doc;
+  const cursorLines = new Set(view.state.selection.ranges.map((r) => doc.lineAt(r.head).number));
   // markers are near the top of the note; scanning visible ranges keeps this cheap
   for (const { from, to } of view.visibleRanges) {
     let pos = from;
@@ -53,6 +57,14 @@ function build(view: EditorView): DecorationSet {
         builder.add(line.from, line.to, Decoration.replace({ widget: new MarkerWidget("start") }));
       } else if (END_RE.test(text)) {
         builder.add(line.from, line.to, Decoration.replace({ widget: new MarkerWidget("end") }));
+      } else if (
+        COMMENT_LINE_RE.test(text) &&
+        line.number > 1 &&
+        EMBED_RE.test(doc.line(line.number - 1).text.trim()) &&
+        !cursorLines.has(line.number)
+      ) {
+        // the diagram's recognised labels (kept for search) – hidden like in Reading view
+        builder.add(line.from, line.to, Decoration.replace({}));
       }
       pos = line.to + 1;
     }
@@ -68,7 +80,12 @@ export function transcriptEditorExtension(): Extension {
         this.decorations = build(view);
       }
       update(u: ViewUpdate) {
-        if (u.docChanged || u.viewportChanged || u.startState.field(editorLivePreviewField, false) !== u.state.field(editorLivePreviewField, false)) {
+        if (
+          u.docChanged ||
+          u.viewportChanged ||
+          u.selectionSet ||
+          u.startState.field(editorLivePreviewField, false) !== u.state.field(editorLivePreviewField, false)
+        ) {
           this.decorations = build(u.view);
         }
       }
