@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { analyseBox } from "../src/core/checkbox";
+import { planOcrUnits } from "../src/core/rasterPlan";
 import { classifyScene } from "../src/core/classify";
-import type { Pt } from "../src/core/geometry";
+import type { Pt, Rect } from "../src/core/geometry";
 import { DEFAULT_LAYOUT_OPTIONS, layoutTranscript, type LayoutOptions } from "../src/core/layout";
 import type { OcrLine } from "../src/core/ocrTypes";
 import type { ExElement } from "../src/types/excalidraw";
@@ -165,6 +166,52 @@ const PLUS = { x: 22, y: 48, w: 76, h: 50 };
 const Y = { x: 240, y: 25, w: 88, h: 93 };
 const X = { x: 522, y: 48, w: 93, h: 79 };
 
+// A 3×3 grid with a header row (traced from a real page: open borders, slightly slanted lines).
+const ellipse = (cx: number, cy: number, rx: number, ry: number): Array<[number, number]> =>
+  Array.from({ length: 41 }, (_, i) => [cx + rx * Math.cos((i / 40) * 2 * Math.PI), cy + ry * Math.sin((i / 40) * 2 * Math.PI)]);
+
+function gridLetters(): ExElement[] {
+  return [
+    poly("one", [[207, 62], [209, 103]]),
+    poly("two", [[470, 88], [488, 74], [505, 80], [498, 95], [473, 101], [526, 99]]),
+    poly("three", [[822, 84], [845, 79], [852, 90], [836, 95], [856, 102], [848, 113], [830, 112]]),
+    poly("x1", [[185, 145], [230, 185], [275, 232]]),
+    poly("x2", [[180, 203], [240, 182], [308, 170]]),
+    poly("y1", [[510, 150], [527, 182], [545, 212]]),
+    poly("y2", [[565, 155], [548, 205], [528, 250]]),
+    poly("z", [[820, 170], [866, 166], [886, 174], [850, 190], [815, 222], [860, 214], [915, 208]]),
+    poly("N", [[157, 438], [157, 374], [190, 430], [193, 370]]),
+    poly("O", ellipse(535, 412, 45, 32)),
+    poly("P", [[818, 410], [818, 360], [840, 362], [850, 378], [836, 390], [818, 392]]),
+  ];
+}
+
+function grid3x3(): ExElement[] {
+  return [
+    poly("H1", [[95, 120], [500, 119], [1012, 121]]),
+    poly("H2", [[88, 306], [500, 302], [1008, 298]]),
+    poly("V1", [[362, 72], [362, 300], [363, 497]]),
+    poly("V2", [[742, 72], [738, 300], [731, 500]]),
+    ...gridLetters(),
+  ];
+}
+
+const GRID_WORDS = {
+  one: ["1", { x: 203, y: 60, w: 10, h: 45 }],
+  two: ["2", { x: 468, y: 72, w: 60, h: 31 }],
+  three: ["3", { x: 820, y: 77, w: 38, h: 38 }],
+  x: ["x", { x: 178, y: 143, w: 132, h: 91 }],
+  y: ["y", { x: 508, y: 148, w: 59, h: 104 }],
+  z: ["z", { x: 813, y: 164, w: 104, h: 60 }],
+  N: ["N", { x: 155, y: 368, w: 40, h: 72 }],
+  O: ["O", { x: 488, y: 378, w: 94, h: 68 }],
+  P: ["P", { x: 816, y: 358, w: 36, h: 54 }],
+} as const;
+type GridWord = keyof typeof GRID_WORDS;
+const G = {
+  row: (...names: GridWord[]) => wordsLine(names.map((n) => [GRID_WORDS[n][0], { ...GRID_WORDS[n][1] }] as [string, Rect])),
+};
+
 describe("hand-drawn tables", () => {
   it.each<[string, OcrLine[]]>([
     ["one line per heading", [wordsLine([["+", PLUS]]), wordsLine([["Y", Y]]), wordsLine([["X", X]])]],
@@ -177,8 +224,8 @@ describe("hand-drawn tables", () => {
     expect(transcribe(headerTable(), ocr)).toEqual(["| + | Y | X |\n| --- | --- | --- |"]);
   });
 
-  it("keeps a cell empty when a heading was not recognised", () => {
-    expect(transcribe(headerTable(), [wordsLine([["Y", Y], ["X", X]])])).toEqual(["|  | Y | X |\n| --- | --- | --- |"]);
+  it("marks a heading OCR could not read with a ?", () => {
+    expect(transcribe(headerTable(), [wordsLine([["Y", Y], ["X", X]])])).toEqual(["| ? | Y | X |\n| --- | --- | --- |"]);
   });
 
   it("turns every line of handwriting below the header into a row", () => {
@@ -250,6 +297,65 @@ describe("hand-drawn tables", () => {
     expect(transcribe(els, lines)).toEqual(["Values", "| + | Y | X |\n| --- | --- | --- |", "done"]);
   });
 
+  it.each<[string, OcrLine[], string]>([
+    ["everything read", [G.row("one", "two", "three"), G.row("x", "y", "z"), G.row("N", "O", "P")], "| x | y | z |\n| N | O | P |"],
+    ["every letter a line of its own", (Object.keys(GRID_WORDS) as GridWord[]).map((k) => G.row(k)), "| x | y | z |\n| N | O | P |"],
+    // OCR misses the crossed "x" and the round "O", and reads "N P" as one line across the middle cell
+    ["some letters not read", [G.row("one", "two", "three"), G.row("y", "z"), G.row("N", "P")], "| ==?== | y | z |\n| N | ==?== | P |"],
+  ])("reads a 3×3 grid (%s)", (_name, ocr, body) => {
+    const blocks = layoutTranscript(classifyScene(grid3x3(), ocr, new Set()), () => "area=REG", { ...layoutOpts, highlightThreshold: 0.6 });
+    expect(blocks.map((b) => b.md)).toEqual([`| 1 | 2 | 3 |\n| --- | --- | --- |\n${body}`]);
+  });
+
+  it("stays a picture when OCR read nothing in the grid", () => {
+    expect(transcribe(grid3x3(), [])).toEqual(["![[Notes/Page.excalidraw#^area=REG|720]]"]);
+  });
+
+  it.each<[string, () => ExElement[]]>([
+    [
+      "lines drawn in pieces",
+      () => [
+        poly("H1a", [[95, 120], [500, 119]]),
+        poly("H1b", [[504, 119], [1012, 121]]),
+        poly("H2", [[88, 306], [500, 302], [1008, 298]]),
+        poly("V1a", [[362, 72], [362, 300]]),
+        poly("V1b", [[362, 304], [363, 497]]),
+        poly("V2", [[742, 72], [738, 300], [731, 500]]),
+        ...gridLetters(),
+      ],
+    ],
+    [
+      "a border drawn in one stroke",
+      () => [
+        poly("border", [[60, 40], [1040, 40], [1040, 520], [60, 520], [60, 44]]),
+        poly("H1", [[60, 120], [500, 119], [1040, 121]]),
+        poly("H2", [[60, 306], [500, 302], [1040, 298]]),
+        poly("V1", [[362, 40], [362, 300], [363, 520]]),
+        poly("V2", [[742, 40], [738, 300], [731, 520]]),
+        ...gridLetters(),
+      ],
+    ],
+    [
+      "the outer lines drawn in one go (a Γ)",
+      () => [
+        poly("gamma", [[88, 500], [90, 120], [1012, 121]]),
+        poly("H2", [[88, 306], [500, 302], [1008, 298]]),
+        poly("V1", [[362, 72], [362, 300], [363, 497]]),
+        poly("V2", [[742, 72], [738, 300], [731, 500]]),
+        ...gridLetters(),
+      ],
+    ],
+  ])("reads a grid with %s", (_name, els) => {
+    const md = transcribe(els(), [G.row("one", "two", "three"), G.row("x", "y", "z"), G.row("N", "O", "P")]);
+    expect(md).toEqual(["| 1 | 2 | 3 |\n| --- | --- | --- |\n| x | y | z |\n| N | O | P |"]);
+  });
+
+  it("leaves a grid with a curve across it as a drawing", () => {
+    const els = [...grid3x3(), poly("curve", [[120, 480], [300, 380], [500, 250], [700, 160], [950, 90]])];
+    const c = classifyScene(els, [G.row("one", "two", "three"), G.row("x", "y", "z"), G.row("N", "O", "P")], new Set());
+    expect(c.tables).toEqual([]);
+  });
+
   it("leaves charts, crosses and axes as drawings", () => {
     // coordinate axes with a curve
     const axes = [
@@ -275,5 +381,24 @@ describe("hand-drawn tables", () => {
     // a grid with an Excalidraw shape in it is a diagram
     const withShape = [...headerTable(), shape("r", "rectangle", 250, 250, 100, 60)];
     expect(classifyScene(withShape, [wordsLine([["Y", Y], ["X", X]])], new Set()).tables).toEqual([]);
+  });
+});
+
+describe("OCR images", () => {
+  it("leave out long straight lines but keep the writing", () => {
+    const [unit] = planOcrUnits(grid3x3(), 150);
+    expect(unit.elementIds).toHaveLength(15);
+    expect(unit.renderIds.sort()).toEqual(gridLetters().map((e) => e.id).sort());
+  });
+
+  it("keep everything when there are no such lines", () => {
+    const els = getThe();
+    const [unit] = planOcrUnits(els, 150);
+    expect(unit.renderIds).toEqual(unit.elementIds);
+  });
+
+  it("have nothing to send for an empty grid", () => {
+    const units = planOcrUnits(grid3x3().slice(0, 4), 150);
+    expect(units.flatMap((u) => u.renderIds)).toEqual([]);
   });
 });

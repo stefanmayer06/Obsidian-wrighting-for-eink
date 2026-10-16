@@ -11,7 +11,7 @@ import {
   normalizeWikilinks,
   wordWithHighlight,
 } from "./markdownFormat";
-import type { TableItem } from "./table";
+import type { TableItem, TableWord } from "./table";
 
 /**
  * Turns a classified scene into ordered Markdown blocks for the text page.
@@ -79,11 +79,10 @@ function cleanLine(text: string): string {
   return stripHighlightsInLinks(normalizeWikilinks(text));
 }
 
-/** A Markdown table; "|" in cells (also in [[link|alias]]) is escaped. */
+/** A Markdown table; "|" in cells (also in [[link|alias]]) is escaped, unread writing is a "?". */
 function renderTable(t: TableItem, threshold: number): string {
-  const rows = t.rows.map((cells) =>
-    cells.map((words) => cleanLine(words.map((w) => wordWithHighlight(w, threshold)).join(" ")).replace(/\|/g, "\\|")),
-  );
+  const word = (w: TableWord) => (w.unread ? (threshold > 0 ? "==?==" : "?") : wordWithHighlight(w, threshold));
+  const rows = t.rows.map((cells) => cells.map((words) => cleanLine(words.map(word).join(" ")).replace(/\|/g, "\\|")));
   const row = (cells: string[]) => `| ${cells.join(" | ")} |`;
   return [row(rows[0]), row(rows[0].map(() => "---")), ...rows.slice(1).map(row)].join("\n");
 }

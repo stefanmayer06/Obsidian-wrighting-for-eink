@@ -7,12 +7,15 @@ import {
   center,
   containsPoint,
   containsRect,
-  distanceToSegment,
+  distance,
   elementRect,
   inflate,
   median,
   polylineLength,
+  rectFromPoints,
   right,
+  simplifyIndices,
+  straightLineDirection,
   union,
   unionAll,
   UnionFind,
@@ -33,6 +36,8 @@ import {
 export interface TableWord {
   text: string;
   confidence: number;
+  /** A placeholder for writing in the cell that OCR could not read. */
+  unread?: boolean;
 }
 
 export interface TableItem {
@@ -66,15 +71,16 @@ export interface TableResult {
 }
 
 interface Rule {
-  id: string;
+  /** The strokes that draw this line: a line may be drawn in pieces, a stroke may draw several lines. */
+  ids: string[];
   horizontal: boolean;
+  /** Points ordered along the line. */
   pts: Pt[];
   rect: Rect;
   /** Median position across the line: y of a horizontal line, x of a vertical one. */
   pos: number;
 }
 
-const MAX_TILT = (20 * Math.PI) / 180;
 /** Words that are a table line read as a character. */
 const VERTICAL_CHARS_RE = /^[|│┃¦‖lI1!/\\()[\]{}]+$/u;
 const HORIZONTAL_CHARS_RE = /^[_\-–—−=~.]+$/u;
@@ -82,23 +88,60 @@ const PIPES_RE = /[|│┃¦‖]/gu;
 
 const compact = (text: string): string => text.replace(/\s+/g, "");
 
-/** A long, straight, roughly horizontal or vertical stroke. */
-function ruleOf(el: ExElement, minLen: number): Rule | null {
-  const pts = absolutePoints(el);
-  if (pts.length < 2) return null;
-  const a = pts[0];
-  const b = pts[pts.length - 1];
-  const chord = Math.hypot(b.x - a.x, b.y - a.y);
-  if (chord < minLen) return null;
-  const angle = Math.abs(Math.atan2(b.y - a.y, b.x - a.x));
-  const fromHorizontal = Math.min(angle, Math.PI - angle);
-  const horizontal = fromHorizontal <= Math.PI / 4;
-  if ((horizontal ? fromHorizontal : Math.PI / 2 - fromHorizontal) > MAX_TILT) return null;
-  if (polylineLength(pts) > 1.25 * chord) return null;
-  let deviation = 0;
-  for (const p of pts) deviation = Math.max(deviation, distanceToSegment(p, a, b));
-  if (deviation > 0.12 * chord) return null;
-  return { id: el.id, horizontal, pts, rect: elementRect(el), pos: median(pts.map((p) => (horizontal ? p.y : p.x))) };
+/**
+ * The straight table lines a stroke draws: the whole stroke, or each side when it turns
+ * corners (a border drawn in one go, "Γ", "L", "⊔"). Handwriting and curves draw none.
+ */
+export function strokeLines(pts: ReadonlyArray<Pt>, minLen: number, lineHeight: number): Array<{ horizontal: boolean; pts: Pt[] }> {
+  const whole = straightLineDirection(pts, minLen);
+  if (whole) return [{ horizontal: whole === "h", pts: [...pts] }];
+  const total = polylineLength(pts);
+  if (total < 2 * minLen) return [];
+  const minPiece = Math.max(40, 1.2 * lineHeight);
+  const corners = simplifyIndices(pts, Math.max(6, 0.3 * lineHeight));
+  const out: Array<{ horizontal: boolean; pts: Pt[] }> = [];
+  let loose = 0;
+  for (let k = 1; k < corners.length; k++) {
+    const piece = pts.slice(corners[k - 1], corners[k] + 1);
+    const dir = straightLineDirection(piece, minPiece);
+    if (dir) out.push({ horizontal: dir === "h", pts: piece });
+    else if (distance(piece[0], piece[piece.length - 1]) < minPiece) loose += polylineLength(piece);
+    else return []; // a long piece that is no table line: a drawing
+  }
+  return out.length >= 2 && loose <= 0.2 * total ? out : [];
+}
+
+function makeRule(ids: string[], horizontal: boolean, pts: Pt[]): Rule {
+  const along = (p: Pt) => (horizontal ? p.x : p.y);
+  const ordered = along(pts[0]) <= along(pts[pts.length - 1]) ? pts : [...pts].reverse();
+  return {
+    ids,
+    horizontal,
+    pts: ordered,
+    rect: rectFromPoints(ordered) ?? { x: ordered[0].x, y: ordered[0].y, w: 0, h: 0 },
+    pos: median(ordered.map((p) => (horizontal ? p.y : p.x))),
+  };
+}
+
+/** Join the pieces of a line drawn in several strokes (pen lifted at a crossing). */
+function mergeCollinear(rules: ReadonlyArray<Rule>, lineHeight: number, tol: number): Rule[] {
+  const out: Rule[] = [];
+  for (const horizontal of [true, false]) {
+    const start = (r: Rule) => (horizontal ? r.rect.x : r.rect.y);
+    const end = (r: Rule) => (horizontal ? right(r.rect) : bottom(r.rect));
+    const groups: Rule[][] = [];
+    for (const r of rules.filter((x) => x.horizontal === horizontal).sort((a, b) => start(a) - start(b))) {
+      const g = groups.find((members) =>
+        members.some((m) => Math.abs(m.pos - r.pos) <= Math.max(8, 0.4 * lineHeight) && start(r) <= end(m) + tol && start(m) <= end(r) + tol),
+      );
+      if (g) g.push(r);
+      else groups.push([r]);
+    }
+    for (const g of groups) {
+      out.push(g.length === 1 ? g[0] : makeRule(g.flatMap((r) => r.ids), horizontal, g.flatMap((r) => r.pts)));
+    }
+  }
+  return out;
 }
 
 /** Position of a line across its direction at `t` along it: y at x = t (horizontal), x at y = t (vertical). */
@@ -140,6 +183,8 @@ interface Entry {
   box: Rect;
   text: string;
   confidence: number;
+  /** Writing OCR could not read. */
+  unread?: boolean;
 }
 
 /** Group boxes into rows of text (top to bottom), each row left to right. */
@@ -231,16 +276,30 @@ function buildGrid(
     return text || null;
   };
 
-  // drawings inside the grid: small marks belong to it, anything bigger makes it a diagram
-  const ruleIds = new Set(members.map((m) => m.id));
+  // Other strokes in the grid: writing that OCR could not read stays cell content (shown as
+  // "?"), marks on the lines belong to them; a curve or anything else running across the
+  // lines, or a shape, makes the grid a diagram.
+  const ruleIds = new Set(members.flatMap((m) => m.ids));
   const marks: string[] = [];
+  const unread: Rect[] = [];
   const markArea = inflate(area, 0.5 * H);
+  const across = Math.max(8, 0.35 * H);
+  const lineNear = (r: Rect, margin: number) =>
+    vs.some((v) => {
+      const x = crossAt(v, center(r).y);
+      return r.x < x - margin && right(r) > x + margin && bottom(r) > v.rect.y && r.y < bottom(v.rect);
+    }) ||
+    hs.some((h) => {
+      const y = crossAt(h, center(r).x);
+      return r.y < y - margin && bottom(r) > y + margin && right(r) > h.rect.x && r.x < right(h.rect);
+    });
   for (const el of ctx.others) {
     if (ruleIds.has(el.id)) continue;
     const r = ctx.strokeRects.get(el.id) ?? elementRect(el);
     if (!containsPoint(markArea, center(r))) continue;
-    if ((el.type !== "freedraw" && el.type !== "line") || Math.max(r.w, r.h) > 1.5 * H) return null;
+    if ((el.type !== "freedraw" && el.type !== "line") || lineNear(r, across)) return null;
     marks.push(el.id);
+    if (Math.max(r.w, r.h) >= 0.4 * H && !lineNear(r, -0.15 * H)) unread.push(r);
   }
 
   // the handwriting and typed text in the cells
@@ -249,6 +308,15 @@ function buildGrid(
   const keptLines: SceneLine[] = [];
   const addEntry = (box: Rect, text: string | null, confidence: number) => {
     if (text) entries.push({ col: colAt(center(box)), band: bandAt(center(box)), box, text, confidence });
+  };
+  /** Strokes of a line that no word covers: OCR's line box spans cells it did not read. */
+  const unreadStrokes = (line: SceneLine, ids: ReadonlyArray<string>) => {
+    const boxes = line.words.map((w) => inflate(w.box, Math.max(4, w.box.h * 0.2), Math.max(4, w.box.h * 0.35)));
+    for (const id of ids) {
+      const r = ctx.strokeRects.get(id);
+      if (!r || boxes.some((b) => containsPoint(b, center(r)))) continue;
+      if (Math.max(r.w, r.h) >= 0.4 * H && !lineNear(r, -0.15 * H)) unread.push(r);
+    }
   };
   for (const line of lines) {
     if (line.words.length === 0) {
@@ -267,6 +335,7 @@ function buildGrid(
     inside.forEach((w) => addEntry(w.box, cleanWord(w), w.confidence));
     const outside = line.words.filter((w) => !inArea(w.box));
     if (outside.length === 0) {
+      unreadStrokes(line, line.strokeIds);
       claimed.push(...line.strokeIds);
       continue;
     }
@@ -275,6 +344,7 @@ function buildGrid(
       const r = ctx.strokeRects.get(id);
       return !!r && inArea(r);
     });
+    unreadStrokes(line, inIds);
     claimed.push(...inIds);
     keptLines.push({
       ...line,
@@ -296,19 +366,44 @@ function buildGrid(
   if (new Set(entries.map((e) => `${e.col}:${e.band}`)).size < 2) return null;
 
   // rows: the first ruled-off band is the header; below it every line of handwriting is a row
+  const bandRows = (es: ReadonlyArray<Entry>, split: boolean): Entry[][] => {
+    const words = es.filter((e) => !e.unread);
+    const rows = split ? textRows(words) : words.length > 0 ? [words] : [];
+    // unread writing goes into the row it sits in, or into a row of its own
+    for (const u of es.filter((e) => e.unread)) {
+      const cy = center(u.box).y;
+      let best: Entry[] | null = null;
+      let bestD = split ? H : Infinity;
+      for (const row of rows) {
+        const box = unionAll(row.map((e) => e.box)) as Rect;
+        const d = Math.max(0, box.y - cy, cy - bottom(box));
+        if (d <= bestD) {
+          best = row;
+          bestD = d;
+        }
+      }
+      if (best) best.push(u);
+      else rows.push([u]);
+    }
+    return rows.sort((a, b) => Math.min(...a.map((e) => e.box.y)) - Math.min(...b.map((e) => e.box.y)));
+  };
   const toRow = (es: ReadonlyArray<Entry>): TableWord[][] =>
-    Array.from({ length: colCount }, (_, col) =>
-      textRows(es.filter((e) => e.col === col))
+    Array.from({ length: colCount }, (_, col) => {
+      const inCell = es.filter((e) => e.col === col);
+      const read = inCell.filter((e) => !e.unread);
+      if (read.length === 0) return inCell.length > 0 ? [{ text: "?", confidence: 0, unread: true }] : [];
+      return textRows(read)
         .flat()
-        .map((e) => ({ text: e.text, confidence: e.confidence })),
-    );
+        .map((e) => ({ text: e.text, confidence: e.confidence }));
+    });
+  for (const r of unread) entries.push({ col: colAt(center(r)), band: bandAt(center(r)), box: r, text: "?", confidence: 0, unread: true });
   const bands = [...new Set(entries.map((e) => e.band))].sort((a, b) => a - b);
   const rows: TableWord[][][] = [];
   if (bands.length >= 2) {
-    rows.push(toRow(entries.filter((e) => e.band === bands[0])));
-    for (const band of bands.slice(1)) for (const r of textRows(entries.filter((e) => e.band === band))) rows.push(toRow(r));
+    rows.push(...bandRows(entries.filter((e) => e.band === bands[0]), false).map(toRow));
+    for (const band of bands.slice(1)) rows.push(...bandRows(entries.filter((e) => e.band === band), true).map(toRow));
   } else {
-    for (const r of textRows(entries)) rows.push(toRow(r));
+    rows.push(...bandRows(entries, true).map(toRow));
   }
 
   const rect = unionAll([ext, ...entries.map((e) => e.box)]) ?? ext;
@@ -324,7 +419,12 @@ function buildGrid(
 export function detectTables(lines: ReadonlyArray<SceneLine>, texts: ReadonlyArray<TextItem>, ctx: TableContext): TableResult {
   const H = ctx.medianH > 0 ? ctx.medianH : 30;
   const tol = Math.max(12, 0.6 * H);
-  const rules = ctx.candidates.map((el) => ruleOf(el, Math.max(60, 2.2 * H))).filter((r): r is Rule => !!r);
+  const minLen = Math.max(60, 2.2 * H);
+  const rules = mergeCollinear(
+    ctx.candidates.flatMap((el) => strokeLines(absolutePoints(el), minLen, H).map((l) => makeRule([el.id], l.horizontal, l.pts))),
+    H,
+    tol,
+  );
   const result: TableResult = { tables: [], lines: [...lines], texts: [...texts], claimed: new Set(), gridIds: new Set() };
   if (!rules.some((r) => r.horizontal) || !rules.some((r) => !r.horizontal)) return result;
 
@@ -354,7 +454,7 @@ export function detectTables(lines: ReadonlyArray<SceneLine>, texts: ReadonlyArr
     if (!grid) continue;
     memberIdx.forEach((i) => {
       used.add(i);
-      result.gridIds.add(rules[i].id);
+      rules[i].ids.forEach((id) => result.gridIds.add(id));
     });
     result.tables.push(grid.table);
     result.lines = grid.lines;
