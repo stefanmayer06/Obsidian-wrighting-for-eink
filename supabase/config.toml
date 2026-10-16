@@ -1,0 +1,6 @@
+# Supabase CLI configuration for the Ink Notebook Cloud server (project ink-notebook-cloud).
+project_id = "ink-notebook-cloud"
+
+[functions.ocr]
+# Requests are authorised by the customer's license key, not by a Supabase JWT.
+verify_jwt = false

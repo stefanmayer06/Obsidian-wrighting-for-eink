@@ -3,8 +3,10 @@ import { mapOcrResult, type OcrLine } from "../core/ocrTypes";
 import { imageRectToScene, type OcrUnit } from "../core/rasterPlan";
 import type { ExElement } from "../types/excalidraw";
 import { AzureHttpError, isApiUnavailable, isOnline, OfflineError, recognize, type ApiVersion } from "./azureClient";
+import { fetchCloudStatus, recognizeCloud, type CloudConfig } from "./cloudClient";
 import { renderStrokesPng } from "./rasterizer";
-import { isOcrConfigured, type InkSettings } from "../settings";
+import { cloudEndpointFor, isOcrConfigured, type InkSettings } from "../settings";
+import type { CloudStatus } from "../core/cloud";
 
 /**
  * Handwriting recognition with caching and rate limiting.
@@ -22,7 +24,7 @@ export interface RecognizeOutcome {
   pendingIds: Set<string>;
   status: OcrStatus;
   error?: string;
-  /** Number of requests sent to Azure. */
+  /** Number of recognition requests sent. */
   requests: number;
 }
 
@@ -117,9 +119,19 @@ export class OcrService {
     return s.azureDetectedApi || "v4";
   }
 
-  /** Recognise one image, with automatic API detection. */
+  private cloudConfig(s: InkSettings, minTimeoutMs = 0): CloudConfig {
+    return {
+      endpoint: cloudEndpointFor(s),
+      licenseKey: s.cloudLicenseKey,
+      language: s.azureLanguage,
+      timeoutMs: Math.max(minTimeoutMs, s.transcribeTimeoutSec * 1000),
+    };
+  }
+
+  /** Recognise one image: with Ink Notebook Cloud, or with the user's Azure resource (automatic API detection). */
   private async recognizePng(png: ArrayBuffer): Promise<OcrLine[] | null> {
     const s = this.getSettings();
+    if (s.ocrProvider === "cloud") return (await recognizeCloud(png, this.cloudConfig(s))).lines;
     const cfg = {
       endpoint: s.azureEndpoint,
       key: s.azureKey,
@@ -217,6 +229,11 @@ export class OcrService {
     }
     if (status === "partial" && pendingIds.size === 0) status = "ok";
     return { lines, pendingIds, status, error, requests };
+  }
+
+  /** Ink Notebook Cloud subscription state and usage. */
+  async cloudStatus(): Promise<CloudStatus> {
+    return fetchCloudStatus(this.cloudConfig(this.getSettings(), 10000));
   }
 
   /** Check endpoint and key with a tiny test image. Returns the working API version. */

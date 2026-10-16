@@ -44,14 +44,14 @@ export function isOnline(): boolean {
   return typeof navigator === "undefined" || navigator.onLine !== false;
 }
 
-function header(res: RequestUrlResponse, name: string): string | null {
+export function header(res: RequestUrlResponse, name: string): string | null {
   const headers = res.headers ?? {};
   const want = name.toLowerCase();
   for (const k of Object.keys(headers)) if (k.toLowerCase() === want) return headers[k];
   return null;
 }
 
-function safeJson(res: RequestUrlResponse): unknown {
+export function safeJson(res: RequestUrlResponse): unknown {
   try {
     return res.json;
   } catch {
@@ -79,7 +79,7 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
   });
 }
 
-async function send(params: Parameters<typeof requestUrl>[0], timeoutMs: number): Promise<RequestUrlResponse> {
+export async function send(params: Parameters<typeof requestUrl>[0], timeoutMs: number): Promise<RequestUrlResponse> {
   if (!isOnline()) throw new OfflineError();
   try {
     const req = typeof params === "string" ? { url: params, throw: false } : { ...params, throw: false };

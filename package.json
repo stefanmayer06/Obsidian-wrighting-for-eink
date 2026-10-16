@@ -14,7 +14,7 @@
   },
   "keywords": ["obsidian", "excalidraw", "handwriting", "ocr", "eink", "boox"],
   "author": "Stefan Mayer",
-  "license": "MIT",
+  "license": "AGPL-3.0-or-later",
   "devDependencies": {
     "@codemirror/state": "6.5.2",
     "@codemirror/view": "6.38.1",
