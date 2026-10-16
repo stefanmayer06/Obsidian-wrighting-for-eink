@@ -177,7 +177,7 @@ The pure logic (OCR parsing, classification, layout, transcript merging, PDF mat
 
 The built‑in Excalidraw lives in `vendor/excalidraw` (the release files, unmodified). To move to another Excalidraw release run `npm run update-excalidraw -- <version>`, then `npm run check` and the end‑to‑end tests.
 
-**Releasing:** bump `version` in `manifest.json`/`package.json` (and add it to `versions.json`), then on GitHub open *Actions → Build & release → Run workflow* (or push a tag like `1.0.1`). The workflow runs the tests, builds and publishes a release with `main.js`, `manifest.json` and `styles.css` – which is what BRAT and manual installs download – plus the license of the built‑in Excalidraw.
+**Releasing:** run `npm run set-version -- 1.3.1` (it updates `manifest.json`, `package.json`, `package-lock.json` and `versions.json`) and commit, then on GitHub create a release with the tag `1.3.1` – just the version, without a "v" – or open *Actions → Build & release → Run workflow*. The workflow runs the tests, builds and publishes the release with `main.js`, `manifest.json` and `styles.css` – which is what BRAT and manual installs download – plus the license of the built‑in Excalidraw. It writes the tag's version into the released `manifest.json`, so a release always matches its tag; Obsidian's community plugin list reads the version from the repository, though, so keep `manifest.json` bumped there too.
 
 `e2e/` contains end-to-end tests that run the plugin inside the real Obsidian desktop app (with its built‑in Excalidraw, or with the Excalidraw plugin installed separately) and a fake Azure server (see `e2e/README.md`).
 
