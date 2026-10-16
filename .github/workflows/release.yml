@@ -2,8 +2,10 @@ name: Build & release
 
 # Builds the plugin on every push/PR. A release (with main.js, manifest.json and
 # styles.css attached, as needed by BRAT and manual installs) is created when a
-# version tag is pushed, or manually via "Run workflow". main.js contains the
-# built-in Excalidraw plugin, so its license is attached as well.
+# version tag is pushed (e.g. 1.3.1 – the release then gets that version, see
+# scripts/set-version.mjs), or manually via "Run workflow" (version from
+# manifest.json). main.js contains the built-in Excalidraw plugin, so its license
+# is attached as well.
 on:
   push:
     branches: ["**"]
@@ -29,6 +31,10 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - name: Version from the tag
+        # a release's manifest.json must match its tag – BRAT and Obsidian compare the two
+        if: startsWith(github.ref, 'refs/tags/')
+        run: node scripts/set-version.mjs "$GITHUB_REF_NAME"
       - run: npm test
       - run: npm run build
       - uses: actions/upload-artifact@v4

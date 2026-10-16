@@ -1,6 +1,6 @@
 {
   "name": "ink-notebook",
-  "version": "1.0.0",
+  "version": "1.3.0",
   "description": "Handwriting notebook for Obsidian built on Excalidraw (included): bookmark switcher between ink and text pages, Azure handwriting OCR, live diagram embeds, PDF annotation and e-ink (Boox) optimisations.",
   "main": "main.js",
   "private": true,
@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit --skipLibCheck",
     "test": "vitest run",
     "check": "npm run typecheck && npm test && node esbuild.config.mjs production",
-    "update-excalidraw": "bash scripts/update-excalidraw.sh"
+    "update-excalidraw": "bash scripts/update-excalidraw.sh",
+    "set-version": "node scripts/set-version.mjs"
   },
   "keywords": ["obsidian", "excalidraw", "handwriting", "ocr", "eink", "boox"],
   "author": "Stefan Mayer",
