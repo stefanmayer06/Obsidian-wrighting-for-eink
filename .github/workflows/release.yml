@@ -2,7 +2,8 @@ name: Build & release
 
 # Builds the plugin on every push/PR. A release (with main.js, manifest.json and
 # styles.css attached, as needed by BRAT and manual installs) is created when a
-# version tag is pushed, or manually via "Run workflow".
+# version tag is pushed, or manually via "Run workflow". main.js contains the
+# built-in Excalidraw plugin, so its license is attached as well.
 on:
   push:
     branches: ["**"]
@@ -43,6 +44,10 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.release)
         run: echo "version=$(node -p "require('./manifest.json').version")" >> "$GITHUB_OUTPUT"
 
+      - name: License of the built-in Excalidraw
+        if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.release)
+        run: cp vendor/excalidraw/LICENSE excalidraw-LICENSE.txt
+
       - name: Release
         if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.release)
         uses: softprops/action-gh-release@v2
@@ -55,3 +60,4 @@ jobs:
             main.js
             manifest.json
             styles.css
+            excalidraw-LICENSE.txt

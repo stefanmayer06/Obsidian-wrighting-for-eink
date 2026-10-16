@@ -1,4 +1,4 @@
-// End-to-end test of Ink Notebook inside a real Obsidian + Excalidraw.
+// End-to-end test of Ink Notebook (with its built-in Excalidraw) inside a real Obsidian.
 import { chromium } from "playwright-core";
 import fs from "fs";
 import path from "path";
@@ -10,6 +10,9 @@ const SHOTS = path.join(E2E, "shots");
 fs.mkdirSync(SHOTS, { recursive: true });
 const MOCK = "http://127.0.0.1:8765";
 const only = process.argv[2]; // optional: run a single step
+// the vault has the Excalidraw plugin installed itself (setup-vault.sh with OWN_EXCALIDRAW=1)
+const OWN = !!process.env.OWN_EXCALIDRAW;
+const EXCALIDRAW_ID = "obsidian-excalidraw-plugin";
 
 const browser = await chromium.connectOverCDP("http://127.0.0.1:9222");
 const page = browser.contexts().flatMap((c) => c.pages()).find((p) => p.url().includes("index.html"));
@@ -198,6 +201,15 @@ steps.setup = async () => {
   await page.waitForTimeout(800);
   const info = await ev(() => ({ loaded: !!__t.plugin(), ea: !!app.plugins.plugins["obsidian-excalidraw-plugin"]?.ea, size: [innerWidth, innerHeight] }));
   check("ink-notebook and excalidraw are loaded", info.loaded && info.ea, JSON.stringify(info));
+  const ex = await ev((id) => ({
+    builtIn: __t.plugin().excalidraw.active,
+    installed: !!app.plugins.manifests[id],
+    version: app.plugins.plugins[id]?.manifest?.version,
+    dir: app.plugins.plugins[id]?.manifest?.dir,
+    styles: [...document.head.querySelectorAll("style")].filter((s) => s.textContent.includes(".excalidraw-script-store")).length,
+  }), EXCALIDRAW_ID);
+  if (OWN) check("the user's own Excalidraw plugin is used, the built-in one stays idle", ex.installed && !ex.builtIn && ex.styles === 1, JSON.stringify(ex));
+  else check("Excalidraw is built in: nothing else installed, its settings and styles are Ink Notebook's", ex.builtIn && !ex.installed && ex.dir === ".obsidian/plugins/ink-notebook/excalidraw" && ex.styles === 1, JSON.stringify(ex));
   // the main flow uses the older side-by-side layout in a fixed folder; the "folders"/"paper…" steps cover the new defaults
   await setSettings({ setupDone: true, azureEndpoint: MOCK, azureKey: "test-key", azureApi: "auto", azureDetectedApi: "", einkMode: "off", queue: [], pageLocation: "fixed", folder: "Ink", inkSubfolder: "", askForPaper: false });
   await ev(() => {
@@ -666,6 +678,8 @@ steps.wizardTest = async () => {
   await ev(() => app.commands.executeCommandById("ink-notebook:open-setup"));
   await page.waitForTimeout(600);
   await shot("12-setup-wizard.png");
+  const step1 = await ev(() => document.querySelector(".modal.ink-setup .ink-step p")?.textContent ?? "");
+  check("setup assistant: Excalidraw needs no installation", OWN ? /Using your own Excalidraw plugin/.test(step1) : /built into Ink Notebook – nothing to install/.test(step1), step1);
   const buttons = await page.$$(".modal.ink-setup button");
   let clicked = false;
   for (const b of buttons) {
@@ -773,11 +787,18 @@ steps.eink = async () => {
 
 steps.reopen = async () => {
   console.log("\n▶ reopen everything after a reload of the plugin");
-  await ev(async () => {
+  const between = await ev(async (id) => {
     await app.plugins.disablePlugin("ink-notebook");
+    const stopped = !app.plugins.plugins[id];
     await app.plugins.enablePlugin("ink-notebook");
-  });
+    return stopped;
+  }, EXCALIDRAW_ID);
+  check(OWN ? "disabling Ink Notebook leaves the user's Excalidraw running" : "disabling Ink Notebook stops the built-in Excalidraw", OWN ? !between : between);
   await page.waitForTimeout(1500);
+  if (!OWN) {
+    const back = await ev(() => __t.waitFor(() => __t.plugin().excalidraw.active && app.workspace.getLeavesOfType("excalidraw").some((l) => l.view.excalidrawAPI), 20000).then(() => true, () => false));
+    check("built-in Excalidraw runs again and reopens the ink pages", back);
+  }
   const info = await ev(() => {
     const leaves = [...app.workspace.getLeavesOfType("excalidraw"), ...app.workspace.getLeavesOfType("markdown")];
     const p = __t.plugin();
@@ -785,6 +806,33 @@ steps.reopen = async () => {
     return { inkLeaves: inkLeaves.length, perLeaf: inkLeaves.map((l) => l.view.containerEl.querySelectorAll(".ink-bookmarks").length) };
   });
   check("bookmarks restored after plugin reload, one set per ink page tab", info.inkLeaves > 0 && info.perLeaf.every((n) => n === 1), JSON.stringify(info));
+};
+
+steps.ownExcalidraw = async () => {
+  if (OWN) return;
+  console.log("\n▶ installing, enabling and disabling the Excalidraw plugin while the built-in one runs");
+  const dir = path.join(VAULT, ".obsidian/plugins", EXCALIDRAW_ID);
+  fs.mkdirSync(dir, { recursive: true });
+  for (const f of ["main.js", "manifest.json", "styles.css"]) fs.copyFileSync(path.join(E2E, "..", "vendor/excalidraw", f), path.join(dir, f));
+  const enabled = await ev(async (id) => {
+    const builtIn = app.plugins.plugins[id];
+    await app.plugins.loadManifests();
+    await app.plugins.enablePluginAndSave(id);
+    return { same: app.plugins.plugins[id] === builtIn, builtIn: __t.plugin().excalidraw.active };
+  }, EXCALIDRAW_ID);
+  check("enabling the Excalidraw plugin keeps the running built-in copy (no second Excalidraw)", enabled.same && enabled.builtIn, JSON.stringify(enabled));
+  // Obsidian now unloads the running copy (the built-in one); Ink Notebook starts it again
+  await ev((id) => app.plugins.disablePluginAndSave(id), EXCALIDRAW_ID);
+  const back = await ev(() => __t.waitFor(() => __t.plugin().excalidraw.active && __t.plugin().excalidraw.describe().ok, 20000).then(() => true, () => false));
+  check("built-in Excalidraw takes over again after the Excalidraw plugin is disabled", back);
+  await ev(async (p) => {
+    const leaf = app.workspace.getLeaf(false);
+    await leaf.setViewState({ type: "excalidraw", state: { file: p }, active: true });
+  }, state.drawing);
+  const p = await waitView("excalidraw", state.drawing);
+  check("ink page opens with the built-in Excalidraw again", p === state.drawing, p);
+  fs.rmSync(dir, { recursive: true, force: true });
+  await ev(() => app.plugins.loadManifests());
 };
 
 steps.folders = async () => {
@@ -990,7 +1038,7 @@ steps.collision = async () => {
   await setWindow(800, 1200);
 };
 
-const order = ["setup", "createPage", "write", "flipToText", "editText", "flipToInk", "flipBack", "editCard", "updateTyped", "undoSafety", "addPage", "markDiagram", "offline", "v3", "errors", "livePreview", "wizardTest", "pdf", "image", "rename", "eink", "reopen", "folders", "paperPages", "renameSub", "collision", "mobile"];
+const order = ["setup", "createPage", "write", "flipToText", "editText", "flipToInk", "flipBack", "editCard", "updateTyped", "undoSafety", "addPage", "markDiagram", "offline", "v3", "errors", "livePreview", "wizardTest", "pdf", "image", "rename", "eink", "reopen", "ownExcalidraw", "folders", "paperPages", "renameSub", "collision", "mobile"];
 for (const name of order) {
   if (only && !only.split(",").includes(name) && name !== "setup") continue;
   try {
