@@ -1,5 +1,7 @@
 node_modules/
 main.js
+# the Excalidraw release built into Ink Notebook (see vendor/excalidraw/README.md)
+!vendor/excalidraw/main.js
 *.js.map
 data.json
 ocr-cache.json

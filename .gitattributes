@@ -1,0 +1,4 @@
+# Excalidraw release files built into Ink Notebook (see vendor/excalidraw/README.md)
+vendor/** linguist-vendored
+vendor/excalidraw/main.js -diff
+vendor/excalidraw/styles.css -diff

@@ -1,6 +1,6 @@
 # Ink Notebook for Obsidian
 
-**Handwritten notebook pages for Obsidian, built on top of [Excalidraw](https://github.com/zsviczian/obsidian-excalidraw-plugin), made for e‑ink tablets such as the Onyx Boox.**
+**Handwritten notebook pages for Obsidian, built on top of [Excalidraw](https://github.com/zsviczian/obsidian-excalidraw-plugin), made for e‑ink tablets such as the Onyx Boox.** Excalidraw is included – install Ink Notebook and start writing.
 
 Write by hand on the **ink page**, tap the **Text** bookmark, and read the same page as clean Markdown: handwriting transcribed, flowcharts and sketches embedded live from your drawing, links working like everywhere else in Obsidian. Type on the **text page** and your typed notes show up on the ink page too.
 
@@ -55,7 +55,9 @@ Taken by the automated end-to-end tests in real Obsidian + Excalidraw (the "hand
 
 ## Installation
 
-You need **Obsidian 1.8.7+** and the **Excalidraw** plugin (Community plugins → *Excalidraw* → Install → Enable). PDF export needs Excalidraw 2.20 or newer.
+You need **Obsidian 1.8.7+** – that's all. **Excalidraw is built into Ink Notebook**, so there is no second plugin to install.
+
+Already using the Excalidraw plugin? If it is installed and enabled in your vault, Ink Notebook uses your Excalidraw instead of its built‑in copy (Excalidraw 2.0+ is needed, PDF export needs 2.20+). If you disable or uninstall it, the built‑in Excalidraw takes over. The built‑in Excalidraw keeps its settings in `.obsidian/plugins/ink-notebook/excalidraw/` (on its first start it copies the settings of an Excalidraw plugin you used before) and has its own tab in Obsidian's settings, as usual.
 
 ### Option A – BRAT (easiest, also on the Boox)
 1. In Obsidian: *Settings → Community plugins → Browse*, install and enable **BRAT**.
@@ -67,7 +69,7 @@ You need **Obsidian 1.8.7+** and the **Excalidraw** plugin (Community plugins �
 2. Copy them to `<your vault>/.obsidian/plugins/ink-notebook/`.
 3. Restart Obsidian and enable **Ink Notebook**.
 
-When Ink Notebook starts the first time, a **setup assistant** opens (you can reopen it from the settings or the command *Open setup assistant*). It checks Excalidraw, turns on the e‑ink optimisations, offers the recommended pen settings, connects handwriting recognition and creates your first page.
+When Ink Notebook starts the first time, a **setup assistant** opens (you can reopen it from the settings or the command *Open setup assistant*). It shows which Excalidraw is used, turns on the e‑ink optimisations, offers the recommended pen settings, connects handwriting recognition and creates your first page.
 
 ## Setting up handwriting recognition (Azure, free tier)
 
@@ -86,7 +88,7 @@ Privacy: only your handwriting strokes are rendered and sent (black on white –
 
 ## Using it on a Boox (Note Air, Tab Ultra, Go, …)
 
-1. Install **Obsidian** from the Play Store (enable Google Play in the Boox settings if needed), open your vault, install Excalidraw and Ink Notebook as above.
+1. Install **Obsidian** from the Play Store (enable Google Play in the Boox settings if needed), open your vault and install Ink Notebook as above.
 2. In the setup assistant press **Apply** next to *Stylus settings for Excalidraw*: the pen draws, one finger pans/zooms, double‑tapping with the pen switches to the eraser.
 3. Recommended Boox app optimisation for Obsidian (long‑press the Obsidian icon → *Optimize* / *E‑Ink Center*):
    - refresh mode **Fast** or **Balanced** for writing (**HD** if you mostly read),
@@ -129,6 +131,7 @@ The two `%% … %%` lines mark the transcript; in Live Preview they are shown as
 
 ## Settings
 
+- **Excalidraw** – which Excalidraw is used (built in, or your own Excalidraw plugin) and a shortcut to its settings.
 - **Pages** – where new pages go (folder of the current note, or a fixed folder), the subfolder for ink files (`Attachments` by default; empty = next to the text page), paper for new pages and whether to choose it every time, ask for a name, open the text page in reading or editing view, keep names in sync on rename/move.
 - **Handwriting recognition** – endpoint, key, API version, language hint, highlight uncertain words, transcribe while writing, how long to wait when flipping, requests per minute, clickable handwritten links, diagram detection sensitivity, offline queue and cache.
 - **Typed notes** – show them on the ink page, font and width of the card.
@@ -137,7 +140,7 @@ The two `%% … %%` lines mark the transcript; in Live Preview they are shown as
 
 ## Troubleshooting
 
-- **"Ink Notebook is built on the Excalidraw plugin"** – install/enable Excalidraw and reopen the setup assistant.
+- **Excalidraw does not start** – the setup assistant (step 1) shows why and has a *Try again* button. If you also have the Excalidraw plugin installed, Ink Notebook uses that one: make sure it is enabled and up to date, or disable it to use the built‑in Excalidraw.
 - **Test connection fails** – 401 means a wrong key; 404 a wrong endpoint (copy it exactly from *Keys and Endpoint*); 429 means the free tier's 20 requests/minute were reached (it retries automatically).
 - **Something was embedded as a picture instead of text** – that area was recognised as a drawing. Change *Diagram detection* to *Only clear drawings*, or write a little larger. Unrecognised handwriting is always shown as a picture rather than lost.
 - **Text on the text page is wrong** – just correct it there; your correction stays.
@@ -152,6 +155,7 @@ The two `%% … %%` lines mark the transcript; in Live Preview they are shown as
 - Each diagram gets an invisible, locked rectangle in the drawing; the text page embeds that area with `#^area=<id>`, so the picture is always live.
 - The transcript region stores a compact fingerprint of what was generated, which is how your corrections, deletions and additions are recognised and kept.
 - Ink Notebook never edits the drawing file directly: all changes go through Excalidraw's scripting API (ExcalidrawAutomate) while the drawing is open.
+- The built‑in Excalidraw is the unmodified Excalidraw plugin release (in `vendor/excalidraw`), embedded in Ink Notebook's `main.js`. Ink Notebook starts it the way Obsidian starts a community plugin, under Excalidraw's own plugin id, so Excalidraw scripts and other plugins that work with Excalidraw find it as usual. It is not started when your own Excalidraw plugin is enabled.
 
 ## Development
 
@@ -163,10 +167,14 @@ npm run build     # type-check + bundle main.js
 
 The pure logic (OCR parsing, classification, layout, transcript merging, PDF maths) lives in `src/core` and is covered by unit tests; Obsidian/Excalidraw integration is in `src/obsidian`.
 
-**Releasing:** bump `version` in `manifest.json`/`package.json` (and add it to `versions.json`), then on GitHub open *Actions → Build & release → Run workflow* (or push a tag like `1.0.1`). The workflow runs the tests, builds and publishes a release with `main.js`, `manifest.json` and `styles.css` – which is what BRAT and manual installs download.
+The built‑in Excalidraw lives in `vendor/excalidraw` (the release files, unmodified). To move to another Excalidraw release run `npm run update-excalidraw -- <version>`, then `npm run check` and the end‑to‑end tests.
 
-`e2e/` contains end-to-end tests that run the plugin inside the real Obsidian desktop app with the real Excalidraw plugin and a fake Azure server (see `e2e/README.md`).
+**Releasing:** bump `version` in `manifest.json`/`package.json` (and add it to `versions.json`), then on GitHub open *Actions → Build & release → Run workflow* (or push a tag like `1.0.1`). The workflow runs the tests, builds and publishes a release with `main.js`, `manifest.json` and `styles.css` – which is what BRAT and manual installs download – plus the license of the built‑in Excalidraw.
+
+`e2e/` contains end-to-end tests that run the plugin inside the real Obsidian desktop app (with its built‑in Excalidraw, or with the Excalidraw plugin installed separately) and a fake Azure server (see `e2e/README.md`).
 
 ## License
 
-MIT
+Ink Notebook's own code is MIT licensed (see `LICENSE`).
+
+The built‑in Excalidraw is the [Excalidraw plugin for Obsidian](https://github.com/zsviczian/obsidian-excalidraw-plugin) by Zsolt Viczian, included unmodified and licensed under the **GNU Affero General Public License v3.0** (`vendor/excalidraw/LICENSE`; [`vendor/excalidraw/README.md`](vendor/excalidraw/README.md) names the included version and where its source code is). Because the released `main.js` contains it, the released plugin as a whole is distributed under the terms of the AGPL v3.0.
