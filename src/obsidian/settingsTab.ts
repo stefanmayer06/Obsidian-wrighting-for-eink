@@ -4,7 +4,7 @@ import { paperLabel } from "../core/paper";
 import { cleanSubfolder } from "../core/folders";
 import { PaperPickerModal } from "./paperPicker";
 import { applyEinkClasses } from "./einkMode";
-import { applyEinkExcalidrawSettings, excalidrawSettingsDiff, isExcalidrawReady } from "./excalidrawBridge";
+import { applyEinkExcalidrawSettings, EXCALIDRAW_PLUGIN_ID, excalidrawSettingsDiff, isExcalidrawReady } from "./excalidrawBridge";
 import { SetupWizard } from "./setupWizard";
 import { renderRecognitionSettings } from "./recognitionSettings";
 import type { BookmarkPosition, DiagramSensitivity, PageLocation, TextViewMode } from "../settings";
@@ -28,6 +28,15 @@ export class InkSettingTab extends PluginSettingTab {
       .setName("Setup assistant")
       .setDesc("Walk through the setup again (Excalidraw, e-ink, handwriting recognition).")
       .addButton((b) => b.setButtonText("Open").onClick(() => new SetupWizard(this.plugin).open()));
+    new Setting(containerEl)
+      .setName("Excalidraw")
+      .setDesc(this.plugin.excalidraw.describe().text)
+      .addButton((b) =>
+        b
+          .setButtonText("Excalidraw settings")
+          .setDisabled(!isExcalidrawReady(this.app))
+          .onClick(() => (this.app as unknown as { setting?: { openTabById(id: string): unknown } }).setting?.openTabById(EXCALIDRAW_PLUGIN_ID)),
+      );
 
     // ------------------------------------------------------------------ pages
     new Setting(containerEl).setName("Pages").setHeading();

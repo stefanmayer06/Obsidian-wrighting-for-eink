@@ -13,12 +13,12 @@ import {
   EXCALIDRAW_VIEW_TYPE,
   findExcalidrawView,
   getEA,
-  isExcalidrawInstalled,
   isExcalidrawReady,
   isExcalidrawView,
   release,
   viewElements,
 } from "./obsidian/excalidrawBridge";
+import { BundledExcalidraw } from "./obsidian/bundledExcalidraw";
 import { annotateImage, annotatePdf, exportAnnotatedImage, exportAnnotatedPdf, findPdfPages } from "./obsidian/pdfAnnotate";
 import { getInkData } from "./types/excalidraw";
 import { elementRect, unionAll } from "./core/geometry";
@@ -36,6 +36,8 @@ export default class InkNotebookPlugin extends Plugin {
   sync!: SyncEngine;
   bookmarks!: BookmarkManager;
   switcher!: PageSwitcher;
+  /** The Excalidraw built into Ink Notebook (idle when the user's own Excalidraw plugin is enabled). */
+  excalidraw!: BundledExcalidraw;
 
   private openDrawings = new Set<string>();
   private queueRunning = false;
@@ -45,6 +47,8 @@ export default class InkNotebookPlugin extends Plugin {
 
   async onload(): Promise<void> {
     this.settings = loadSettings(await this.loadData());
+    this.excalidraw = new BundledExcalidraw(this);
+    await this.excalidraw.ensure();
     this.pairs = new PairManager(this.app, () => this.settings.inkSubfolder);
     this.ocr = new OcrService(
       this.app.vault.adapter,
@@ -72,6 +76,8 @@ export default class InkNotebookPlugin extends Plugin {
     // ---- workspace & vault events ----
     const onLayout = debounce(
       () => {
+        // the user's own Excalidraw plugin may have been disabled: the built-in one takes over
+        void this.excalidraw.ensure();
         this.bookmarks.refreshAll();
         this.detectClosedDrawings();
       },
@@ -110,6 +116,7 @@ export default class InkNotebookPlugin extends Plugin {
     for (const t of this.typedTimers.values()) window.clearTimeout(t);
     for (const t of this.inkTimers.values()) window.clearTimeout(t);
     void this.ocr?.flush();
+    this.excalidraw?.unload();
   }
 
   private async onLayoutReady(): Promise<void> {
@@ -117,7 +124,7 @@ export default class InkNotebookPlugin extends Plugin {
     this.bookmarks.refreshAll();
     this.detectClosedDrawings();
     if (!this.settings.setupDone) {
-      // give Excalidraw a moment to finish loading before checking
+      // give the user's own Excalidraw plugin (if any) a moment to finish loading before checking
       window.setTimeout(() => new SetupWizard(this).open(), 1200);
     } else if (!isExcalidrawReady(this.app)) {
       window.setTimeout(() => {
@@ -140,15 +147,16 @@ export default class InkNotebookPlugin extends Plugin {
   }
 
   showExcalidrawMissing(): void {
+    // e.g. the user's own Excalidraw plugin was just disabled: start the built-in one
+    if (!this.excalidraw.error && this.excalidraw.canStart()) {
+      void this.excalidraw.ensure().then((ok) => (ok ? new Notice("Excalidraw is ready – please try again.") : this.showExcalidrawMissing()));
+      return;
+    }
     if (this.missingNoticeShown) return;
     this.missingNoticeShown = true;
     window.setTimeout(() => (this.missingNoticeShown = false), 10000);
     const frag = document.createDocumentFragment();
-    frag.appendText(
-      isExcalidrawInstalled(this.app)
-        ? "Ink Notebook needs the Excalidraw plugin to be enabled. "
-        : "Ink Notebook is built on the Excalidraw plugin – please install it from Community plugins. ",
-    );
+    frag.appendText(`Ink Notebook: ${this.excalidraw.describe().text} `);
     const a = frag.createEl("a", { text: "Open setup", href: "#" });
     a.addEventListener("click", (e) => {
       e.preventDefault();

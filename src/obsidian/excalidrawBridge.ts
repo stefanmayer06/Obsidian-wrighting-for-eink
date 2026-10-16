@@ -3,9 +3,12 @@ import type { ExElement } from "../types/excalidraw";
 
 /**
  * All access to the Excalidraw plugin goes through this file.
- * The Excalidraw plugin exposes "ExcalidrawAutomate" (EA) for scripting; we
- * only use documented EA methods and guard every call so that a different
- * Excalidraw version degrades gracefully instead of breaking Ink Notebook.
+ * Excalidraw is built into Ink Notebook (see bundledExcalidraw.ts), but the
+ * user's own Excalidraw plugin is used instead when it is enabled, so this may
+ * be any Excalidraw version. The Excalidraw plugin exposes "ExcalidrawAutomate"
+ * (EA) for scripting; we only use documented EA methods and guard every call
+ * so that a different Excalidraw version degrades gracefully instead of
+ * breaking Ink Notebook.
  */
 
 export const EXCALIDRAW_PLUGIN_ID = "obsidian-excalidraw-plugin";
@@ -76,11 +79,6 @@ export function getExcalidrawPlugin(app: App): ExcalidrawPluginLike | null {
   const plugins = (app as Any).plugins;
   const p = plugins?.plugins?.[EXCALIDRAW_PLUGIN_ID] ?? plugins?.getPlugin?.(EXCALIDRAW_PLUGIN_ID);
   return p ?? null;
-}
-
-export function isExcalidrawInstalled(app: App): boolean {
-  const plugins = (app as Any).plugins;
-  return !!plugins?.manifests?.[EXCALIDRAW_PLUGIN_ID];
 }
 
 export function isExcalidrawReady(app: App): boolean {

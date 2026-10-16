@@ -1,44 +1,13 @@
-import { App, Modal, Notice, Platform, Setting } from "obsidian";
+import { Modal, Notice, Platform, Setting } from "obsidian";
 import type InkNotebookPlugin from "../main";
 import { paperLabel } from "../core/paper";
 import { PaperPickerModal } from "./paperPicker";
 import { currentDevice, applyEinkClasses } from "./einkMode";
-import {
-  applyEinkExcalidrawSettings,
-  compareVersions,
-  excalidrawSettingsDiff,
-  excalidrawVersion,
-  isExcalidrawInstalled,
-  isExcalidrawReady,
-  EXCALIDRAW_PLUGIN_ID,
-  MIN_EXCALIDRAW_VERSION,
-} from "./excalidrawBridge";
+import { applyEinkExcalidrawSettings, excalidrawSettingsDiff, isExcalidrawReady } from "./excalidrawBridge";
 import { renderRecognitionSettings } from "./recognitionSettings";
 
-/** Opens Excalidraw in Obsidian's community plugin browser. */
-export function openExcalidrawInstall(app: App): void {
-  const setting = (app as unknown as { setting?: { open(): void; openTabById(id: string): unknown } }).setting;
-  try {
-    window.open(`obsidian://show-plugin?id=${EXCALIDRAW_PLUGIN_ID}`);
-  } catch {
-    setting?.open();
-    setting?.openTabById("community-plugins");
-  }
-}
-
-export async function enableExcalidraw(app: App): Promise<boolean> {
-  const plugins = (app as unknown as { plugins?: { enablePluginAndSave?(id: string): Promise<boolean> } }).plugins;
-  if (!plugins?.enablePluginAndSave) return false;
-  try {
-    await plugins.enablePluginAndSave(EXCALIDRAW_PLUGIN_ID);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 /**
- * First-run setup: Excalidraw check, device (e-ink) setup, optional handwriting
+ * First-run setup: Excalidraw status, device (e-ink) setup, optional handwriting
  * recognition and where pages go. Everything can be changed later in settings.
  */
 export class SetupWizard extends Modal {
@@ -60,37 +29,22 @@ export class SetupWizard extends Modal {
       text: "Write by hand on the ink page, flip the bookmark, and read your notes as text. Four quick steps – you can change everything later in the settings.",
     });
 
-    // ---- Step 1: Excalidraw ----
-    const step1 = this.step(contentEl, "1", "Excalidraw (required)");
+    // ---- Step 1: Excalidraw (built in) ----
+    const step1 = this.step(contentEl, "1", "Excalidraw");
     const ready = isExcalidrawReady(this.app);
-    const version = excalidrawVersion(this.app);
-    if (ready) {
-      const old = version && compareVersions(version, MIN_EXCALIDRAW_VERSION) < 0;
-      step1.createEl("p", {
-        cls: old ? "ink-warn" : "ink-ok",
-        text: old ? `Excalidraw ${version} is installed but too old – please update it.` : `✓ Excalidraw ${version ?? ""} is installed and enabled.`,
-      });
-    } else if (isExcalidrawInstalled(this.app)) {
-      step1.createEl("p", { cls: "ink-warn", text: "Excalidraw is installed but not enabled." });
+    const status = this.plugin.excalidraw.describe();
+    step1.createEl("p", { cls: status.ok ? "ink-ok" : "ink-warn", text: status.ok ? `✓ ${status.text}` : status.text });
+    if (!ready) {
       new Setting(step1).addButton((b) =>
         b
-          .setButtonText("Enable Excalidraw")
+          .setButtonText("Try again")
           .setCta()
           .onClick(async () => {
-            await enableExcalidraw(this.app);
-            window.setTimeout(() => this.render(), 800);
+            b.setDisabled(true);
+            await this.plugin.excalidraw.ensure(true);
+            this.render();
           }),
       );
-    } else {
-      step1.createEl("p", { cls: "ink-warn", text: "Ink Notebook is built on the Excalidraw plugin. Please install it first (free, from Community plugins)." });
-      new Setting(step1)
-        .addButton((b) =>
-          b
-            .setButtonText("Install Excalidraw")
-            .setCta()
-            .onClick(() => openExcalidrawInstall(this.app)),
-        )
-        .addButton((b) => b.setButtonText("I installed it – check again").onClick(() => this.render()));
     }
 
     // ---- Step 2: device ----
