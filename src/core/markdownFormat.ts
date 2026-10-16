@@ -62,24 +62,23 @@ export function escapePlainLine(text: string): string {
   return t;
 }
 
+/** A word, highlighted with ==…== if its confidence is below the threshold (0 disables). */
+export function wordWithHighlight(word: { text: string; confidence: number }, threshold: number): string {
+  if (threshold <= 0 || word.confidence >= threshold || !/^[\p{L}\p{N}'’-]+[.,;:!?]?$/u.test(word.text)) return word.text;
+  const m = /^(.*?)([.,;:!?]?)$/u.exec(word.text);
+  const core = m ? m[1] : word.text;
+  const punct = m ? m[2] : "";
+  return core ? `==${core}==${punct}` : word.text;
+}
+
 /** Highlight words below the confidence threshold with ==…== marks. */
 export function lineTextWithHighlights(line: OcrLine, threshold: number): string {
   if (threshold <= 0 || line.words.length === 0) return line.text;
   const joined = line.words.map((w) => w.text).join(" ");
   // Only rebuild from words when they reproduce the line (modulo spaces).
   if (joined.replace(/\s+/g, "") !== line.text.replace(/\s+/g, "")) return line.text;
-  let any = false;
-  const parts = line.words.map((w) => {
-    if (w.confidence < threshold && /^[\p{L}\p{N}'’-]+[.,;:!?]?$/u.test(w.text)) {
-      any = true;
-      const m = /^(.*?)([.,;:!?]?)$/u.exec(w.text);
-      const core = m ? m[1] : w.text;
-      const punct = m ? m[2] : "";
-      return core ? `==${core}==${punct}` : w.text;
-    }
-    return w.text;
-  });
-  return any ? parts.join(" ") : line.text;
+  const parts = line.words.map((w) => wordWithHighlight(w, threshold));
+  return parts.some((p, i) => p !== line.words[i].text) ? parts.join(" ") : line.text;
 }
 
 /** Join wrapped handwriting lines into one paragraph. */

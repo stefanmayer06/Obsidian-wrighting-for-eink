@@ -47,3 +47,47 @@ export function line(text: string, box: Rect, confidence = 0.95): OcrLine {
     words: parts.map((p, i) => word(p, { x: box.x + i * ww, y: box.y, w: ww * 0.9, h: box.h }, confidence)),
   };
 }
+
+/** A freedraw stroke through the given points (densified like real pen input). */
+export function poly(id: string, pts: ReadonlyArray<[number, number]>, extra: Partial<ExElement> = {}): ExElement {
+  const dense: Array<[number, number]> = [];
+  for (let i = 0; i < pts.length; i++) {
+    if (i === 0) {
+      dense.push(pts[0]);
+      continue;
+    }
+    const [x0, y0] = pts[i - 1];
+    const [x1, y1] = pts[i];
+    const n = Math.max(1, Math.ceil(Math.hypot(x1 - x0, y1 - y0) / 3));
+    for (let k = 1; k <= n; k++) dense.push([x0 + ((x1 - x0) * k) / n, y0 + ((y1 - y0) * k) / n]);
+  }
+  const [ox, oy] = dense[0];
+  const xs = dense.map((p) => p[0]);
+  const ys = dense.map((p) => p[1]);
+  return {
+    id,
+    type: "freedraw",
+    x: ox,
+    y: oy,
+    width: Math.max(...xs) - Math.min(...xs),
+    height: Math.max(...ys) - Math.min(...ys),
+    points: dense.map(([x, y]) => [x - ox, y - oy] as [number, number]),
+    strokeWidth: 1,
+    version: version++,
+    ...extra,
+  };
+}
+
+/** OCR line from explicit words (text + box). */
+export function wordsLine(words: ReadonlyArray<[string, Rect]>, confidence = 0.95): OcrLine {
+  const boxes = words.map((w) => w[1]);
+  const x = Math.min(...boxes.map((b) => b.x));
+  const y = Math.min(...boxes.map((b) => b.y));
+  const r = Math.max(...boxes.map((b) => b.x + b.w));
+  const btm = Math.max(...boxes.map((b) => b.y + b.h));
+  return {
+    text: words.map((w) => w[0]).join(" "),
+    box: { x, y, w: r - x, h: btm - y },
+    words: words.map(([text, box]) => word(text, box, confidence)),
+  };
+}

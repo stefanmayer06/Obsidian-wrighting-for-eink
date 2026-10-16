@@ -14,9 +14,12 @@ import {
   median,
   union,
   unionAll,
+  type Pt,
   type Rect,
 } from "./geometry";
 import type { OcrLine } from "./ocrTypes";
+import { detectCheckboxes } from "./checkbox";
+import { detectTables, type TableItem } from "./table";
 
 /**
  * Classification of an Excalidraw scene into the parts of a text page:
@@ -92,6 +95,8 @@ export interface ClassifiedScene {
   lines: SceneLine[];
   texts: TextItem[];
   diagrams: DiagramItem[];
+  /** Hand-drawn tables with the handwriting in their cells. */
+  tables: TableItem[];
   /** Strokes that have not been recognised yet (OCR pending/offline/not configured). */
   pendingInk: PendingInk[];
   textStrokeIds: Set<string>;
@@ -130,6 +135,34 @@ function distanceToRect(r: Rect, p: { x: number; y: number }): number {
   const dx = Math.max(r.x - p.x, 0, p.x - (r.x + r.w));
   const dy = Math.max(r.y - p.y, 0, p.y - (r.y + r.h));
   return Math.hypot(dx, dy);
+}
+
+/**
+ * The line of the word a stroke hangs from or reaches up out of: the descender of a "g"/"y"
+ * or the ascender of an "h" that OCR's word box only partly covers. The stroke has to lie
+ * within the word horizontally, start (or end) inside it and stay close to it.
+ */
+function attachedWordLine(r: Rect, pts: ReadonlyArray<Pt>, step: number, candidates: ReadonlyArray<WordRef>): number {
+  for (const c of candidates) {
+    const word = c.core;
+    if (r.h > 3.2 * word.h || r.w > c.box.w) continue;
+    // descender loops may curl a little out of the word's box
+    const overlapX = Math.min(r.x + r.w, c.box.x + c.box.w) - Math.max(r.x, c.box.x);
+    const cx = r.x + r.w / 2;
+    if (overlapX < 0.5 * r.w || cx < c.box.x || cx > c.box.x + c.box.w) continue;
+    const topInside = r.y >= c.box.y;
+    const bottomInside = bottom(r) <= bottom(c.box);
+    if (!topInside && !bottomInside) continue;
+    if ((topInside ? bottom(r) - bottom(c.box) : c.box.y - r.y) > 2 * word.h) continue;
+    let n = 0;
+    let inside = 0;
+    for (let i = 0; i < pts.length; i += step) {
+      n++;
+      if (containsPoint(c.box, pts[i])) inside++;
+    }
+    if (n > 0 && inside >= 0.4 * n) return c.lineIndex;
+  }
+  return -1;
 }
 
 /**
@@ -300,7 +333,9 @@ export function classifyScene(
         if (onLine && hitsPerLine.size === 0) hitsPerLine.set(lineCands[0].lineIndex, 1);
       }
     }
-    if (ratio >= opts.textPointRatio || (tiny && hits > 0) || onLine) {
+    const attached = ratio >= opts.textPointRatio || (tiny && hits > 0) || onLine ? -1 : attachedWordLine(r, pts, step, candidates);
+    if (attached >= 0) hitsPerLine.set(attached, Number.MAX_SAFE_INTEGER);
+    if (ratio >= opts.textPointRatio || (tiny && hits > 0) || onLine || attached >= 0) {
       textStrokeIds.add(s.id);
       let best = -1;
       let bestHits = -1;
@@ -316,7 +351,7 @@ export function classifyScene(
     }
   }
 
-  const sceneLines: SceneLine[] = usableLines.map((l, i) => ({ ...l, strokeIds: strokesOfLine[i] }));
+  let sceneLines: SceneLine[] = usableLines.map((l, i) => ({ ...l, strokeIds: strokesOfLine[i] }));
 
   // ----- 2. Explicit diagram frames ---------------------------------------------------------
   const diagrams: DiagramItem[] = [];
@@ -335,7 +370,36 @@ export function classifyScene(
     });
   }
 
-  // ----- 3. Automatic diagram clustering ---------------------------------------------------
+  // ----- 3. Hand-drawn checkboxes and tables ---------------------------------------------
+  const inDiagramFrame = (r: Rect) => diagramFrames.some((f) => containsPoint(f.rect, center(r)));
+  const recognised = strokes.filter((s) => !pendingStrokeIds.has(s.id) && !claimed.has(s.id));
+  const boxes = detectCheckboxes(sceneLines, { strokes: recognised, strokeRects, textStrokeIds, skip: inDiagramFrame });
+  sceneLines = boxes.lines;
+  for (const id of boxes.claimed) {
+    textStrokeIds.add(id);
+    claimed.add(id);
+  }
+  let textItems: TextItem[] = textEls.map((el) => ({
+    id: el.id,
+    text: elementText(el),
+    rect: elementRect(el),
+    fontSize: el.fontSize,
+  }));
+  const free = (el: ExElement) => !claimed.has(el.id);
+  const found = detectTables(sceneLines, textItems, {
+    candidates: [...recognised.filter(free), ...shapeParts.filter((el) => el.type === "line" && free(el))],
+    others: [...nonTextStrokes, ...shapeParts].filter(free),
+    strokeRects,
+    // word heights: a table line that OCR read as a tall "|" makes the line boxes huge
+    medianH: medianWordH,
+    skip: inDiagramFrame,
+  });
+  sceneLines = found.lines;
+  textItems = found.texts;
+  for (const id of found.gridIds) textStrokeIds.delete(id);
+  for (const id of found.claimed) claimed.add(id);
+
+  // ----- 4. Automatic diagram clustering ---------------------------------------------------
   const parts = [...nonTextStrokes, ...shapeParts].filter((el) => !claimed.has(el.id));
   const partRects = parts.map((el) => strokeRects.get(el.id) ?? elementRect(el));
   const groups = clusterRects(partRects, opts.diagramGap);
@@ -355,14 +419,9 @@ export function classifyScene(
     diagrams.push({ rect, elementIds: els.map((e) => e.id), labels: [], isRule: isRule || undefined });
   }
 
-  // ----- 4. Absorb labels into diagrams and merge overlapping diagrams ------------------------
+  // ----- 5. Absorb labels into diagrams and merge overlapping diagrams ------------------------
   let remainingLines = sceneLines.slice();
-  let remainingTexts: TextItem[] = textEls.map((el) => ({
-    id: el.id,
-    text: elementText(el),
-    rect: elementRect(el),
-    fontSize: el.fontSize,
-  }));
+  let remainingTexts: TextItem[] = textItems;
   const labelLines = new Map<DiagramItem, SceneLine[]>();
   const labelTexts = new Map<DiagramItem, TextItem[]>();
   // Labels are searched in the diagram's own area (not the area grown by earlier labels),
@@ -437,7 +496,7 @@ export function classifyScene(
     d.elementIds = [...new Set(d.elementIds)];
   }
 
-  // ----- 5. Pending (not yet recognised) ink -------------------------------------------------
+  // ----- 6. Pending (not yet recognised) ink -------------------------------------------------
   const pendingInk: PendingInk[] = [];
   if (pendingStrokes.length > 0) {
     const pRects = pendingStrokes.map((s) => strokeRects.get(s.id) ?? elementRect(s));
@@ -453,6 +512,7 @@ export function classifyScene(
     lines: remainingLines,
     texts: remainingTexts,
     diagrams,
+    tables: found.tables,
     pendingInk,
     textStrokeIds,
     noiseStrokeIds,

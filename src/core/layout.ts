@@ -1,6 +1,6 @@
 import type { ClassifiedScene, DiagramItem, PageInfo, PendingInk, SceneLine, TextItem } from "./classify";
 import { pageIndexFor } from "./classify";
-import { center, median, verticalOverlapRatio, type Rect } from "./geometry";
+import { bottom, center, median, union, verticalOverlapRatio, type Rect } from "./geometry";
 import { shortHash } from "./hash";
 import {
   classifyLine,
@@ -9,7 +9,9 @@ import {
   joinParagraphLines,
   lineTextWithHighlights,
   normalizeWikilinks,
+  wordWithHighlight,
 } from "./markdownFormat";
+import type { TableItem } from "./table";
 
 /**
  * Turns a classified scene into ordered Markdown blocks for the text page.
@@ -51,6 +53,7 @@ type Item =
   | { kind: "line"; rect: Rect; line: SceneLine }
   | { kind: "text"; rect: Rect; text: TextItem }
   | { kind: "diagram"; rect: Rect; diagram: DiagramItem }
+  | { kind: "table"; rect: Rect; table: TableItem }
   | { kind: "pending"; rect: Rect; pending: PendingInk };
 
 interface Section {
@@ -76,6 +79,15 @@ function cleanLine(text: string): string {
   return stripHighlightsInLinks(normalizeWikilinks(text));
 }
 
+/** A Markdown table; "|" in cells (also in [[link|alias]]) is escaped. */
+function renderTable(t: TableItem, threshold: number): string {
+  const rows = t.rows.map((cells) =>
+    cells.map((words) => cleanLine(words.map((w) => wordWithHighlight(w, threshold)).join(" ")).replace(/\|/g, "\\|")),
+  );
+  const row = (cells: string[]) => `| ${cells.join(" | ")} |`;
+  return [row(rows[0]), row(rows[0].map(() => "---")), ...rows.slice(1).map(row)].join("\n");
+}
+
 /** Build a page embed for pending/unknown ink. */
 function pageEmbed(page: PageInfo | null, opts: LayoutOptions): string {
   if (!page) return `![[${opts.drawingLink}]]`;
@@ -89,6 +101,12 @@ function sectionHeading(page: PageInfo, opts: LayoutOptions): string | null {
   }
   if (page.kind === "frame" && page.title) return `### ${page.title}`;
   return null;
+}
+
+/** A task line with the checkbox drawn in front of it (its first word, see checkbox.ts). */
+function taskBox(line: SceneLine): Rect {
+  const first = line.words[0];
+  return first && /^\[[ x]\]$/.test(first.text) ? union(line.box, first.box) : line.box;
 }
 
 function sortItems(items: Item[]): Item[] {
@@ -125,6 +143,7 @@ export function layoutTranscript(
   scene.lines.forEach((line) => place({ kind: "line", rect: line.box, line }));
   scene.texts.forEach((text) => place({ kind: "text", rect: text.rect, text }));
   scene.diagrams.forEach((diagram) => place({ kind: "diagram", rect: diagram.rect, diagram }));
+  scene.tables.forEach((table) => place({ kind: "table", rect: table.rect, table }));
   scene.pendingInk.forEach((pending) => place({ kind: "pending", rect: pending.rect, pending }));
 
   const allSections = sections.filter((s) => s.items.length > 0);
@@ -153,6 +172,14 @@ export function layoutTranscript(
         // one block: blank lines inside a text element would split it into several blocks
         const text = it.text.text.replace(/\r\n/g, "\n").replace(/\n[ \t]*\n+/g, "\n").trim();
         blocks.push({ key: `t${shortHash(`${it.text.id}\n${text}`, 8)}`, md: text });
+        i++;
+        continue;
+      }
+      if (it.kind === "table") {
+        if (it.table.rows.length > 0) {
+          const ids = it.table.elementIds.slice().sort().join(",");
+          blocks.push({ key: `g${shortHash(ids, 8)}`, md: renderTable(it.table, opts.highlightThreshold) });
+        }
         i++;
         continue;
       }
@@ -201,7 +228,13 @@ export function layoutTranscript(
         const nextList = classifyLine(next.text).kind !== "plain";
         const nextIsTall = enoughLinesForHeadings && next.box.h >= opts.headingRatio * medianH;
         const prevIsTall = enoughLinesForHeadings && prev.box.h >= opts.headingRatio * medianH;
-        const close = sameRow || (gap <= opts.paragraphGapRatio * medianH && aligned);
+        let close = sameRow || (gap <= opts.paragraphGapRatio * medianH && aligned);
+        if (!close && aligned && classifyLine(prev.text).kind === "task" && classifyLine(next.text).kind === "task") {
+          // stacked checkboxes: the boxes, not the (smaller) writing, set the spacing
+          const a = taskBox(prev);
+          const b = taskBox(next);
+          close = b.y - bottom(a) <= Math.max(opts.paragraphGapRatio * medianH, Math.min(a.h, b.h));
+        }
         if (!close || prevIsTall || nextIsTall) break;
         if (isList) {
           // Lists: list lines start new items; indented plain lines continue the current item.

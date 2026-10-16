@@ -84,6 +84,13 @@ const injectHelpers = () => ev(() => {
       for (let i = 0; i <= n; i++) pts.push([(w * i) / n, i % 2 ? h : h * 0.15]);
       return t.freedraw(ea, x, y, w, h, pts);
     },
+    /** A freedraw stroke through absolute scene points. */
+    path(ea, pts) {
+      const xs = pts.map((p) => p[0]);
+      const ys = pts.map((p) => p[1]);
+      const [x, y] = pts[0];
+      return t.freedraw(ea, x, y, Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys), pts.map(([px, py]) => [px - x, py - y]));
+    },
     dash(ea, x, y, w) {
       return t.freedraw(ea, x, y, w, 2, [[0, 0], [w / 2, 1], [w, 2]]);
     },
@@ -398,6 +405,58 @@ steps.editCard = async () => {
     return scene.elements.filter((e) => e.customData?.inkNotebook?.role === "typed").length;
   }, state.drawing);
   check("still exactly one typed card", card === 1, card);
+};
+
+steps.tasksTables = async () => {
+  console.log("\n▶ hand-drawn checkboxes and a table become tasks and a Markdown table");
+  await ev(() => app.commands.executeCommandById("ink-notebook:new-page"));
+  const drawing = await waitView("excalidraw");
+  const text = drawing.replace(/\.excalidraw\.md$/, ".md");
+  await ev(async () => {
+    const v = __t.view();
+    const ea = __t.ea(v);
+    // a ticked box in front of "get the", an empty one in front of "milk"
+    __t.box(ea, 100, 600, 40, 40);
+    __t.path(ea, [[108, 615], [117, 632], [130, 610], [150, 580]]);
+    __t.word(ea, 160, 605, 70, 30);
+    __t.word(ea, 245, 605, 60, 30);
+    __t.box(ea, 100, 670, 40, 40);
+    __t.word(ea, 160, 675, 90, 30);
+    // a table: a header line, two column lines, the headings above the line and one row below it
+    __t.path(ea, [[100, 1200], [400, 1201], [700, 1203]]);
+    __t.path(ea, [[300, 1150], [301, 1300], [300, 1450]]);
+    __t.path(ea, [[500, 1150], [500, 1300], [501, 1450]]);
+    for (const x of [150, 350, 550]) {
+      __t.word(ea, x, 1160, 80, 30);
+      __t.word(ea, x, 1250, 60, 30);
+    }
+    await ea.addElementsToView(false, true, true);
+    ea.destroy();
+  });
+  await page.waitForTimeout(800);
+  await shot("tasks-tables-ink.png");
+  // OCR reads the drawn boxes as "D" and "0"; the table lines are a drawing to it
+  await mock({ responses: [["D get the", "0 milk"], ["a b c", "1 2 3"]] });
+  await clickBookmark("text");
+  await waitView("markdown", text);
+  const md = await ev((p) => __t.read(p), text);
+  console.log("----- text page -----\n" + md + "\n---------------------");
+  check("hand-drawn boxes become tasks (ticked = done)", md.includes("- [x] get the\n- [ ] milk"), md);
+  check("hand-drawn table becomes a Markdown table", md.includes("| a | b | c |\n| --- | --- | --- |\n| 1 | 2 | 3 |"), md);
+  check("neither is embedded as a picture", !md.includes("#^area="), md);
+  const rendered = await ev(async () => {
+    await __t.waitFor(() => document.querySelector(".workspace-leaf.mod-active .markdown-reading-view table"), 5000, "table");
+    const root = document.querySelector(".workspace-leaf.mod-active .markdown-reading-view");
+    const boxes = [...root.querySelectorAll("input.task-list-item-checkbox")];
+    return { boxes: boxes.length, checked: boxes.filter((b) => b.checked).length, headers: [...root.querySelectorAll("table th")].map((th) => th.textContent.trim()) };
+  });
+  check("reading view shows tickable checkboxes and a table", rendered.boxes === 2 && rendered.checked === 1 && rendered.headers.join() === "a,b,c", JSON.stringify(rendered));
+  await shot("tasks-tables-text.png");
+  // back to the main page for the next steps
+  if (state.text) {
+    await ev((p) => app.workspace.getMostRecentLeaf().openFile(app.vault.getAbstractFileByPath(p)), state.text);
+    await waitView("markdown", state.text);
+  }
 };
 
 steps.offline = async () => {
@@ -1100,7 +1159,7 @@ steps.collision = async () => {
   await setWindow(800, 1200);
 };
 
-const order = ["setup", "createPage", "write", "flipToText", "editText", "flipToInk", "flipBack", "editCard", "updateTyped", "undoSafety", "addPage", "markDiagram", "offline", "v3", "errors", "cloud", "livePreview", "wizardTest", "pdf", "image", "rename", "eink", "reopen", "ownExcalidraw", "folders", "paperPages", "renameSub", "collision", "mobile"];
+const order = ["setup", "createPage", "write", "flipToText", "editText", "flipToInk", "flipBack", "editCard", "updateTyped", "undoSafety", "addPage", "markDiagram", "tasksTables", "offline", "v3", "errors", "cloud", "livePreview", "wizardTest", "pdf", "image", "rename", "eink", "reopen", "ownExcalidraw", "folders", "paperPages", "renameSub", "collision", "mobile"];
 for (const name of order) {
   if (only && !only.split(",").includes(name) && name !== "setup") continue;
   try {
