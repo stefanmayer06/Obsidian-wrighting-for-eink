@@ -1,19 +1,23 @@
 import { Menu, setIcon, type WorkspaceLeaf } from "obsidian";
 import type InkNotebookPlugin from "../main";
 import { EXCALIDRAW_VIEW_TYPE } from "./excalidrawBridge";
+import { DockLayout } from "./dockLayout";
 
 /**
  * The bookmark switcher: two ribbon bookmarks on the right edge of every ink
  * page – "Ink" (drawing) and "Text" (transcript). Tapping the other ribbon
- * flips the page in the same tab.
+ * flips the page in the same tab. On the ink page a third ribbon adds a page.
+ * The stack moves out of the way of toolbars and panels (see DockLayout).
  */
 
 interface BookmarkEls {
   root: HTMLElement;
   ink: HTMLButtonElement;
   text: HTMLButtonElement;
+  add: HTMLButtonElement;
   badge: HTMLElement;
   textLabel: HTMLElement;
+  layout: DockLayout;
 }
 
 const STATE_LABEL: Record<string, string> = {
@@ -50,6 +54,7 @@ export class BookmarkManager {
   remove(leaf: WorkspaceLeaf): void {
     const el = this.els.get(leaf);
     if (el) {
+      el.layout.destroy();
       el.root.remove();
       this.els.delete(leaf);
     }
@@ -84,6 +89,7 @@ export class BookmarkManager {
 
     let els = this.els.get(leaf);
     if (!els || !container.contains(els.root)) {
+      els?.layout.destroy();
       els?.root.remove();
       els = this.build(leaf, container);
       this.els.set(leaf, els);
@@ -92,9 +98,11 @@ export class BookmarkManager {
     container.toggleClass("ink-text-page", info.role === "text");
     container.toggleClass("ink-ink-page", info.role === "ink");
 
-    const { root, ink, text, badge, textLabel } = els;
-    root.className = `ink-bookmarks ink-pos-${settings.bookmarkPosition}`;
+    const { root, ink, text, add, badge, textLabel } = els;
+    const keep = ["is-compact", "is-cramped"].filter((c) => root.hasClass(c));
+    root.className = ["ink-bookmarks", `ink-pos-${settings.bookmarkPosition}`, ...keep].join(" ");
     const onInk = info.role === "ink";
+    add.toggleClass("is-hidden", !onInk);
     ink.toggleClass("is-active", onInk);
     text.toggleClass("is-active", !onInk);
     ink.setAttr("aria-selected", String(onInk));
@@ -113,23 +121,28 @@ export class BookmarkManager {
     const tip = state ? STATE_LABEL[state] ?? "" : "";
     text.setAttr("title", tip || text.getAttr("aria-label") || "");
     root.toggleClass("is-busy", busy);
+    els.layout.schedule(0);
   }
 
   private build(leaf: WorkspaceLeaf, container: HTMLElement): BookmarkEls {
     const root = container.createDiv({ cls: "ink-bookmarks" });
-    root.setAttr("role", "tablist");
-    root.setAttr("aria-label", "Ink page / text page");
-    const make = (cls: string, icon: string, label: string) => {
-      const b = root.createEl("button", { cls: `ink-bookmark ${cls}` });
-      b.setAttr("role", "tab");
+    const tabs = root.createDiv({ cls: "ink-bookmark-tabs" });
+    tabs.setAttr("role", "tablist");
+    tabs.setAttr("aria-label", "Ink page / text page");
+    const make = (parent: HTMLElement, cls: string, icon: string, label: string, role: string) => {
+      const b = parent.createEl("button", { cls: `ink-bookmark ${cls}` });
+      b.setAttr("role", role);
       b.setAttr("type", "button");
       const iconEl = b.createSpan({ cls: "ink-bookmark-icon" });
       setIcon(iconEl, icon);
       const labelEl = b.createSpan({ cls: "ink-bookmark-label", text: label });
       return { b, labelEl };
     };
-    const ink = make("ink-bookmark-ink", "pencil", "Ink");
-    const text = make("ink-bookmark-text", "file-text", "Text");
+    const ink = make(tabs, "ink-bookmark-ink", "pencil", "Ink", "tab");
+    const text = make(tabs, "ink-bookmark-text", "file-text", "Text", "tab");
+    const add = make(root, "ink-bookmark-add", "plus", "Page", "button");
+    add.b.setAttr("aria-label", "Add a page");
+    add.b.setAttr("title", "Add a page (ruled, dotted, squared, …)");
     const badge = text.b.createSpan({ cls: "ink-bookmark-badge" });
 
     // a long press opens the menu; the click/contextmenu events that follow it are ignored
@@ -148,6 +161,12 @@ export class BookmarkManager {
     };
     ink.b.addEventListener("click", onClick("ink"));
     text.b.addEventListener("click", onClick("text"));
+    add.b.addEventListener("click", (evt) => {
+      evt.preventDefault();
+      evt.stopPropagation();
+      if (justLongPressed() || this.busy.has(leaf)) return;
+      void this.plugin.switcher.addPageInteractive(leaf).catch((e) => this.plugin.switcher.reportError("Could not add a page", e));
+    });
     // keep pen/touch input on the bookmarks from reaching the canvas below
     for (const evName of ["pointerdown", "touchstart", "mousedown"] as const) {
       root.addEventListener(evName, (e) => e.stopPropagation(), { passive: true });
@@ -177,7 +196,8 @@ export class BookmarkManager {
     };
     root.addEventListener("touchend", cancel, { passive: true });
     root.addEventListener("touchmove", cancel, { passive: true });
-    return { root, ink: ink.b, text: text.b, badge, textLabel: text.labelEl };
+    const layout = new DockLayout(container, root, () => this.plugin.settings.bookmarkPosition);
+    return { root, ink: ink.b, text: text.b, add: add.b, badge, textLabel: text.labelEl, layout };
   }
 
   private showMenu(leaf: WorkspaceLeaf, evt: MouseEvent): void {
@@ -204,6 +224,21 @@ export class BookmarkManager {
         .setIcon("columns")
         .onClick(() => void this.plugin.switcher.openSideBySide(leaf)),
     );
+    if (info.role === "ink") {
+      menu.addSeparator();
+      menu.addItem((i) =>
+        i
+          .setTitle("Add a page…")
+          .setIcon("file-plus-2")
+          .onClick(() => void this.plugin.switcher.addPageInteractive(leaf)),
+      );
+      menu.addItem((i) =>
+        i
+          .setTitle("Change the paper of this page…")
+          .setIcon("layout-template")
+          .onClick(() => void this.plugin.switcher.changePaperInteractive(leaf)),
+      );
+    }
     menu.addSeparator();
     const st = this.plugin.sync.statusOf(info.pair.drawing.path);
     if (st?.message) menu.addItem((i) => i.setTitle(`Last error: ${st.message}`).setIcon("alert-triangle").setDisabled(true));

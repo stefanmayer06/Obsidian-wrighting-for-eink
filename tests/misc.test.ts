@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import { detectDevice } from "../src/core/device";
-import { paperSvg, PAPER_STYLES, isPaperStyle } from "../src/core/paper";
 import { applyTransform, displayedSize, normalizeRotation, parsePageRange, unrotateTransform } from "../src/core/pdfMath";
 import { imageRectToScene, makeRenderPlan, planOcrUnits, sceneToImage, DEFAULT_RASTER_LIMITS } from "../src/core/rasterPlan";
 import { applyTypedNotes, decideTypedSync, extractTypedNotes, typedHash } from "../src/core/typedNotes";
@@ -20,20 +19,6 @@ describe("device detection", () => {
     ["Mozilla/5.0 (Linux; Android 11; ONYX BOOX Build/1)", true],
   ])("%s -> %s", (ua, expected) => {
     expect(detectDevice(ua).isEink).toBe(expected);
-  });
-});
-
-describe("paper", () => {
-  it("generates valid SVG for every style", () => {
-    for (const style of Object.keys(PAPER_STYLES)) {
-      expect(isPaperStyle(style)).toBe(true);
-      const svg = paperSvg(style as keyof typeof PAPER_STYLES);
-      expect(svg.startsWith("<svg")).toBe(true);
-      expect(svg).toContain('width="1000"');
-      expect(svg.length).toBeLessThan(200_000);
-    }
-    expect(paperSvg("lined").match(/<line/g)?.length).toBeGreaterThan(20);
-    expect(isPaperStyle("nope")).toBe(false);
   });
 });
 

@@ -1,7 +1,10 @@
-import { MarkdownView, Notice, normalizePath, TFile, type WorkspaceLeaf } from "obsidian";
+import { MarkdownView, Notice, normalizePath, TAbstractFile, TFile, TFolder, type WorkspaceLeaf } from "obsidian";
 import type InkNotebookPlugin from "../main";
-import { PAGE_HEIGHT, PAGE_WIDTH, paperFileName, paperSvg, type PaperStyle } from "../core/paper";
-import { INK_CUSTOM_DATA_KEY, type InkCustomData } from "../types/excalidraw";
+import { normalizePaperSpec, paperFileName, paperLabel, paperSize, paperSvg, type PaperSpec } from "../core/paper";
+import { collectPages, elementsBelow, PAGE_GAP, pageAt, planPageInsert, type PagePosition, type PageRef } from "../core/pages";
+import { cleanSubfolder, homeFolder, isInkSubfolder, joinPath } from "../core/folders";
+import { bottom, elementRect } from "../core/geometry";
+import { getInkData, INK_CUSTOM_DATA_KEY, type ExElement, type InkCustomData } from "../types/excalidraw";
 import {
   ExcalidrawMissingError,
   findExcalidrawView,
@@ -10,12 +13,15 @@ import {
   isExcalidrawView,
   release,
   saveView,
+  viewElements,
   waitForExcalidrawView,
   EXCALIDRAW_VIEW_TYPE,
   type EA,
+  type ExcalidrawViewLike,
 } from "./excalidrawBridge";
 import { FM_DRAWING_TO_TEXT } from "./pairs";
 import { TextPromptModal } from "./modals";
+import { PaperPickerModal } from "./paperPicker";
 
 /**
  * Page flipping and page creation – the user-facing workflows.
@@ -170,27 +176,65 @@ export class PageSwitcher {
 
   // ------------------------------------------------------------------ creating pages
 
-  /** Make sure the SVG for a paper style exists in the vault; returns it. */
-  async ensurePaperFile(style: PaperStyle): Promise<TFile> {
-    const folder = normalizePath(`${this.plugin.settings.folder || "Ink"}/assets`);
+  /**
+   * Folders for a new page: the text page goes into `textFolder`, the drawing and
+   * its paper into `inkFolder` (the ink subfolder of `textFolder`, or the same folder).
+   * `context` is a folder path, a folder, or a file whose folder counts as "current".
+   */
+  pageFolders(context?: TAbstractFile | string | null): { textFolder: string; inkFolder: string } {
+    const s = this.plugin.settings;
+    const sub = cleanSubfolder(s.inkSubfolder);
+    const fixed = joinPath(s.folder || "Ink");
+    let home: string;
+    if (typeof context === "string") home = joinPath(context);
+    else if (context instanceof TFolder) home = joinPath(context.path);
+    else if (s.pageLocation === "current") {
+      const file = context instanceof TFile ? context : this.app.workspace.getActiveFile();
+      home = file ? this.homeFolderOf(file) : fixed;
+    } else home = fixed;
+    return { textFolder: home, inkFolder: sub ? joinPath(home, sub) : home };
+  }
+
+  /** The folder a file "lives in" for new pages (never an ink subfolder). */
+  private homeFolderOf(file: TFile): string {
+    const pairs = this.plugin.pairs;
+    const text = pairs.isDrawing(file) ? pairs.textFor(file) : null;
+    return homeFolder(joinPath((text ?? file).parent?.path ?? ""), cleanSubfolder(this.plugin.settings.inkSubfolder));
+  }
+
+  /** Where the paper SVGs for drawings in `drawingFolder` are kept. */
+  paperFolderFor(drawingFolder: string): string {
+    const folder = joinPath(drawingFolder);
+    return isInkSubfolder(folder, cleanSubfolder(this.plugin.settings.inkSubfolder)) ? folder : joinPath(folder, "assets");
+  }
+
+  /** Make sure the SVG for a paper exists in `folder`; returns it. */
+  async ensurePaperFile(spec: PaperSpec, folder: string): Promise<TFile> {
     await this.plugin.pairs.ensureFolder(folder);
-    const path = normalizePath(`${folder}/${paperFileName(style)}`);
+    const path = normalizePath(joinPath(folder, paperFileName(spec)));
     const existing = this.app.vault.getAbstractFileByPath(path);
     if (existing instanceof TFile) return existing;
-    return this.app.vault.create(path, paperSvg(style));
+    try {
+      return await this.app.vault.create(path, paperSvg(spec));
+    } catch (e) {
+      // created concurrently (e.g. by sync)
+      const f = this.app.vault.getAbstractFileByPath(path);
+      if (f instanceof TFile) return f;
+      throw e;
+    }
   }
 
   /** Add a paper page to an EA workbench at the given position. */
-  async addPaper(ea: EA, style: PaperStyle, x: number, y: number): Promise<string | null> {
-    if (style === "blank") return null;
-    const file = await this.ensurePaperFile(style);
+  async addPaper(ea: EA, spec: PaperSpec, x: number, y: number, paperFolder: string): Promise<string | null> {
+    const file = await this.ensurePaperFile(spec, paperFolder);
     const id = await ea.addImage(x, y, file, false, false);
     if (!id) return null;
+    const { width, height } = paperSize(spec);
     const el = ea.getElement(id);
-    el.width = PAGE_WIDTH;
-    el.height = PAGE_HEIGHT;
+    el.width = width;
+    el.height = height;
     el.locked = true;
-    el.customData = { ...(el.customData ?? {}), [INK_CUSTOM_DATA_KEY]: { role: "paper" } satisfies InkCustomData };
+    el.customData = { ...(el.customData ?? {}), [INK_CUSTOM_DATA_KEY]: { role: "paper", paper: { ...spec } } satisfies InkCustomData };
     return id;
   }
 
@@ -207,25 +251,51 @@ export class PageSwitcher {
     return TextPromptModal.ask(this.app, "Name of the new ink page", name);
   }
 
+  private async rememberPaper(spec: PaperSpec): Promise<void> {
+    this.plugin.settings.paper = { ...spec };
+    await this.plugin.saveSettings();
+  }
+
   /**
    * Create a new ink page (drawing + text page).
    * `build` can add content (e.g. PDF pages) to the EA workbench before the file is written.
+   * Without `paper` or `build`, the paper picker opens (if enabled in the settings).
    */
   async createPage(opts: {
     name?: string;
+    /** Folder for the text page (the drawing goes into its ink subfolder). */
     folder?: string;
-    paper?: PaperStyle;
+    /** A file or folder that counts as "current" for choosing the folder. */
+    context?: TAbstractFile | null;
+    paper?: PaperSpec;
     open?: boolean;
     leaf?: WorkspaceLeaf;
     extraTextFrontmatter?: Record<string, string>;
-    build?: (ea: EA) => Promise<void>;
+    build?: (ea: EA, folders: { textFolder: string; inkFolder: string }) => Promise<void>;
   } = {}): Promise<{ drawing: TFile; text: TFile } | null> {
     if (!this.requireExcalidraw()) return null;
-    const name0 = opts.name ?? (await this.choosePageName());
+    const settings = this.plugin.settings;
+    // decide the folder first: the picker modal changes the active leaf on some platforms
+    const { textFolder, inkFolder } = this.pageFolders(opts.folder ?? opts.context ?? null);
+    let name0: string | null = opts.name ?? null;
+    let paper = opts.paper ?? null;
+    if (!opts.build && !paper && settings.askForPaper) {
+      const choice = await PaperPickerModal.pick(this.app, {
+        mode: "new",
+        initial: settings.paper,
+        name: !opts.name && settings.askForPageName ? this.defaultPageName() : undefined,
+      });
+      if (!choice) return null;
+      paper = choice.spec;
+      if (choice.name) name0 = choice.name;
+      if (choice.makeDefault) await this.rememberPaper(choice.spec);
+    }
+    name0 ??= await this.choosePageName();
     if (!name0) return null;
-    const folder = normalizePath(opts.folder ?? (this.plugin.settings.folder || "Ink"));
-    await this.plugin.pairs.ensureFolder(folder);
-    const name = this.plugin.pairs.uniqueBaseName(folder, name0);
+    await this.plugin.pairs.ensureFolder(textFolder);
+    await this.plugin.pairs.ensureFolder(inkFolder);
+    const name = this.plugin.pairs.uniqueBaseName(textFolder, inkFolder, name0);
+    const textPath = normalizePath(joinPath(textFolder, `${name}.md`));
 
     const ea = getEA(this.app);
     let drawingPath: string;
@@ -236,15 +306,15 @@ export class PageSwitcher {
       ea.style.strokeColor = "#1e1e1e";
       ea.style.strokeWidth = 1;
       ea.style.roughness = 0;
-      if (opts.build) await opts.build(ea);
-      else await this.addPaper(ea, opts.paper ?? this.plugin.settings.paperStyle, 0, 0);
+      if (opts.build) await opts.build(ea, { textFolder, inkFolder });
+      else await this.addPaper(ea, paper ?? settings.paper, 0, 0, this.paperFolderFor(inkFolder));
       drawingPath = await ea.create({
         filename: name,
-        foldername: folder,
+        foldername: inkFolder || "/",
         silent: true,
         frontmatterKeys: {
           "excalidraw-plugin": "parsed",
-          [FM_DRAWING_TO_TEXT]: JSON.stringify(`[[${name}]]`),
+          [FM_DRAWING_TO_TEXT]: JSON.stringify(`[[${textPath.replace(/\.md$/, "")}]]`),
         },
       });
     } finally {
@@ -252,7 +322,6 @@ export class PageSwitcher {
     }
     const drawing = await this.waitForFile(drawingPath);
     if (!drawing) throw new Error(`The drawing ${drawingPath} was not created`);
-    const textPath = normalizePath(`${folder}/${name}.md`);
     const text = await this.app.vault.create(textPath, this.plugin.pairs.textPageContent(drawing, textPath, opts.extraTextFrontmatter));
     if (opts.open !== false) {
       const leaf = opts.leaf ?? this.app.workspace.getLeaf(false);
@@ -271,32 +340,126 @@ export class PageSwitcher {
     return null;
   }
 
-  /** Add another paper page below the existing pages of the open drawing. */
-  async addPaperPage(leaf: WorkspaceLeaf): Promise<void> {
-    if (!this.requireExcalidraw()) return;
+  // ------------------------------------------------------------------ pages of an ink page
+
+  private inkView(leaf: WorkspaceLeaf): ExcalidrawViewLike | null {
+    if (!this.requireExcalidraw()) return null;
     const view = leaf.view;
-    if (!isExcalidrawView(view)) {
+    if (!isExcalidrawView(view) || !view.file) {
       new Notice("Open the ink page first.");
-      return;
+      return null;
     }
-    const style = this.plugin.settings.paperStyle === "blank" ? "lined" : this.plugin.settings.paperStyle;
+    return view;
+  }
+
+  /** The page in the middle of the screen. */
+  private currentPage(view: ExcalidrawViewLike, pages: PageRef[]): PageRef | null {
+    const st = view.excalidrawAPI?.getAppState?.();
+    if (!st || pages.length === 0) return pages[pages.length - 1] ?? null;
+    const zoom = st.zoom?.value || 1;
+    return pageAt(pages, { x: st.width / 2 / zoom - st.scrollX, y: st.height / 2 / zoom - st.scrollY });
+  }
+
+  /** Paper of the page on screen (or the last paper page), to suggest for a new page. */
+  private suggestedPaper(pages: PageRef[], current: PageRef | null): PaperSpec {
+    const lastPaper = [...pages].reverse().find((p) => p.paper)?.paper;
+    return current?.paper ?? lastPaper ?? this.plugin.settings.paper;
+  }
+
+  /** "Add a page": choose paper and position, then add it. */
+  async addPageInteractive(leaf: WorkspaceLeaf): Promise<void> {
+    const view = this.inkView(leaf);
+    if (!view) return;
+    const pages = collectPages(viewElements(view));
+    const choice = await PaperPickerModal.pick(this.app, {
+      mode: "add",
+      initial: this.suggestedPaper(pages, this.currentPage(view, pages)),
+      canInsert: pages.length > 0,
+    });
+    if (!choice) return;
+    if (choice.makeDefault) await this.rememberPaper(choice.spec);
+    await this.addPaperPage(leaf, { spec: choice.spec, position: choice.position });
+  }
+
+  /**
+   * Add a paper page after/before the page on screen or at the end. Pages (and
+   * writing) below the new page move down to make room.
+   */
+  async addPaperPage(leaf: WorkspaceLeaf, opts: { spec?: PaperSpec; position?: PagePosition } = {}): Promise<void> {
+    const view = this.inkView(leaf);
+    if (!view?.file) return;
+    const els = viewElements(view);
+    const pages = collectPages(els);
+    const current = this.currentPage(view, pages);
+    const spec = normalizePaperSpec(opts.spec ?? this.suggestedPaper(pages, current));
+    const { height } = paperSize(spec);
+    const content = els.filter((e) => !getInkData(e));
+    const contentBottom = content.length > 0 ? Math.max(...content.map((e) => bottom(elementRect(e)))) : null;
+    const plan = planPageInsert(pages, current, opts.position ?? "end", height, contentBottom);
+    const moving = plan.threshold === null ? new Set<string>() : elementsBelow(els, plan.threshold);
     const ea = getEA(this.app, view);
     try {
-      const els = ea.getViewElements().filter((e) => !e.isDeleted);
-      const pages = els.filter((e) => {
-        const role = (e.customData?.[INK_CUSTOM_DATA_KEY] as InkCustomData | undefined)?.role;
-        return role === "paper" || role === "pdf-page" || role === "image-page";
-      });
-      const bottomY = (pages.length > 0 ? pages : els).reduce((acc, e) => Math.max(acc, e.y + e.height), 0);
-      const x = pages.length > 0 ? Math.min(...pages.map((p) => p.x)) : 0;
-      const id = await this.addPaper(ea, style, x, els.length > 0 ? bottomY + 80 : 0);
+      this.shiftOnWorkbench(ea, els, moving, plan.shift);
+      const id = await this.addPaper(ea, spec, plan.x, plan.y, this.paperFolderFor(view.file.parent?.path ?? ""));
       if (!id) return;
       await ea.addElementsToView(false, true, false);
       const added = ea.getViewElements().filter((e) => e.id === id);
       if (added.length > 0) ea.viewZoomToElements?.(false, added);
-      new Notice("New page added.");
+      new Notice(moving.size > 0 ? "Page inserted." : "New page added.");
     } finally {
       release(ea);
     }
+  }
+
+  /** "Change paper": swap the template of the page on screen (writing stays). */
+  async changePaperInteractive(leaf: WorkspaceLeaf): Promise<void> {
+    const view = this.inkView(leaf);
+    if (!view) return;
+    const pages = collectPages(viewElements(view));
+    const current = this.currentPage(view, pages);
+    if (!current || current.role !== "paper") {
+      new Notice(current ? "This page is a PDF page or an image – its background can't be changed." : "This ink page has no paper pages yet – add one first.");
+      return;
+    }
+    const choice = await PaperPickerModal.pick(this.app, { mode: "change", initial: this.suggestedPaper(pages, current) });
+    if (!choice) return;
+    if (choice.makeDefault) await this.rememberPaper(choice.spec);
+    await this.changePaper(leaf, choice.spec, current.id);
+  }
+
+  async changePaper(leaf: WorkspaceLeaf, spec: PaperSpec, pageId?: string): Promise<void> {
+    const view = this.inkView(leaf);
+    if (!view?.file) return;
+    const els = viewElements(view);
+    const pages = collectPages(els);
+    const page = pageId ? pages.find((p) => p.id === pageId) : this.currentPage(view, pages);
+    const old = page && els.find((e) => e.id === page.id);
+    if (!page || !old || page.role !== "paper") return;
+    const size = paperSize(spec);
+    // a page that gets taller/shorter (orientation) moves the pages below it
+    const next = pages[pages.findIndex((p) => p.id === page.id) + 1];
+    const space = next ? Math.max(0, next.rect.y - bottom(page.rect)) : PAGE_GAP;
+    const shift = size.height - page.rect.h;
+    const moving = shift !== 0 ? elementsBelow(els, bottom(page.rect) + Math.min(space, PAGE_GAP) / 2) : new Set<string>();
+    const ea = getEA(this.app, view);
+    try {
+      this.shiftOnWorkbench(ea, els, moving, shift);
+      ea.copyViewElementsToEAforEditing([old]);
+      ea.getElement(old.id).isDeleted = true;
+      const id = await this.addPaper(ea, spec, page.rect.x, page.rect.y, this.paperFolderFor(view.file.parent?.path ?? ""));
+      if (!id) return;
+      await ea.addElementsToView(false, true, false);
+      new Notice(`Paper changed to ${paperLabel(spec)}.`);
+    } finally {
+      release(ea);
+    }
+  }
+
+  /** Put the elements in `ids` on the workbench, moved down by `dy` (they keep their place in the stacking order). */
+  private shiftOnWorkbench(ea: EA, els: ReadonlyArray<ExElement>, ids: ReadonlySet<string>, dy: number): void {
+    if (ids.size === 0 || dy === 0) return;
+    const moving = els.filter((e) => ids.has(e.id));
+    ea.copyViewElementsToEAforEditing(moving);
+    for (const e of moving) ea.getElement(e.id).y = e.y + dy;
   }
 }

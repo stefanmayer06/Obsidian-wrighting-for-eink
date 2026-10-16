@@ -1,13 +1,15 @@
 import { App, normalizePath, TAbstractFile, TFile, TFolder } from "obsidian";
 import { isExcalidrawFile } from "./excalidrawBridge";
 import { renderRegion } from "../core/transcript";
+import { cleanSubfolder, homeFolder, joinPath, parentPath, partnerTarget } from "../core/folders";
 
 /**
  * An "ink page" is a pair of files:
- *   - the drawing      `Name.excalidraw.md` (frontmatter `ink-text: "[[Name]]"`)
- *   - the text page    `Name.md`            (frontmatter `ink-drawing: "[[Name.excalidraw]]"`)
- * The frontmatter links make the pair visible in the graph/backlinks and let
- * us find the partner even after renames.
+ *   - the drawing      `Attachments/Name.excalidraw.md` (frontmatter `ink-text: "[[Folder/Name]]"`)
+ *   - the text page    `Name.md`  (frontmatter `ink-drawing: "[[Folder/Attachments/Name.excalidraw]]"`)
+ * The drawing sits in the ink subfolder of the text page's folder (or next to it).
+ * The frontmatter links use full paths – names like "Week 1" repeat across folders –
+ * make the pair visible in the graph/backlinks and let us find the partner after renames.
  */
 
 export const FM_TEXT_TO_DRAWING = "ink-drawing";
@@ -34,8 +36,26 @@ export function drawingBaseName(file: TFile): string {
   return file.basename.replace(/\.excalidraw$/i, "");
 }
 
+/** Folder path of a file ("" for the vault root). */
+function folderOf(file: TAbstractFile): string {
+  const p = file.parent?.path ?? "";
+  return p === "/" ? "" : p;
+}
+
 export class PairManager {
-  constructor(private app: App) {}
+  constructor(
+    private app: App,
+    private inkSubfolder: () => string = () => "",
+  ) {}
+
+  private get sub(): string {
+    return cleanSubfolder(this.inkSubfolder());
+  }
+
+  private fileAt(path: string): TFile | null {
+    const f = this.app.vault.getAbstractFileByPath(normalizePath(path));
+    return f instanceof TFile ? f : null;
+  }
 
   private resolve(link: string | null, from: TFile): TFile | null {
     if (!link) return null;
@@ -59,9 +79,13 @@ export class PairManager {
     const fm = this.app.metadataCache.getFileCache(text)?.frontmatter;
     const viaLink = this.resolve(linkFromFrontmatter(fm?.[FM_TEXT_TO_DRAWING]), text);
     if (viaLink && this.isDrawing(viaLink)) return viaLink;
-    // convention fallback: same folder, Name.excalidraw.md
-    const candidate = this.app.vault.getAbstractFileByPath(normalizePath(`${text.parent?.path ?? ""}/${text.basename}.excalidraw.md`));
-    return candidate instanceof TFile && this.isDrawing(candidate) ? candidate : null;
+    // convention fallback: Name.excalidraw.md next to the text page or in its ink subfolder
+    const folder = folderOf(text);
+    for (const dir of this.sub ? [folder, joinPath(folder, this.sub)] : [folder]) {
+      const candidate = this.fileAt(joinPath(dir, `${text.basename}.excalidraw.md`));
+      if (candidate && this.isDrawing(candidate)) return candidate;
+    }
+    return null;
   }
 
   /** The text page for a drawing (if any). */
@@ -69,10 +93,12 @@ export class PairManager {
     const fm = this.app.metadataCache.getFileCache(drawing)?.frontmatter;
     const viaLink = this.resolve(linkFromFrontmatter(fm?.[FM_DRAWING_TO_TEXT]), drawing);
     if (viaLink && viaLink.extension === "md" && !this.isDrawing(viaLink)) return viaLink;
-    const candidate = this.app.vault.getAbstractFileByPath(normalizePath(`${drawing.parent?.path ?? ""}/${drawingBaseName(drawing)}.md`));
-    if (candidate instanceof TFile && this.isTextPage(candidate)) {
-      const back = this.drawingFor(candidate);
-      if (back?.path === drawing.path) return candidate;
+    // convention fallback: Name.md next to the drawing, or in the home folder of its ink subfolder
+    const folder = folderOf(drawing);
+    const home = homeFolder(folder, this.sub);
+    for (const dir of home !== folder ? [folder, home] : [folder]) {
+      const candidate = this.fileAt(joinPath(dir, `${drawingBaseName(drawing)}.md`));
+      if (candidate && this.isTextPage(candidate) && this.drawingFor(candidate)?.path === drawing.path) return candidate;
     }
     return null;
   }
@@ -92,8 +118,13 @@ export class PairManager {
     return null;
   }
 
+  /**
+   * Link text for `file` used from `sourcePath`: the short form for a file next to the
+   * source, the full path otherwise (a short "Week 1" link could resolve to another folder).
+   */
   linkText(file: TFile, sourcePath: string): string {
-    return this.app.metadataCache.fileToLinktext(file, sourcePath, true);
+    if (parentPath(file.path) === parentPath(sourcePath)) return this.app.metadataCache.fileToLinktext(file, sourcePath, true);
+    return pairLink(file);
   }
 
   async ensureFolder(path: string): Promise<void> {
@@ -117,21 +148,22 @@ export class PairManager {
     }
   }
 
-  /** A base name that is free for both the drawing and the text page. */
-  uniqueBaseName(folder: string, base: string): string {
+  /** A base name that is free for both the text page (in `textFolder`) and the drawing (in `inkFolder`). */
+  uniqueBaseName(textFolder: string, inkFolder: string, base: string): string {
     const clean = base.replace(/[\\/:*?"<>|#^[\]]/g, "-").trim() || "Ink page";
     let name = clean;
     let n = 2;
     const exists = (nm: string) =>
-      !!this.app.vault.getAbstractFileByPath(normalizePath(`${folder}/${nm}.md`)) ||
-      !!this.app.vault.getAbstractFileByPath(normalizePath(`${folder}/${nm}.excalidraw.md`));
+      !!this.app.vault.getAbstractFileByPath(normalizePath(joinPath(textFolder, `${nm}.md`))) ||
+      !!this.app.vault.getAbstractFileByPath(normalizePath(joinPath(inkFolder, `${nm}.excalidraw.md`))) ||
+      !!this.app.vault.getAbstractFileByPath(normalizePath(joinPath(inkFolder, `${nm}.md`)));
     while (exists(name)) name = `${clean} ${n++}`;
     return name;
   }
 
   /** Initial content of a text page. */
   textPageContent(drawing: TFile, textPath: string, extraFrontmatter: Record<string, string> = {}): string {
-    const link = this.linkText(drawing, textPath);
+    const link = pairLink(drawing);
     const extra = Object.entries(extraFrontmatter)
       .map(([k, v]) => `${k}: ${JSON.stringify(v)}\n`)
       .join("");
@@ -142,13 +174,14 @@ export class PairManager {
   async createTextPage(drawing: TFile, extraFrontmatter: Record<string, string> = {}): Promise<TFile> {
     const existing = this.textFor(drawing);
     if (existing) return existing;
-    const folder = drawing.parent?.path ?? "";
+    // a drawing in an ink subfolder gets its text page in the folder above
+    const folder = homeFolder(folderOf(drawing), this.sub);
     let base = drawingBaseName(drawing);
-    let path = normalizePath(`${folder}/${base}.md`);
+    let path = normalizePath(joinPath(folder, `${base}.md`));
     let n = 2;
     while (this.app.vault.getAbstractFileByPath(path)) {
       base = `${drawingBaseName(drawing)} (text${n > 2 ? " " + n : ""})`;
-      path = normalizePath(`${folder}/${base}.md`);
+      path = normalizePath(joinPath(folder, `${base}.md`));
       n++;
     }
     const text = await this.app.vault.create(path, this.textPageContent(drawing, path, extraFrontmatter));
@@ -157,7 +190,7 @@ export class PairManager {
   }
 
   private async setLink(file: TFile, key: string, target: TFile): Promise<void> {
-    const value = `[[${this.linkText(target, file.path)}]]`;
+    const value = `[[${pairLink(target)}]]`;
     const current = this.app.metadataCache.getFileCache(file)?.frontmatter?.[key];
     if (current === value) return;
     await this.app.fileManager.processFrontMatter(file, (fm) => {
@@ -176,34 +209,27 @@ export class PairManager {
   private renaming = new Set<string>();
 
   /**
-   * Keep names in sync: renaming/moving one side renames the other, and the
+   * Keep names in sync: renaming/moving one side renames/moves the other (keeping
+   * the drawing in the ink subfolder of the text page's folder), and the
    * frontmatter links are refreshed in both files.
    */
   async onRename(file: TAbstractFile, oldPath: string, keepNamesInSync: boolean): Promise<void> {
     if (!(file instanceof TFile) || this.renaming.has(file.path)) return;
-    const oldBase = oldPath.split("/").pop()?.replace(/\.md$/i, "") ?? "";
-    const folderOf = (path: string) => (path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "");
-    const oldFolder = folderOf(oldPath);
     const pairInfo = this.pairOf(file);
     if (!pairInfo) return;
     const { drawing, text } = pairInfo.pair;
     if (!text) return;
     const partner = pairInfo.role === "ink" ? text : drawing;
     if (keepNamesInSync) {
-      const partnerBase = pairInfo.role === "ink" ? partner.basename : drawingBaseName(partner);
-      const oldPlainBase = oldBase.replace(/\.excalidraw$/i, "");
-      // only rename a partner that sat next to the renamed file under the same name
-      if (partnerBase === oldPlainBase && folderOf(partner.path) === oldFolder) {
-        const newPlain = pairInfo.role === "ink" ? drawingBaseName(file) : file.basename;
-        const folder = file.parent?.path ?? "";
-        const target = normalizePath(`${folder}/${newPlain}${pairInfo.role === "ink" ? "" : ".excalidraw"}.md`);
-        if (target !== partner.path && !this.app.vault.getAbstractFileByPath(target)) {
-          this.renaming.add(target);
-          try {
-            await this.app.fileManager.renameFile(partner, target);
-          } finally {
-            window.setTimeout(() => this.renaming.delete(target), 2000);
-          }
+      const found = partnerTarget({ role: pairInfo.role, oldPath, newPath: file.path, partnerPath: partner.path });
+      const target = found ? normalizePath(found) : null;
+      if (target && target !== partner.path && !this.app.vault.getAbstractFileByPath(target)) {
+        this.renaming.add(target);
+        try {
+          await this.ensureFolder(parentPath(target));
+          await this.app.fileManager.renameFile(partner, target);
+        } finally {
+          window.setTimeout(() => this.renaming.delete(target), 2000);
         }
       }
     }
@@ -211,4 +237,9 @@ export class PairManager {
     await this.linkTextToDrawing(text, drawing);
     await this.linkDrawingToText(drawing, text);
   }
+}
+
+/** Unambiguous link text for a pair link: the full vault path (without ".md"). */
+export function pairLink(file: TFile): string {
+  return file.extension === "md" ? file.path.slice(0, -3) : file.path;
 }

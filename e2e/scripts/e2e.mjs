@@ -129,6 +129,59 @@ async function clickBookmark(which) {
   await page.click(`.workspace-leaf.mod-active .ink-bookmark-${which}`, { timeout: 5000 });
 }
 
+/** Choose in the paper picker (only the given fields) and confirm. */
+async function pickPaper({ style, spacing, color, orientation, position, name }) {
+  await page.waitForSelector(".modal.ink-paper-picker", { timeout: 5000 });
+  if (name !== undefined) await page.fill(".modal.ink-paper-picker .ink-paper-name-row input", name);
+  if (style) await page.click(`.modal.ink-paper-picker .ink-paper-card[data-style="${style}"]`);
+  for (const v of [spacing, color, orientation, position]) if (v) await page.click(`.modal.ink-paper-picker .ink-segmented button[data-value="${v}"]`);
+  await page.click(".modal.ink-paper-picker button.mod-cta");
+  await page.waitForSelector(".modal.ink-paper-picker", { state: "detached", timeout: 5000 });
+}
+
+/** Do the visible bookmarks of the active page overlap any toolbar, panel or header? */
+async function bookmarkOverlaps() {
+  return ev(async () => {
+    await __t.sleep(900); // the layout pass is debounced
+    const leafEl = document.querySelector(".workspace-leaf.mod-active .workspace-leaf-content");
+    const c = leafEl.getBoundingClientRect();
+    const sel = [".view-header", ".excalidraw .Island", ".excalidraw .sidebar", '.excalidraw [class*="misc-tools-container"]', ".excalidraw .layer-ui__wrapper__footer-right", ".excalidraw .ToolIcon", ".excalidraw button"].join(",");
+    const obstacles = [...leafEl.querySelectorAll(sel), ...document.querySelectorAll(".status-bar, .mobile-navbar")]
+      .filter((e) => !e.closest(".ink-bookmarks, .HintViewer") && getComputedStyle(e).visibility !== "hidden")
+      .map((e) => ({ cls: e.className?.baseVal ?? String(e.className).slice(0, 60), r: e.getBoundingClientRect() }))
+      .filter((o) => o.r.width > 0 && o.r.height > 0);
+    const buttons = [...leafEl.querySelectorAll(".ink-bookmarks .ink-bookmark")].filter((b) => getComputedStyle(b).display !== "none").map((b) => b.getBoundingClientRect());
+    const hit = (a, b) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+    const bad = [];
+    for (const b of buttons) for (const o of obstacles) if (hit(b, o.r)) bad.push({ obstacle: o.cls, o: [o.r.left, o.r.top, o.r.width, o.r.height].map(Math.round), b: [b.left, b.top, b.width, b.height].map(Math.round) });
+    const inside = buttons.every((b) => b.top >= c.top && b.bottom <= c.bottom + 0.5 && b.right <= c.right + 0.5);
+    const root = leafEl.querySelector(".ink-bookmarks");
+    return { ok: buttons.length > 0 && bad.length === 0 && inside, n: buttons.length, inside, compact: root?.classList.contains("is-compact"), cramped: root?.classList.contains("is-cramped"), bad: bad.slice(0, 4) };
+  });
+}
+
+async function setWindow(w, h) {
+  await ev(({ w, h }) => {
+    const win = window.require("@electron/remote").getCurrentWindow();
+    win.unmaximize();
+    win.setBounds({ x: 0, y: 0, width: w, height: h });
+  }, { w, h });
+  await page.waitForTimeout(900);
+}
+
+/** Paper pages of the open drawing, top to bottom. */
+const papersOnPage = () =>
+  ev(() => {
+    const api = __t.view().excalidrawAPI;
+    const files = api.getFiles();
+    const els = api.getSceneElements();
+    return els
+      .map((e, z) => ({ e, z }))
+      .filter(({ e }) => ["paper", "pdf-page", "image-page"].includes(e.customData?.inkNotebook?.role))
+      .map(({ e, z }) => ({ id: e.id, x: e.x, y: Math.round(e.y), w: e.width, h: e.height, z, style: e.customData.inkNotebook.paper?.style, orientation: e.customData.inkNotebook.paper?.orientation, hasFile: !!files[e.fileId], locked: e.locked }))
+      .sort((a, b) => a.y - b.y);
+  });
+
 // ---------------------------------------------------------------- state shared between steps
 const state = {};
 
@@ -145,7 +198,8 @@ steps.setup = async () => {
   await page.waitForTimeout(800);
   const info = await ev(() => ({ loaded: !!__t.plugin(), ea: !!app.plugins.plugins["obsidian-excalidraw-plugin"]?.ea, size: [innerWidth, innerHeight] }));
   check("ink-notebook and excalidraw are loaded", info.loaded && info.ea, JSON.stringify(info));
-  await setSettings({ setupDone: true, azureEndpoint: MOCK, azureKey: "test-key", azureApi: "auto", azureDetectedApi: "", einkMode: "off", queue: [] });
+  // the main flow uses the older side-by-side layout in a fixed folder; the "folders"/"paper…" steps cover the new defaults
+  await setSettings({ setupDone: true, azureEndpoint: MOCK, azureKey: "test-key", azureApi: "auto", azureDetectedApi: "", einkMode: "off", queue: [], pageLocation: "fixed", folder: "Ink", inkSubfolder: "", askForPaper: false });
   await ev(() => {
     app.vault.setConfig("alwaysUpdateLinks", true);
     document.querySelectorAll(".modal-close-button").forEach((b) => b.click());
@@ -168,7 +222,8 @@ steps.createPage = async () => {
       textContent: tf ? await app.vault.read(tf) : null,
       drawingFm: app.metadataCache.getFileCache(d)?.frontmatter,
       paper: els.filter((e) => __t.inkData(e)?.role === "paper").map((e) => ({ w: e.width, h: e.height, locked: e.locked })),
-      bookmarks: document.querySelectorAll(".workspace-leaf.mod-active .ink-bookmark").length,
+      bookmarks: document.querySelectorAll(".workspace-leaf.mod-active .ink-bookmark-tabs .ink-bookmark").length,
+      addButton: !!document.querySelector(".workspace-leaf.mod-active .ink-bookmark-add:not(.is-hidden)"),
       activeBookmark: document.querySelector(".workspace-leaf.mod-active .ink-bookmark.is-active")?.textContent,
     };
   }, state);
@@ -177,6 +232,7 @@ steps.createPage = async () => {
   check("drawing links back to the text page", typeof info.drawingFm?.["ink-text"] === "string" && info.drawingFm["ink-text"].includes("[["), JSON.stringify(info.drawingFm));
   check("lined paper page added, locked, A4 size", info.paper.length === 1 && info.paper[0].locked && info.paper[0].w === 1000, JSON.stringify(info.paper));
   check("two bookmarks shown, Ink active", info.bookmarks === 2 && /Ink/.test(info.activeBookmark ?? ""), JSON.stringify(info));
+  check("+ Page bookmark shown on the ink page", info.addButton, JSON.stringify(info));
   await shot("02-new-ink-page.png");
 };
 
@@ -511,7 +567,7 @@ steps.rename = async () => {
     return { files, drawingFm: d && app.metadataCache.getFileCache(d)?.frontmatter, textFm: t && app.metadataCache.getFileCache(t)?.frontmatter };
   });
   check("drawing renamed to match", !!info.drawingFm, JSON.stringify(info.files));
-  check("links updated both ways", info.drawingFm?.["ink-text"] === "[[Shopping list]]" && /Shopping list\.excalidraw/.test(info.textFm?.["ink-drawing"] ?? ""), JSON.stringify(info));
+  check("links updated both ways", info.drawingFm?.["ink-text"] === "[[Ink/Shopping list]]" && /Shopping list\.excalidraw/.test(info.textFm?.["ink-drawing"] ?? ""), JSON.stringify(info));
   state.text = "Ink/Shopping list.md";
   state.drawing = "Ink/Shopping list.excalidraw.md";
   const md = await ev((p) => __t.read(p), state.text);
@@ -549,8 +605,9 @@ steps.undoSafety = async () => {
 };
 
 steps.addPage = async () => {
-  console.log("\n▶ add a paper page");
+  console.log("\n▶ add a paper page (picker, same paper)");
   await ev(() => app.commands.executeCommandById("ink-notebook:add-paper-page"));
+  await pickPaper({});
   await page.waitForTimeout(1500);
   const papers = await ev(() => __t.view().excalidrawAPI.getSceneElements().filter((e) => e.customData?.inkNotebook?.role === "paper").map((e) => ({ y: e.y, locked: e.locked })));
   papers.sort((a, b) => a.y - b.y);
@@ -681,8 +738,10 @@ steps.mobile = async () => {
   await waitView("excalidraw", state.drawing);
   await page.waitForTimeout(1000);
   await shot("13-mobile-ink.png");
-  const n = await ev(() => document.querySelectorAll(".workspace-leaf.mod-active .ink-bookmark").length);
+  const n = await ev(() => document.querySelectorAll(".workspace-leaf.mod-active .ink-bookmark-tabs .ink-bookmark").length);
   check("bookmarks shown in mobile layout", n === 2, n);
+  const overlaps = await bookmarkOverlaps();
+  check("mobile layout: bookmarks clear of all toolbars and panels", overlaps.ok, JSON.stringify(overlaps));
   await clickBookmark("text");
   await waitView("markdown", state.text);
   await page.waitForTimeout(800);
@@ -728,7 +787,210 @@ steps.reopen = async () => {
   check("bookmarks restored after plugin reload, one set per ink page tab", info.inkLeaves > 0 && info.perLeaf.every((n) => n === 1), JSON.stringify(info));
 };
 
-const order = ["setup", "createPage", "write", "flipToText", "editText", "flipToInk", "flipBack", "editCard", "updateTyped", "undoSafety", "addPage", "markDiagram", "offline", "v3", "errors", "livePreview", "wizardTest", "pdf", "image", "rename", "eink", "reopen", "mobile"];
+steps.folders = async () => {
+  console.log("\n▶ new page in the current folder, ink files in its subfolder, chosen paper");
+  await setSettings({ pageLocation: "current", inkSubfolder: "Attachments", askForPaper: true, askForPageName: true });
+  const CA = "003 - University/Computer Architecture";
+  await ev(async (CA) => {
+    await app.vault.createFolder(CA).catch(() => {});
+    const f = app.vault.getAbstractFileByPath(`${CA}/Computer Architecture.md`) ?? (await app.vault.create(`${CA}/Computer Architecture.md`, "# Computer Architecture\n"));
+    await app.workspace.getLeaf(false).openFile(f);
+  }, CA);
+  await page.waitForTimeout(800);
+  await ev(() => app.commands.executeCommandById("ink-notebook:new-page"));
+  await page.waitForSelector(".modal.ink-paper-picker", { timeout: 5000 });
+  const picker = await ev(() => ({
+    cards: document.querySelectorAll(".modal.ink-paper-picker .ink-paper-card").length,
+    thumbs: [...document.querySelectorAll(".modal.ink-paper-picker .ink-paper-thumb img")].filter((i) => i.complete && i.naturalWidth > 0).length,
+    selected: document.querySelector(".modal.ink-paper-picker .ink-paper-card.is-selected")?.dataset.style,
+  }));
+  check("paper picker shows all templates with previews", picker.cards === 9 && picker.thumbs === 9 && picker.selected === "lined", JSON.stringify(picker));
+  await shot("15-paper-picker.png");
+  await pickPaper({ name: "Week 1", style: "dots", spacing: "narrow", orientation: "landscape" });
+  const drawing = await waitView("excalidraw");
+  const info = await ev(async ({ drawing, CA }) => {
+    const p = __t.plugin();
+    const d = app.vault.getAbstractFileByPath(drawing);
+    const t = p.pairs.textFor(d);
+    return {
+      text: t?.path,
+      drawingFm: app.metadataCache.getFileCache(d)?.frontmatter?.["ink-text"],
+      textFm: t && app.metadataCache.getFileCache(t)?.frontmatter?.["ink-drawing"],
+      paperFile: !!app.vault.getAbstractFileByPath(`${CA}/Attachments/ink-paper-dots-narrow-landscape.svg`),
+      caFiles: app.vault.getAbstractFileByPath(CA).children.map((c) => c.name).sort(),
+    };
+  }, { drawing, CA });
+  check("drawing is in the Attachments subfolder of the current folder", drawing === `${CA}/Attachments/Week 1.excalidraw.md`, drawing);
+  check("text page is in the current folder", info.text === `${CA}/Week 1.md`, JSON.stringify(info));
+  check("the course folder only shows notes and the ink subfolder", JSON.stringify(info.caFiles) === JSON.stringify(["Attachments", "Computer Architecture.md", "Week 1.md"]), JSON.stringify(info.caFiles));
+  check("pair links use full paths", info.drawingFm === `[[${CA}/Week 1]]` && info.textFm === `[[${CA}/Attachments/Week 1.excalidraw]]`, JSON.stringify(info));
+  check("paper SVG stored next to the drawing", info.paperFile, JSON.stringify(info));
+  const papers = await papersOnPage();
+  check("chosen paper used: dotted, landscape", papers.length === 1 && papers[0].style === "dots" && papers[0].w === 1414 && papers[0].h === 1000 && papers[0].hasFile, JSON.stringify(papers));
+  state.ca = { drawing, text: info.text };
+  // same name in another folder: each page stays paired with its own partner
+  const other = await ev(async () => {
+    const p = __t.plugin();
+    await app.vault.createFolder("003 - University/Maths").catch(() => {});
+    const r = await p.switcher.createPage({ name: "Week 1", folder: "003 - University/Maths", paper: { style: "grid", spacing: "normal", color: "white", orientation: "portrait" }, open: false });
+    await __t.sleep(800);
+    const caDrawing = app.vault.getAbstractFileByPath("003 - University/Computer Architecture/Attachments/Week 1.excalidraw.md");
+    return { drawing: r.drawing.path, text: r.text.path, textOfMaths: p.pairs.textFor(r.drawing)?.path, drawingOfMaths: p.pairs.drawingFor(r.text)?.path, textOfCA: p.pairs.textFor(caDrawing)?.path };
+  });
+  check("same page name in two folders: no mix-up", other.textOfMaths === "003 - University/Maths/Week 1.md" && other.drawingOfMaths === "003 - University/Maths/Attachments/Week 1.excalidraw.md" && other.textOfCA === `${CA}/Week 1.md`, JSON.stringify(other));
+  await clickBookmark("text");
+  const t = await waitView("markdown");
+  check("flip to the text page works with the subfolder layout", t === state.ca.text, t);
+  await clickBookmark("ink");
+  await waitView("excalidraw", state.ca.drawing);
+  await setSettings({ askForPageName: false });
+};
+
+steps.paperPages = async () => {
+  console.log("\n▶ add, insert and change pages");
+  await waitView("excalidraw", state.ca.drawing);
+  // writing on page 1
+  await ev(async () => {
+    const v = __t.view();
+    const ea = __t.ea(v);
+    __t.word(ea, 120, 200, 140, 30);
+    await ea.addElementsToView(false, true, true);
+    ea.destroy();
+  });
+  // + Page bookmark → picker → ruled page at the end
+  await ev(() => document.querySelectorAll(".notice").forEach((n) => n.remove()));
+  await page.click(".workspace-leaf.mod-active .ink-bookmark-add");
+  const where = await ev(async () => {
+    await __t.waitFor(() => document.querySelector(".modal.ink-paper-picker"), 5000);
+    return { selected: document.querySelector(".modal.ink-paper-picker .ink-paper-card.is-selected")?.dataset.style, positions: [...document.querySelectorAll('.modal.ink-paper-picker .ink-segmented button[data-value="after"], .modal.ink-paper-picker .ink-segmented button[data-value="end"]')].length };
+  });
+  check("+ Page suggests the paper of the current page and offers positions", where.selected === "dots" && where.positions === 2, JSON.stringify(where));
+  await pickPaper({ style: "lined", orientation: "portrait", position: "end" });
+  await page.waitForTimeout(1200);
+  let papers = await papersOnPage();
+  check("ruled page added at the end", papers.length === 2 && papers[1].style === "lined" && papers[1].y === 1000 + 80 && papers[1].h === 1414, JSON.stringify(papers));
+  // write on page 2, go back to page 1 and insert a squared page after it
+  await ev(async () => {
+    const v = __t.view();
+    const ea = __t.ea(v);
+    __t.word(ea, 120, 1300, 140, 30);
+    await ea.addElementsToView(false, true, true);
+    ea.destroy();
+    const first = v.excalidrawAPI.getSceneElements().filter((e) => e.customData?.inkNotebook?.role === "paper").sort((a, b) => a.y - b.y)[0];
+    const z = __t.ea(v);
+    z.viewZoomToElements(false, [first]);
+    z.destroy();
+  });
+  await page.waitForTimeout(800);
+  await ev(() => app.commands.executeCommandById("ink-notebook:add-paper-page"));
+  await pickPaper({ style: "grid", orientation: "portrait", position: "after" });
+  await page.waitForTimeout(1500);
+  papers = await papersOnPage();
+  const strokes = await ev(() => __t.view().excalidrawAPI.getSceneElements().filter((e) => e.type === "freedraw").map((e) => Math.round(e.y)).sort((a, b) => a - b));
+  const shift = 1414 + 80;
+  check(
+    "squared page inserted after page 1, later pages moved down",
+    papers.length === 3 && papers[0].style === "dots" && papers[1].style === "grid" && papers[1].y === 1080 && papers[2].style === "lined" && papers[2].y === 1080 + shift,
+    JSON.stringify(papers),
+  );
+  check("writing on page 1 stayed, writing on the old page 2 moved with it", strokes[0] === 200 && strokes[1] === 1300 + shift, JSON.stringify(strokes));
+  const order = await ev(() => {
+    const els = __t.view().excalidrawAPI.getSceneElements();
+    const lastPaper = Math.max(...els.map((e, i) => (e.customData?.inkNotebook?.role === "paper" ? i : -1)));
+    const firstStroke = els.findIndex((e) => e.type === "freedraw");
+    return { lastPaper, firstStroke };
+  });
+  check("paper stays behind the writing", order.lastPaper < order.firstStroke, JSON.stringify(order));
+  check("all paper images still load", papers.every((p) => p.hasFile && p.locked), JSON.stringify(papers));
+  await shot("16-inserted-pages.png");
+  // change the paper of page 1 (landscape dots → portrait Cornell): the pages below move down by the extra height
+  await ev(() => {
+    const v = __t.view();
+    const first = v.excalidrawAPI.getSceneElements().filter((e) => e.customData?.inkNotebook?.role === "paper").sort((a, b) => a.y - b.y)[0];
+    const z = __t.ea(v);
+    z.viewZoomToElements(false, [first]);
+    z.destroy();
+  });
+  await page.waitForTimeout(800);
+  await ev(() => app.commands.executeCommandById("ink-notebook:change-paper"));
+  await pickPaper({ style: "cornell", orientation: "portrait" });
+  await page.waitForTimeout(1500);
+  const after = await papersOnPage();
+  check(
+    "page 1 changed to Cornell (portrait), pages below moved by the extra height",
+    after.length === 3 && after[0].style === "cornell" && after[0].h === 1414 && after[1].y === papers[1].y + 414 && after[2].y === papers[2].y + 414 && after.every((p) => p.hasFile),
+    JSON.stringify(after),
+  );
+  const md = await ev(async (p) => {
+    await __t.plugin().sync.syncInkToText(app.vault.getAbstractFileByPath(p), { view: __t.view(), network: true });
+    return __t.read(__t.plugin().pairs.textFor(app.vault.getAbstractFileByPath(p)).path);
+  }, state.ca.drawing);
+  check("text page still builds after page changes", md.includes("%% ink-notebook:start %%"), md);
+};
+
+steps.renameSub = async () => {
+  console.log("\n▶ rename/move a text page – the drawing in the subfolder follows");
+  const CA = "003 - University/Computer Architecture";
+  await ev(async (p) => {
+    const f = app.vault.getAbstractFileByPath(p);
+    await app.fileManager.renameFile(f, f.parent.path + "/Week 1 - Intro.md");
+  }, state.ca.text);
+  await page.waitForTimeout(2500);
+  let info = await ev((CA) => ({
+    drawing: !!app.vault.getAbstractFileByPath(`${CA}/Attachments/Week 1 - Intro.excalidraw.md`),
+    oldDrawing: !!app.vault.getAbstractFileByPath(`${CA}/Attachments/Week 1.excalidraw.md`),
+  }), CA);
+  check("drawing in the subfolder renamed with the text page", info.drawing && !info.oldDrawing, JSON.stringify(info));
+  await ev(async (CA) => {
+    await app.vault.createFolder("Archive").catch(() => {});
+    await app.fileManager.renameFile(app.vault.getAbstractFileByPath(`${CA}/Week 1 - Intro.md`), "Archive/Week 1 - Intro.md");
+  }, CA);
+  await page.waitForTimeout(2500);
+  info = await ev(() => {
+    const t = app.vault.getAbstractFileByPath("Archive/Week 1 - Intro.md");
+    const d = app.vault.getAbstractFileByPath("Archive/Attachments/Week 1 - Intro.excalidraw.md");
+    const p = __t.plugin();
+    return { moved: !!d, paired: !!t && !!d && p.pairs.textFor(d)?.path === t.path && p.pairs.drawingFor(t)?.path === d.path, link: d && app.metadataCache.getFileCache(d)?.frontmatter?.["ink-text"] };
+  });
+  check("moving the text page moves the drawing into the new folder's subfolder", info.moved && info.paired && info.link === "[[Archive/Week 1 - Intro]]", JSON.stringify(info));
+  state.ca = { drawing: "Archive/Attachments/Week 1 - Intro.excalidraw.md", text: "Archive/Week 1 - Intro.md" };
+};
+
+steps.collision = async () => {
+  console.log("\n▶ bookmarks never cover toolbars or panels, whatever the window size");
+  const sizes = [[800, 600], [800, 1200], [1024, 700], [1400, 1000], [700, 500], [640, 420], [1280, 520]];
+  const open = async (type, file) => {
+    await ev(async ({ type, file }) => {
+      await app.workspace.getLeaf(false).setViewState({ type, state: { file }, active: true });
+    }, { type, file });
+    await waitView(type, file);
+  };
+  await open("excalidraw", state.ca.drawing);
+  for (const [w, h] of sizes) {
+    await setWindow(w, h);
+    const r = await bookmarkOverlaps();
+    check(`ink page ${w}×${h}: bookmarks clear of toolbars and panels${r.compact ? " (compact)" : ""}`, r.ok, JSON.stringify(r));
+    if (w === 800 && h === 600) await shot("17-bookmarks-800x600.png");
+  }
+  await open("markdown", state.ca.text);
+  for (const [w, h] of [[800, 600], [640, 420]]) {
+    await setWindow(w, h);
+    const r = await bookmarkOverlaps();
+    check(`text page ${w}×${h}: bookmarks clear of the header and status bar`, r.ok, JSON.stringify(r));
+  }
+  // an Excalidraw panel that appears later (here: the library sidebar) pushes the bookmarks away too
+  await open("excalidraw", state.ca.drawing);
+  await setWindow(800, 1200);
+  await ev(() => __t.view().excalidrawAPI.toggleSidebar?.({ name: "default", force: true }));
+  await page.waitForTimeout(600);
+  const r = await bookmarkOverlaps();
+  const sidebar = await ev(() => !!document.querySelector(".workspace-leaf.mod-active .excalidraw .sidebar"));
+  check("bookmarks move clear of a docked Excalidraw sidebar", !sidebar || r.ok, JSON.stringify({ sidebar, ...r }));
+  await ev(() => __t.view().excalidrawAPI.toggleSidebar?.({ name: "default", force: false }));
+  await setWindow(800, 1200);
+};
+
+const order = ["setup", "createPage", "write", "flipToText", "editText", "flipToInk", "flipBack", "editCard", "updateTyped", "undoSafety", "addPage", "markDiagram", "offline", "v3", "errors", "livePreview", "wizardTest", "pdf", "image", "rename", "eink", "reopen", "folders", "paperPages", "renameSub", "collision", "mobile"];
 for (const name of order) {
   if (only && !only.split(",").includes(name) && name !== "setup") continue;
   try {

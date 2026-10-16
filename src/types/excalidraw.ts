@@ -37,6 +37,8 @@ export interface ExElement {
   frameRole?: string | null;
   groupIds?: ReadonlyArray<string>;
   boundElements?: ReadonlyArray<{ id: string; type: string }> | null;
+  startBinding?: { elementId: string } | null;
+  endBinding?: { elementId: string } | null;
   link?: string | null;
   name?: string | null;
   fileId?: string | null;
@@ -61,6 +63,8 @@ export interface InkCustomData {
   sourceHeight?: number;
   /** For region rectangles: what the region is used for. */
   kind?: "diagram";
+  /** For paper pages: the template (style, spacing, colour, orientation). */
+  paper?: { style: string; spacing: string; color: string; orientation: string };
 }
 
 export const INK_CUSTOM_DATA_KEY = "inkNotebook";

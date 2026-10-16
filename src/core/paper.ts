@@ -1,76 +1,222 @@
 /**
- * Paper templates (like the backgrounds in the Boox Notes app), generated as SVG.
- * The SVG is stored once in the vault and placed as a locked image on ink pages.
+ * Paper templates (like the page templates in GoodNotes or the Boox Notes app), generated as SVG.
+ * Each template is stored once per folder and placed as a locked image on ink pages.
  */
 
-export type PaperStyle = "blank" | "lined" | "grid" | "dots" | "cornell";
+export type PaperStyle = "blank" | "lined" | "dots" | "grid" | "graph" | "isometric" | "cornell" | "checklist" | "music";
+export type PaperSpacing = "narrow" | "normal" | "wide";
+export type PaperColor = "white" | "ivory" | "yellow" | "blue";
+export type PaperOrientation = "portrait" | "landscape";
+
+/** Everything that describes a paper page. */
+export interface PaperSpec {
+  style: PaperStyle;
+  spacing: PaperSpacing;
+  color: PaperColor;
+  orientation: PaperOrientation;
+}
 
 export const PAPER_STYLES: Record<PaperStyle, string> = {
   blank: "Blank",
-  lined: "Lined",
-  grid: "Grid",
+  lined: "Ruled",
   dots: "Dotted",
-  cornell: "Cornell (cue column + summary)",
+  grid: "Squared",
+  graph: "Graph paper",
+  isometric: "Isometric",
+  cornell: "Cornell notes",
+  checklist: "Checklist",
+  music: "Music staff",
 };
+
+export const PAPER_SPACINGS: Record<PaperSpacing, string> = {
+  narrow: "Narrow",
+  normal: "Normal",
+  wide: "Wide",
+};
+
+export const PAPER_COLORS: Record<PaperColor, { label: string; fill: string }> = {
+  white: { label: "White", fill: "#ffffff" },
+  ivory: { label: "Ivory", fill: "#fbf6ea" },
+  yellow: { label: "Yellow", fill: "#fff5c2" },
+  blue: { label: "Blue", fill: "#edf3fb" },
+};
+
+export const PAPER_ORIENTATIONS: Record<PaperOrientation, string> = {
+  portrait: "Portrait",
+  landscape: "Landscape",
+};
+
+export const DEFAULT_PAPER: PaperSpec = { style: "lined", spacing: "normal", color: "white", orientation: "portrait" };
 
 /** Page size in scene units (A4 proportions). */
 export const PAGE_WIDTH = 1000;
 export const PAGE_HEIGHT = 1414;
+/** Ruled line distance for "normal" spacing. */
 export const LINE_SPACING = 44;
 
+const LINE_SPACINGS: Record<PaperSpacing, number> = { narrow: 34, normal: LINE_SPACING, wide: 56 };
+
+const has = (obj: object, key: unknown): boolean => typeof key === "string" && Object.prototype.hasOwnProperty.call(obj, key);
+
 export function isPaperStyle(v: unknown): v is PaperStyle {
-  return typeof v === "string" && Object.prototype.hasOwnProperty.call(PAPER_STYLES, v);
+  return has(PAPER_STYLES, v);
+}
+
+/** A complete, valid paper spec from stored data (unknown fields fall back). */
+export function normalizePaperSpec(raw: unknown, fallback: PaperSpec = DEFAULT_PAPER): PaperSpec {
+  const r = (raw && typeof raw === "object" ? raw : typeof raw === "string" ? { style: raw } : {}) as Record<string, unknown>;
+  const style = isPaperStyle(r.style) ? r.style : fallback.style;
+  return {
+    style,
+    // spacing means nothing on blank paper; keeping it fixed avoids duplicate files
+    spacing: style === "blank" ? "normal" : has(PAPER_SPACINGS, r.spacing) ? (r.spacing as PaperSpacing) : fallback.spacing,
+    color: has(PAPER_COLORS, r.color) ? (r.color as PaperColor) : fallback.color,
+    orientation: has(PAPER_ORIENTATIONS, r.orientation) ? (r.orientation as PaperOrientation) : fallback.orientation,
+  };
+}
+
+export function paperSize(spec: Pick<PaperSpec, "orientation">): { width: number; height: number } {
+  return spec.orientation === "landscape" ? { width: PAGE_HEIGHT, height: PAGE_WIDTH } : { width: PAGE_WIDTH, height: PAGE_HEIGHT };
+}
+
+export function paperLineSpacing(spec: Pick<PaperSpec, "spacing">): number {
+  return LINE_SPACINGS[spec.spacing] ?? LINE_SPACING;
+}
+
+/** File name of the SVG for a spec (the default variant of each style keeps its old name). */
+export function paperFileName(spec: PaperSpec | PaperStyle): string {
+  const s = normalizePaperSpec(spec);
+  const parts = [`ink-paper-${s.style}`];
+  if (s.spacing !== "normal") parts.push(s.spacing);
+  if (s.color !== "white") parts.push(s.color);
+  if (s.orientation === "landscape") parts.push("landscape");
+  return `${parts.join("-")}.svg`;
+}
+
+/** Short human readable description, e.g. "Dotted · narrow · ivory". */
+export function paperLabel(spec: PaperSpec): string {
+  const parts = [PAPER_STYLES[spec.style]];
+  if (spec.style !== "blank" && spec.spacing !== "normal") parts.push(PAPER_SPACINGS[spec.spacing].toLowerCase());
+  if (spec.color !== "white") parts.push(PAPER_COLORS[spec.color].label.toLowerCase());
+  if (spec.orientation === "landscape") parts.push("landscape");
+  return parts.join(" · ");
 }
 
 const fmt = (n: number) => (Math.round(n * 100) / 100).toString();
 
-/** SVG for a paper style. Colours are light grey so they print and OCR well. */
-export function paperSvg(style: PaperStyle, width = PAGE_WIDTH, height = PAGE_HEIGHT, spacing = LINE_SPACING): string {
-  const line = "#c8c8c8";
-  const margin = "#e09a9a";
+export interface PaperSvgOptions {
+  /** Multiplies stroke widths and dot sizes (thumbnails need thicker lines to stay visible). */
+  strokeScale?: number;
+}
+
+/** SVG for a paper spec. Lines are light grey so they print well; OCR never sees them (only strokes are sent). */
+export function paperSvg(specOrStyle: PaperSpec | PaperStyle, opts: PaperSvgOptions = {}): string {
+  const spec = normalizePaperSpec(specOrStyle);
+  const { width: W, height: H } = paperSize(spec);
+  const s = paperLineSpacing(spec);
+  const k = opts.strokeScale ?? 1;
+  const sw = (n: number) => fmt(n * k);
   const parts: string[] = [];
-  parts.push(`<rect x="0" y="0" width="${width}" height="${height}" fill="#ffffff" stroke="#d0d0d0" stroke-width="2"/>`);
-  const top = spacing * 2.5;
-  switch (style) {
+  const path = (d: string, stroke: string, width: number, extra = "") =>
+    d ? parts.push(`<path d="${d}" fill="none" stroke="${stroke}" stroke-width="${sw(width)}"${extra}/>`) : 0;
+  const hLines = (from: number, to: number, step: number, x1 = 0, x2 = W) => {
+    let d = "";
+    for (let y = from; y < to; y += step) d += `M${fmt(x1)} ${fmt(y)}H${fmt(x2)}`;
+    return d;
+  };
+  const vLines = (from: number, to: number, step: number, y1 = 0, y2 = H) => {
+    let d = "";
+    for (let x = from; x < to; x += step) d += `M${fmt(x)} ${fmt(y1)}V${fmt(y2)}`;
+    return d;
+  };
+  const line = "#c8c8c8";
+  const strong = "#909090";
+  const margin = "#e09a9a";
+  const top = s * 2.5;
+
+  parts.push(`<rect x="0" y="0" width="${W}" height="${H}" fill="${PAPER_COLORS[spec.color].fill}" stroke="#d0d0d0" stroke-width="${sw(2)}"/>`);
+  switch (spec.style) {
     case "lined": {
-      for (let y = top; y < height - spacing / 2; y += spacing) {
-        parts.push(`<line x1="0" y1="${fmt(y)}" x2="${width}" y2="${fmt(y)}" stroke="${line}" stroke-width="1.5"/>`);
-      }
-      parts.push(`<line x1="${spacing * 2}" y1="0" x2="${spacing * 2}" y2="${height}" stroke="${margin}" stroke-width="1.5"/>`);
-      break;
-    }
-    case "grid": {
-      const g = spacing / 1.5;
-      for (let y = g; y < height; y += g) parts.push(`<line x1="0" y1="${fmt(y)}" x2="${width}" y2="${fmt(y)}" stroke="${line}" stroke-width="1"/>`);
-      for (let x = g; x < width; x += g) parts.push(`<line x1="${fmt(x)}" y1="0" x2="${fmt(x)}" y2="${height}" stroke="${line}" stroke-width="1"/>`);
+      path(hLines(top, H - s / 2, s), line, 1.5);
+      path(`M${fmt(s * 2)} 0V${H}`, margin, 1.5);
       break;
     }
     case "dots": {
-      const g = spacing / 1.5;
-      // one path with many tiny circles keeps the SVG small
+      // each row is one dashed line whose (almost) zero-length dashes with round caps are the dots
+      const g = s / 1.5;
+      const lastX = g * Math.floor((W - g / 2) / g);
       let d = "";
-      for (let y = g; y < height; y += g) {
-        for (let x = g; x < width; x += g) d += `M${fmt(x)} ${fmt(y)}m-1.6 0a1.6 1.6 0 1 0 3.2 0a1.6 1.6 0 1 0 -3.2 0`;
+      for (let y = g; y < H - g / 2; y += g) d += `M${fmt(g)} ${fmt(y)}H${fmt(lastX)}`;
+      path(d, "#a0a0a0", 3.4, ` stroke-linecap="round" stroke-dasharray="0.01 ${fmt(g - 0.01)}"`);
+      break;
+    }
+    case "grid": {
+      const g = s / 1.5;
+      path(hLines(g, H, g) + vLines(g, W, g), line, 1);
+      break;
+    }
+    case "graph": {
+      const m = s / 4;
+      let minor = "";
+      let major = "";
+      for (let i = 1; i * m < H; i++) {
+        const d = `M0 ${fmt(i * m)}H${W}`;
+        if (i % 4 === 0) major += d;
+        else minor += d;
       }
-      parts.push(`<path d="${d}" fill="#a8a8a8"/>`);
+      for (let i = 1; i * m < W; i++) {
+        const d = `M${fmt(i * m)} 0V${H}`;
+        if (i % 4 === 0) major += d;
+        else minor += d;
+      }
+      path(minor, "#dedede", 0.8);
+      path(major, "#b8b8b8", 1.3);
+      break;
+    }
+    case "isometric": {
+      // triangular grid: vertical lines plus lines at ±30°
+      const a = s * 0.8;
+      const t = Math.tan(Math.PI / 6);
+      let d = vLines(0, W + 0.1, (a * Math.sqrt(3)) / 2);
+      for (let y0 = -Math.ceil((W * t) / a) * a; y0 < H; y0 += a) d += `M0 ${fmt(y0)}L${W} ${fmt(y0 + W * t)}`;
+      for (let y0 = 0; y0 < H + W * t; y0 += a) d += `M0 ${fmt(y0)}L${W} ${fmt(y0 - W * t)}`;
+      path(d, "#d2d2d2", 1);
       break;
     }
     case "cornell": {
-      const cue = width * 0.28;
-      const summaryTop = height - height * 0.2;
-      for (let y = top; y < summaryTop - spacing / 2; y += spacing) {
-        parts.push(`<line x1="${fmt(cue)}" y1="${fmt(y)}" x2="${width}" y2="${fmt(y)}" stroke="${line}" stroke-width="1.5"/>`);
+      const cue = W * 0.28;
+      const summaryTop = H * 0.8;
+      path(hLines(top, summaryTop - s / 2, s, cue, W), line, 1.5);
+      path(`M${fmt(cue)} 0V${fmt(summaryTop)}M0 ${fmt(summaryTop)}H${W}`, strong, 2);
+      break;
+    }
+    case "checklist": {
+      const b = s * 0.48;
+      const x = s * 0.75;
+      let boxes = "";
+      for (let y = top; y + s < H - s / 2; y += s) boxes += `M${fmt(x)} ${fmt(y + (s - b) / 2)}h${fmt(b)}v${fmt(b)}h${fmt(-b)}Z`;
+      path(hLines(top, H - s / 2, s), line, 1.5);
+      path(boxes, "#9a9a9a", 1.6);
+      break;
+    }
+    case "music": {
+      const d0 = s / 4;
+      const staff = d0 * 4;
+      const gap = s * 1.6;
+      const x1 = s;
+      const x2 = W - s;
+      let lines = "";
+      let bars = "";
+      for (let y = s * 2; y + staff < H - s; y += staff + gap) {
+        lines += hLines(y, y + staff + 0.1, d0, x1, x2);
+        bars += `M${fmt(x1)} ${fmt(y)}V${fmt(y + staff)}M${fmt(x2)} ${fmt(y)}V${fmt(y + staff)}`;
       }
-      parts.push(`<line x1="${fmt(cue)}" y1="0" x2="${fmt(cue)}" y2="${fmt(summaryTop)}" stroke="#909090" stroke-width="2"/>`);
-      parts.push(`<line x1="0" y1="${fmt(summaryTop)}" x2="${width}" y2="${fmt(summaryTop)}" stroke="#909090" stroke-width="2"/>`);
+      path(lines, "#a8a8a8", 1.2);
+      path(bars, "#a8a8a8", 1.6);
       break;
     }
     default:
       break;
   }
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">${parts.join("")}</svg>`;
-}
-
-export function paperFileName(style: PaperStyle): string {
-  return `ink-paper-${style}.svg`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${parts.join("")}</svg>`;
 }
