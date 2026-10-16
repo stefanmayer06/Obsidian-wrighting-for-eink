@@ -191,6 +191,10 @@ The built‑in Excalidraw lives in `vendor/excalidraw` (the release files, unmod
 
 ## License
 
-Ink Notebook's own code is MIT licensed (see `LICENSE`).
+Copyright (C) 2026 Stefan Mayer
 
-The built‑in Excalidraw is the [Excalidraw plugin for Obsidian](https://github.com/zsviczian/obsidian-excalidraw-plugin) by Zsolt Viczian, included unmodified and licensed under the **GNU Affero General Public License v3.0** (`vendor/excalidraw/LICENSE`; [`vendor/excalidraw/README.md`](vendor/excalidraw/README.md) names the included version and where its source code is). Because the released `main.js` contains it, the released plugin as a whole is distributed under the terms of the AGPL v3.0. The license texts of all third‑party code in the released `main.js` – the built‑in Excalidraw, pdf-lib and the libraries it uses – are appended to the end of that file.
+Ink Notebook – the plugin and the Ink Notebook Cloud server in `supabase/` – is free software: you can redistribute it and/or modify it under the terms of the **GNU Affero General Public License** as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version (`AGPL-3.0-or-later`, see [`LICENSE`](LICENSE)). It is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the license for details.
+
+Releases up to and including 1.1.0 were published under the MIT license and remain available under it.
+
+The built‑in Excalidraw is the [Excalidraw plugin for Obsidian](https://github.com/zsviczian/obsidian-excalidraw-plugin) by Zsolt Viczian, included unmodified and licensed under the GNU AGPL v3.0 (`vendor/excalidraw/LICENSE`; [`vendor/excalidraw/README.md`](vendor/excalidraw/README.md) names the included version and where its source code is). The license texts of Ink Notebook and of all third‑party code in the released `main.js` – the built‑in Excalidraw, pdf-lib and the libraries it uses – are appended to the end of that file.
