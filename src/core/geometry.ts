@@ -272,3 +272,106 @@ export class GridIndex<T> {
     return out;
   }
 }
+
+// ----- polylines and polygons (used to recognise hand-drawn checkboxes and tables) -----
+
+export function distance(a: Pt, b: Pt): number {
+  return Math.hypot(a.x - b.x, a.y - b.y);
+}
+
+/** Length of a polyline. */
+export function polylineLength(points: ReadonlyArray<Pt>): number {
+  let len = 0;
+  for (let i = 1; i < points.length; i++) len += distance(points[i - 1], points[i]);
+  return len;
+}
+
+/** Points along a polyline, `step` apart (first and last point included). */
+export function resample(points: ReadonlyArray<Pt>, step: number): Pt[] {
+  if (points.length === 0) return [];
+  const out: Pt[] = [points[0]];
+  if (!(step > 0)) return [...points];
+  let carry = 0;
+  for (let i = 1; i < points.length; i++) {
+    const a = points[i - 1];
+    const b = points[i];
+    const seg = distance(a, b);
+    let t = step - carry;
+    while (t <= seg) {
+      out.push({ x: a.x + ((b.x - a.x) * t) / seg, y: a.y + ((b.y - a.y) * t) / seg });
+      t += step;
+    }
+    carry = seg - (t - step);
+  }
+  const last = points[points.length - 1];
+  if (distance(out[out.length - 1], last) > 1e-6) out.push(last);
+  return out;
+}
+
+/** Distance from a point to the segment a–b. */
+export function distanceToSegment(p: Pt, a: Pt, b: Pt): number {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const len2 = dx * dx + dy * dy;
+  const t = len2 > 0 ? Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2)) : 0;
+  return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy));
+}
+
+/** Convex hull (Andrew's monotone chain), counter-clockwise, without repeated points. */
+export function convexHull(points: ReadonlyArray<Pt>): Pt[] {
+  const pts = [...points].sort((a, b) => a.x - b.x || a.y - b.y);
+  if (pts.length <= 2) return pts;
+  const cross = (o: Pt, a: Pt, b: Pt) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+  const lower: Pt[] = [];
+  for (const p of pts) {
+    while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) lower.pop();
+    lower.push(p);
+  }
+  const upper: Pt[] = [];
+  for (let i = pts.length - 1; i >= 0; i--) {
+    const p = pts[i];
+    while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) upper.pop();
+    upper.push(p);
+  }
+  lower.pop();
+  upper.pop();
+  return lower.concat(upper);
+}
+
+/** Area of a simple polygon (always positive). */
+export function polygonArea(poly: ReadonlyArray<Pt>): number {
+  let s = 0;
+  for (let i = 0; i < poly.length; i++) {
+    const a = poly[i];
+    const b = poly[(i + 1) % poly.length];
+    s += a.x * b.y - b.x * a.y;
+  }
+  return Math.abs(s) / 2;
+}
+
+export function polygonPerimeter(poly: ReadonlyArray<Pt>): number {
+  return poly.length < 2 ? 0 : polylineLength([...poly, poly[0]]);
+}
+
+/** Distance from a point to the outline of a polygon. */
+export function distanceToOutline(p: Pt, poly: ReadonlyArray<Pt>): number {
+  let best = Infinity;
+  for (let i = 0; i < poly.length; i++) best = Math.min(best, distanceToSegment(p, poly[i], poly[(i + 1) % poly.length]));
+  return best;
+}
+
+/** Is the point inside a convex polygon (either orientation)? */
+export function insideConvex(p: Pt, poly: ReadonlyArray<Pt>): boolean {
+  if (poly.length < 3) return false;
+  let sign = 0;
+  for (let i = 0; i < poly.length; i++) {
+    const a = poly[i];
+    const b = poly[(i + 1) % poly.length];
+    const c = (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x);
+    if (c === 0) continue;
+    const s = c > 0 ? 1 : -1;
+    if (sign === 0) sign = s;
+    else if (s !== sign) return false;
+  }
+  return true;
+}

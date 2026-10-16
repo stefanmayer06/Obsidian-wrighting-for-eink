@@ -7,7 +7,7 @@ fake Azure server that genuinely looks at the uploaded handwriting images
 chosen by the test).
 
 They cover: page creation, writing, flipping both ways, transcript layout,
-diagram embeds, edits being preserved, typed notes ⇄ drawing card, clickable
+diagram embeds, hand-drawn checkboxes and tables, edits being preserved, typed notes ⇄ drawing card, clickable
 handwritten links, undo safety, extra paper pages, diagram frames, offline
 queue, Read 3.2 fallback, error recovery, Ink Notebook Cloud (the real server
 code from `supabase/functions/ocr` with a fake Polar, see `scripts/mock-cloud.mjs`), Live Preview markers, the setup
