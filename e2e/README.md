@@ -11,7 +11,10 @@ diagram embeds, edits being preserved, typed notes ⇄ drawing card, clickable
 handwritten links, undo safety, extra paper pages, diagram frames, offline
 queue, Read 3.2 fallback, error recovery, Live Preview markers, the setup
 assistant, PDF annotation + export (incl. a rotated page), image annotation,
-rename sync, e-ink mode, plugin reload and Obsidian's mobile layout.
+rename sync, e-ink mode, plugin reload, Obsidian's mobile layout, the paper
+picker, the current-folder/`Attachments` layout (incl. rename/move sync), adding,
+inserting and changing pages, and that the bookmarks never overlap toolbars or
+panels at many window sizes.
 
 Linux only (uses Xvfb). Requirements: Node 20+, `xvfb`, the GTK/NSS libraries Electron needs.
 

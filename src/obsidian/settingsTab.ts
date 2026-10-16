@@ -1,10 +1,12 @@
 import { App, Notice, PluginSettingTab, Setting } from "obsidian";
 import type InkNotebookPlugin from "../main";
-import { PAPER_STYLES, type PaperStyle } from "../core/paper";
+import { paperLabel } from "../core/paper";
+import { cleanSubfolder } from "../core/folders";
+import { PaperPickerModal } from "./paperPicker";
 import { applyEinkClasses } from "./einkMode";
 import { applyEinkExcalidrawSettings, excalidrawSettingsDiff, isExcalidrawReady } from "./excalidrawBridge";
 import { AZURE_PORTAL_URL, README_URL, renderAzureSettings, SetupWizard } from "./setupWizard";
-import type { BookmarkPosition, DiagramSensitivity, TextViewMode } from "../settings";
+import type { BookmarkPosition, DiagramSensitivity, PageLocation, TextViewMode } from "../settings";
 
 export class InkSettingTab extends PluginSettingTab {
   constructor(
@@ -29,7 +31,20 @@ export class InkSettingTab extends PluginSettingTab {
     // ------------------------------------------------------------------ pages
     new Setting(containerEl).setName("Pages").setHeading();
     new Setting(containerEl)
-      .setName("Folder for new ink pages")
+      .setName("Where new pages go")
+      .setDesc("The folder of the note you are in, or always the same folder.")
+      .addDropdown((d) =>
+        d
+          .addOptions({ current: "Folder of the current note", fixed: "Fixed folder" })
+          .setValue(s.pageLocation)
+          .onChange(async (v) => {
+            s.pageLocation = v as PageLocation;
+            await save();
+            this.display();
+          }),
+      );
+    new Setting(containerEl)
+      .setName(s.pageLocation === "fixed" ? "Folder for new pages" : "Folder when no note is open")
       .addText((t) =>
         t.setValue(s.folder).onChange(async (v) => {
           s.folder = v.trim().replace(/^\/+|\/+$/g, "") || "Ink";
@@ -37,16 +52,37 @@ export class InkSettingTab extends PluginSettingTab {
         }),
       );
     new Setting(containerEl)
-      .setName("Paper")
-      .setDesc("Background for new ink pages (like the templates in the Boox Notes app).")
-      .addDropdown((d) =>
-        d
-          .addOptions(PAPER_STYLES)
-          .setValue(s.paperStyle)
+      .setName("Subfolder for ink files")
+      .setDesc("Drawings and paper backgrounds go into this subfolder of the text page's folder, so your folders only show your notes. Leave empty to keep them next to the text page.")
+      .addText((t) =>
+        t
+          .setPlaceholder("next to the text page")
+          .setValue(s.inkSubfolder)
           .onChange(async (v) => {
-            s.paperStyle = v as PaperStyle;
+            s.inkSubfolder = cleanSubfolder(v);
             await save();
           }),
+      );
+    const paperSetting = new Setting(containerEl)
+      .setName("Paper for new pages")
+      .setDesc(paperLabel(s.paper))
+      .addButton((b) =>
+        b.setButtonText("Choose…").onClick(async () => {
+          const choice = await PaperPickerModal.pick(this.app, { mode: "default", initial: s.paper });
+          if (!choice) return;
+          s.paper = choice.spec;
+          await save();
+          paperSetting.setDesc(paperLabel(s.paper));
+        }),
+      );
+    new Setting(containerEl)
+      .setName("Choose the paper for every new page")
+      .setDesc("Show the paper picker (ruled, dotted, squared, … with spacing, colour and orientation) when creating a page.")
+      .addToggle((t) =>
+        t.setValue(s.askForPaper).onChange(async (v) => {
+          s.askForPaper = v;
+          await save();
+        }),
       );
     new Setting(containerEl)
       .setName("Ask for a name when creating a page")
@@ -264,7 +300,7 @@ export class InkSettingTab extends PluginSettingTab {
     }
     new Setting(containerEl)
       .setName("Bookmark position")
-      .setDesc("Where the Ink/Text bookmarks sit on the right edge of the page.")
+      .setDesc("Where the bookmarks prefer to sit on the right edge of the page. They always move out of the way of toolbars and panels.")
       .addDropdown((d) =>
         d
           .addOptions({ top: "Upper", middle: "Middle", bottom: "Lower" })
@@ -272,6 +308,7 @@ export class InkSettingTab extends PluginSettingTab {
           .onChange(async (v) => {
             s.bookmarkPosition = v as BookmarkPosition;
             await save();
+            this.plugin.bookmarks.refreshAll();
           }),
       );
     new Setting(containerEl)

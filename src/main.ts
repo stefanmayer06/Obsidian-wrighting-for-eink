@@ -45,7 +45,7 @@ export default class InkNotebookPlugin extends Plugin {
 
   async onload(): Promise<void> {
     this.settings = loadSettings(await this.loadData());
-    this.pairs = new PairManager(this.app);
+    this.pairs = new PairManager(this.app, () => this.settings.inkSubfolder);
     this.ocr = new OcrService(
       this.app.vault.adapter,
       `${this.manifest.dir ?? `${this.app.vault.configDir}/plugins/${this.manifest.id}`}/ocr-cache.json`,
@@ -394,12 +394,34 @@ export default class InkNotebookPlugin extends Plugin {
     });
     this.addCommand({
       id: "add-paper-page",
-      name: "Add a new paper page to this ink page",
+      name: "Add a page… (choose paper and position)",
       icon: "file-plus-2",
       checkCallback: (checking) => {
         const leaf = this.app.workspace.getMostRecentLeaf();
         if (!leaf || !isExcalidrawView(leaf.view)) return false;
-        if (!checking) run(this.switcher.addPaperPage(leaf), "Could not add a page");
+        if (!checking) run(this.switcher.addPageInteractive(leaf), "Could not add a page");
+        return true;
+      },
+    });
+    this.addCommand({
+      id: "add-page-after",
+      name: "Add a page after this one (same paper)",
+      icon: "file-plus-2",
+      checkCallback: (checking) => {
+        const leaf = this.app.workspace.getMostRecentLeaf();
+        if (!leaf || !isExcalidrawView(leaf.view)) return false;
+        if (!checking) run(this.switcher.addPaperPage(leaf, { position: "after" }), "Could not add a page");
+        return true;
+      },
+    });
+    this.addCommand({
+      id: "change-paper",
+      name: "Change the paper of this page…",
+      icon: "layout-template",
+      checkCallback: (checking) => {
+        const leaf = this.app.workspace.getMostRecentLeaf();
+        if (!leaf || !isExcalidrawView(leaf.view)) return false;
+        if (!checking) run(this.switcher.changePaperInteractive(leaf), "Could not change the paper");
         return true;
       },
     });

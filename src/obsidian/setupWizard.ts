@@ -1,6 +1,7 @@
 import { App, Modal, Notice, Platform, Setting } from "obsidian";
 import type InkNotebookPlugin from "../main";
-import { PAPER_STYLES, type PaperStyle } from "../core/paper";
+import { paperLabel } from "../core/paper";
+import { PaperPickerModal } from "./paperPicker";
 import { normalizeEndpoint } from "../core/azureParse";
 import { currentDevice, applyEinkClasses } from "./einkMode";
 import {
@@ -218,24 +219,32 @@ export class SetupWizard extends Modal {
     // ---- Step 4: pages ----
     const step4 = this.step(contentEl, "4", "Your pages");
     new Setting(step4)
-      .setName("Folder for ink pages")
-      .addText((t) =>
-        t.setValue(s.folder).onChange(async (v) => {
-          s.folder = v.trim().replace(/^\/+|\/+$/g, "") || "Ink";
-          await this.plugin.saveSettings();
-        }),
-      );
-    new Setting(step4)
-      .setName("Paper")
-      .setDesc("Lined paper helps handwriting recognition.")
+      .setName("Where new pages go")
+      .setDesc(
+        s.inkSubfolder
+          ? `The text page goes into the folder of the note you are in, the drawing into its "${s.inkSubfolder}" subfolder.`
+          : "The text page and the drawing go into the folder of the note you are in.",
+      )
       .addDropdown((d) =>
         d
-          .addOptions(PAPER_STYLES)
-          .setValue(s.paperStyle)
+          .addOptions({ current: "Folder of the current note", fixed: `Always "${s.folder || "Ink"}"` })
+          .setValue(s.pageLocation)
           .onChange(async (v) => {
-            s.paperStyle = v as PaperStyle;
+            s.pageLocation = v === "fixed" ? "fixed" : "current";
             await this.plugin.saveSettings();
           }),
+      );
+    const paperSetting = new Setting(step4)
+      .setName("Paper")
+      .setDesc(`${paperLabel(s.paper)} – ruled paper helps handwriting recognition.`)
+      .addButton((b) =>
+        b.setButtonText("Choose…").onClick(async () => {
+          const choice = await PaperPickerModal.pick(this.app, { mode: "default", initial: s.paper });
+          if (!choice) return;
+          s.paper = choice.spec;
+          await this.plugin.saveSettings();
+          paperSetting.setDesc(`${paperLabel(s.paper)} – ruled paper helps handwriting recognition.`);
+        }),
       );
 
     // ---- Finish ----
@@ -256,7 +265,7 @@ export class SetupWizard extends Modal {
             s.setupDone = true;
             await this.plugin.saveSettings();
             this.close();
-            await this.plugin.switcher.createPage();
+            await this.plugin.switcher.createPage({ paper: s.paper });
           }),
       );
   }

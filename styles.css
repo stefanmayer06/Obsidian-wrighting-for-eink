@@ -13,19 +13,27 @@
   --ink-ribbon-paper: var(--background-primary);
   --ink-ribbon-height: 44px;
   --ink-notch: 12px;
+  --ink-gap: 8px;
   position: absolute;
   right: 0;
-  /* below Excalidraw's tool panel in the top right corner */
+  /* starting point only: the plugin measures toolbars/panels and moves the stack clear of them */
   top: clamp(190px, 28%, 45%);
   z-index: var(--layer-popover, 30);
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  gap: 8px;
+  gap: calc(var(--ink-gap) * 1.5);
   pointer-events: none;
   user-select: none;
   -webkit-user-select: none;
   touch-action: manipulation;
+}
+
+.ink-bookmark-tabs {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--ink-gap);
 }
 
 .ink-bookmarks.ink-pos-middle {
@@ -139,10 +147,24 @@
   cursor: progress;
 }
 
+/* "+ Page": a slimmer ribbon below the two tabs */
+.ink-bookmarks .ink-bookmark.ink-bookmark-add {
+  height: calc(var(--ink-ribbon-height) - 8px);
+  font-weight: 500;
+}
+
+.ink-bookmarks .ink-bookmark.ink-bookmark-add::before {
+  background: var(--ink-ribbon-paper);
+}
+
+.ink-bookmarks .ink-bookmark.is-hidden {
+  display: none;
+}
+
 .ink-large-targets .ink-bookmarks {
   --ink-ribbon-height: 54px;
   --ink-notch: 14px;
-  gap: 10px;
+  --ink-gap: 10px;
 }
 
 .ink-large-targets .ink-bookmarks .ink-bookmark.ink-bookmark {
@@ -153,6 +175,36 @@
 .ink-large-targets .ink-bookmark-icon svg {
   width: 22px;
   height: 22px;
+}
+
+/* Compact: icons only, used when the screen is too short for the full stack */
+.ink-bookmarks.is-compact {
+  --ink-ribbon-height: 36px;
+  --ink-notch: 10px;
+  --ink-gap: 5px;
+}
+
+.ink-large-targets .ink-bookmarks.is-compact {
+  --ink-ribbon-height: 44px;
+  --ink-notch: 12px;
+  --ink-gap: 6px;
+}
+
+.ink-bookmarks.is-compact .ink-bookmark-label {
+  display: none;
+}
+
+.ink-bookmarks.is-measuring .ink-bookmark.ink-bookmark {
+  transition: none;
+}
+
+.ink-bookmarks.is-compact .ink-bookmark.ink-bookmark {
+  min-width: 0;
+  padding-right: 10px;
+}
+
+.ink-bookmarks.is-compact .ink-bookmark.ink-bookmark.is-active {
+  padding-left: calc(var(--ink-notch) + 14px);
 }
 
 /* ---------- Text page --------------------------------------------------- */
@@ -192,6 +244,99 @@
 .ink-has-bookmarks.ink-text-page .markdown-reading-view .markdown-preview-view,
 .ink-has-bookmarks.ink-text-page .markdown-source-view.mod-cm6 .cm-scroller {
   padding-right: 88px;
+}
+
+/* ---------- Paper picker ------------------------------------------------ */
+
+.ink-modal.ink-paper-picker {
+  width: min(760px, 96vw);
+}
+
+.ink-paper-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 10px;
+  margin: 4px 0 10px;
+}
+
+.ink-paper-grid.is-landscape {
+  grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+}
+
+.ink-paper-picker .ink-paper-card.ink-paper-card {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  height: auto;
+  margin: 0;
+  padding: 6px;
+  border: 2px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-normal);
+  cursor: pointer;
+}
+
+.ink-paper-picker .ink-paper-card.ink-paper-card.is-selected {
+  border-color: var(--interactive-accent);
+  background: var(--background-modifier-hover);
+}
+
+.ink-paper-thumb {
+  aspect-ratio: 1000 / 1414;
+  border: 1px solid var(--background-modifier-border);
+  background: #ffffff;
+  overflow: hidden;
+}
+
+.ink-paper-grid.is-landscape .ink-paper-thumb {
+  aspect-ratio: 1414 / 1000;
+}
+
+.ink-paper-thumb img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.ink-paper-label {
+  font-size: var(--font-ui-small);
+  line-height: 1.2;
+  text-align: center;
+}
+
+.ink-paper-option.is-disabled {
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+.ink-segmented {
+  display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+.ink-segmented button {
+  margin: 0;
+}
+
+.ink-segmented button.is-active {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+.ink-swatch {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  margin-right: 6px;
+  border: 1px solid var(--text-muted);
+  border-radius: 50%;
+  vertical-align: -1px;
 }
 
 /* ---------- Setup & settings -------------------------------------------- */
@@ -348,6 +493,19 @@ body.ink-eink .ink-bookmarks {
   --ink-ribbon-paper: #ffffff;
 }
 
+body.ink-eink .ink-paper-picker .ink-paper-card.ink-paper-card.is-selected {
+  border: 3px solid #000000;
+  background: transparent;
+}
+
+body.ink-eink.theme-dark .ink-paper-picker .ink-paper-card.ink-paper-card.is-selected {
+  border-color: #ffffff;
+}
+
+body.ink-eink .ink-segmented button {
+  border: 1px solid var(--text-normal);
+}
+
 body.ink-eink.theme-dark .ink-bookmarks {
   --ink-ribbon-ink: #ffffff;
   --ink-ribbon-paper: #000000;
@@ -370,4 +528,8 @@ body.ink-eink .excalidraw .Island {
 body.ink-large-targets .ink-modal button,
 body.ink-large-targets .ink-settings button {
   min-height: 40px;
+}
+
+body.ink-large-targets .ink-paper-grid {
+  gap: 12px;
 }

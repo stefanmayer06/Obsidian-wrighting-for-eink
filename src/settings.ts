@@ -1,19 +1,28 @@
-import type { PaperStyle } from "./core/paper";
-import { isPaperStyle } from "./core/paper";
+import { DEFAULT_PAPER, isPaperStyle, normalizePaperSpec, type PaperSpec } from "./core/paper";
+import { cleanSubfolder } from "./core/folders";
 
 export type AzureApi = "auto" | "v4" | "v3.2";
 export type EinkMode = "auto" | "on" | "off";
 export type BookmarkPosition = "top" | "middle" | "bottom";
 export type TextViewMode = "reading" | "editing" | "keep";
 export type DiagramSensitivity = "low" | "normal" | "high";
+/** current: the folder of the note you are in; fixed: always `folder`. */
+export type PageLocation = "current" | "fixed";
 
 export interface InkSettings {
   /** Setup wizard completed (or dismissed). */
   setupDone: boolean;
 
   // ---- pages ----
+  pageLocation: PageLocation;
+  /** Folder for new pages when pageLocation is "fixed" (and when no note is open). */
   folder: string;
-  paperStyle: PaperStyle;
+  /** Subfolder (of the text page's folder) for the drawings and paper files; "" = next to the text page. */
+  inkSubfolder: string;
+  /** Paper for new pages. */
+  paper: PaperSpec;
+  /** Show the paper picker when creating a page. */
+  askForPaper: boolean;
   textViewMode: TextViewMode;
   askForPageName: boolean;
   keepNamesInSync: boolean;
@@ -57,8 +66,11 @@ export interface InkSettings {
 
 export const DEFAULT_SETTINGS: InkSettings = {
   setupDone: false,
+  pageLocation: "current",
   folder: "Ink",
-  paperStyle: "lined",
+  inkSubfolder: "Attachments",
+  paper: DEFAULT_PAPER,
+  askForPaper: true,
   textViewMode: "reading",
   askForPageName: false,
   keepNamesInSync: true,
@@ -114,8 +126,12 @@ export function loadSettings(raw: unknown): InkSettings {
   const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
   return {
     setupDone: bool(r.setupDone, d.setupDone),
+    pageLocation: oneOf(r.pageLocation, ["current", "fixed"] as const, d.pageLocation),
     folder: str(r.folder, d.folder).replace(/^\/+|\/+$/g, ""),
-    paperStyle: isPaperStyle(r.paperStyle) ? r.paperStyle : d.paperStyle,
+    inkSubfolder: cleanSubfolder(str(r.inkSubfolder, d.inkSubfolder)),
+    // older versions stored only the style
+    paper: normalizePaperSpec(r.paper ?? (isPaperStyle(r.paperStyle) ? { style: r.paperStyle } : undefined), d.paper),
+    askForPaper: bool(r.askForPaper, d.askForPaper),
     textViewMode: oneOf(r.textViewMode, ["reading", "editing", "keep"] as const, d.textViewMode),
     askForPageName: bool(r.askForPageName, d.askForPageName),
     keepNamesInSync: bool(r.keepNamesInSync, d.keepNamesInSync),

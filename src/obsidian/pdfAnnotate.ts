@@ -7,6 +7,7 @@ import { getInkData, INK_CUSTOM_DATA_KEY, type ExElement, type InkCustomData } f
 import { getEA, isExcalidrawView, release, viewElements, type ExcalidrawViewLike } from "./excalidrawBridge";
 import { FilePickModal, PdfImportModal } from "./modals";
 import { FM_PDF } from "./pairs";
+import { cleanSubfolder, homeFolder, joinPath } from "../core/folders";
 
 /**
  * Annotating PDFs and images, like in the Boox Notes app:
@@ -17,6 +18,13 @@ import { FM_PDF } from "./pairs";
  */
 
 const PAGE_GAP = 40;
+
+/** Exports go next to the text page (not into the ink subfolder with the drawing). */
+function exportFolder(plugin: InkNotebookPlugin, drawing: TFile): string {
+  const text = plugin.pairs.textFor(drawing);
+  if (text) return joinPath(text.parent?.path ?? "");
+  return homeFolder(joinPath(drawing.parent?.path ?? ""), cleanSubfolder(plugin.settings.inkSubfolder));
+}
 
 interface PdfPageRef {
   element: ExElement;
@@ -106,11 +114,12 @@ export async function annotatePdf(plugin: InkNotebookPlugin, file?: TFile | null
     }
     const info = await readPdfInfo(plugin, pdf, pages);
     const width = plugin.settings.pdfPageWidth;
-    const link = plugin.app.metadataCache.fileToLinktext(pdf, plugin.settings.folder || "", true);
     const created = await plugin.switcher.createPage({
       name: `${pdf.basename} (annotated)`,
       leaf,
-      extraTextFrontmatter: { [FM_PDF]: `[[${link}]]` },
+      // the annotated page goes next to the PDF (when new pages go into the current folder)
+      context: pdf,
+      extraTextFrontmatter: { [FM_PDF]: `[[${pdf.path}]]` },
       build: async (ea) => {
         let y = 0;
         let i = 0;
@@ -159,6 +168,7 @@ export async function annotateImage(plugin: InkNotebookPlugin, file?: TFile | nu
     await plugin.switcher.createPage({
       name: `${img.basename} (annotated)`,
       leaf,
+      context: img,
       build: async (ea) => {
         const id = await ea.addImage(0, 0, img, false, false);
         if (!id) throw new Error("The image could not be loaded");
@@ -302,8 +312,7 @@ export async function exportAnnotatedPdf(plugin: InkNotebookPlugin, leaf?: Works
         continue;
       }
       const bytes = await doc.save();
-      const folder = view.file.parent?.path ?? "";
-      const out = normalizePath(`${folder}/${src.basename} (annotated).pdf`);
+      const out = normalizePath(joinPath(exportFolder(plugin, view.file), `${src.basename} (annotated).pdf`));
       written.push(await writeBinary(plugin, out, bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer));
     }
     notice.hide();
@@ -349,7 +358,7 @@ export async function exportAnnotatedImage(plugin: InkNotebookPlugin, leaf?: Wor
     });
     if (!blob) throw new Error("Nothing was exported");
     const base = data?.image ? (data.image.split("/").pop() ?? "image").replace(/\.[^.]+$/, "") : view.file.basename;
-    const out = normalizePath(`${view.file.parent?.path ?? ""}/${base} (annotated).png`);
+    const out = normalizePath(joinPath(exportFolder(plugin, view.file), `${base} (annotated).png`));
     const file = await writeBinary(plugin, out, await blob.arrayBuffer());
     new Notice(`Saved ${file.path}`);
     await plugin.app.workspace.getLeaf("tab").openFile(file);
