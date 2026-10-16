@@ -5,7 +5,8 @@ import { cleanSubfolder } from "../core/folders";
 import { PaperPickerModal } from "./paperPicker";
 import { applyEinkClasses } from "./einkMode";
 import { applyEinkExcalidrawSettings, excalidrawSettingsDiff, isExcalidrawReady } from "./excalidrawBridge";
-import { AZURE_PORTAL_URL, README_URL, renderAzureSettings, SetupWizard } from "./setupWizard";
+import { SetupWizard } from "./setupWizard";
+import { renderRecognitionSettings } from "./recognitionSettings";
 import type { BookmarkPosition, DiagramSensitivity, PageLocation, TextViewMode } from "../settings";
 
 export class InkSettingTab extends PluginSettingTab {
@@ -115,41 +116,11 @@ export class InkSettingTab extends PluginSettingTab {
       );
 
     // ------------------------------------------------------------------ handwriting
-    new Setting(containerEl).setName("Handwriting recognition (Azure AI Vision)").setHeading();
-    const intro = containerEl.createDiv({ cls: "setting-item-description ink-block-desc" });
-    intro.appendText("Free tier: 5,000 images per month. ");
-    intro.createEl("a", { text: "Create a resource", href: AZURE_PORTAL_URL });
-    intro.appendText(" · ");
-    intro.createEl("a", { text: "Guide", href: README_URL });
-    renderAzureSettings(containerEl, this.plugin);
-    new Setting(containerEl)
-      .setName("API version")
-      .setDesc("Automatic tries Image Analysis 4.0 first and falls back to Read 3.2 (available in more regions).")
-      .addDropdown((d) =>
-        d
-          .addOptions({ auto: "Automatic", v4: "Image Analysis 4.0", "v3.2": "Read 3.2" })
-          .setValue(s.azureApi)
-          .onChange(async (v) => {
-            s.azureApi = v as typeof s.azureApi;
-            s.azureDetectedApi = "";
-            await save();
-          }),
-      );
-    new Setting(containerEl)
-      .setName("Language hint")
-      .setDesc('Optional two-letter code such as "de" or "en" (Read 3.2 only). Leave empty for automatic detection.')
-      .addText((t) =>
-        t
-          .setPlaceholder("auto")
-          .setValue(s.azureLanguage)
-          .onChange(async (v) => {
-            s.azureLanguage = v.trim();
-            await save();
-          }),
-      );
+    new Setting(containerEl).setName("Handwriting recognition").setHeading();
+    renderRecognitionSettings(containerEl, this.plugin, { advanced: true });
     new Setting(containerEl)
       .setName("Mark uncertain words")
-      .setDesc("Highlight words Azure is unsure about (==like this==) so they are easy to proofread.")
+      .setDesc("Highlight words the recognition is unsure about (==like this==) so they are easy to proofread.")
       .addToggle((t) =>
         t.setValue(s.highlightUncertain).onChange(async (v) => {
           s.highlightUncertain = v;
@@ -167,7 +138,7 @@ export class InkSettingTab extends PluginSettingTab {
       );
     new Setting(containerEl)
       .setName("Wait for recognition when flipping (seconds)")
-      .setDesc("If Azure takes longer, the text page opens anyway and updates when the result arrives.")
+      .setDesc("If recognition takes longer, the text page opens anyway and updates when the result arrives.")
       .addSlider((sl) =>
         sl
           .setLimits(3, 60, 1)
@@ -177,18 +148,6 @@ export class InkSettingTab extends PluginSettingTab {
             s.transcribeTimeoutSec = v;
             await save();
           }),
-      );
-    new Setting(containerEl)
-      .setName("Requests per minute")
-      .setDesc("The free tier allows 20 per minute.")
-      .addText((t) =>
-        t.setValue(String(s.requestsPerMinute)).onChange(async (v) => {
-          const n = parseInt(v, 10);
-          if (Number.isFinite(n) && n > 0) {
-            s.requestsPerMinute = n;
-            await save();
-          }
-        }),
       );
     new Setting(containerEl)
       .setName("Clickable handwritten links")

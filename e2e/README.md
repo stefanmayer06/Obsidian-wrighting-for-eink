@@ -9,7 +9,8 @@ chosen by the test).
 They cover: page creation, writing, flipping both ways, transcript layout,
 diagram embeds, edits being preserved, typed notes ⇄ drawing card, clickable
 handwritten links, undo safety, extra paper pages, diagram frames, offline
-queue, Read 3.2 fallback, error recovery, Live Preview markers, the setup
+queue, Read 3.2 fallback, error recovery, Ink Notebook Cloud (the real server
+code from `supabase/functions/ocr` with a fake Polar, see `scripts/mock-cloud.mjs`), Live Preview markers, the setup
 assistant, PDF annotation + export (incl. a rotated page), image annotation,
 rename sync, e-ink mode, plugin reload, Obsidian's mobile layout, the paper
 picker, the current-folder/`Attachments` layout (incl. rename/move sync), adding,

@@ -9,6 +9,7 @@ const VAULT = path.join(E2E, "vault");
 const SHOTS = path.join(E2E, "shots");
 fs.mkdirSync(SHOTS, { recursive: true });
 const MOCK = "http://127.0.0.1:8765";
+const CLOUD = "http://127.0.0.1:8766/functions/v1/ocr";
 const only = process.argv[2]; // optional: run a single step
 
 const browser = await chromium.connectOverCDP("http://127.0.0.1:9222");
@@ -475,6 +476,67 @@ steps.errors = async () => {
   await ev(() => __t.plugin().processQueue());
   const md2 = await ev((p) => __t.read(p), state.text);
   check("recovers after the key is fixed", md2.includes("fixed key line") && !/recognition failed/i.test(md2), md2.slice(0, 600));
+};
+
+steps.cloud = async () => {
+  console.log("\n▶ Ink Notebook Cloud: a license key instead of an Azure resource");
+  await setSettings({ ocrProvider: "cloud", cloudEndpoint: CLOUD, cloudLicenseKey: "INK_e2e-active-license", azureKey: "" });
+  await mock({ mode: "ok", responses: [["Recognised by the cloud"]] });
+  const writeAt = async (y) => {
+    await clickBookmark("ink");
+    await waitView("excalidraw", state.drawing);
+    await ev(async (y) => {
+      const v = __t.view();
+      const ea = __t.ea(v);
+      __t.word(ea, 100, y, 150, 30);
+      __t.word(ea, 270, y, 150, 30);
+      __t.word(ea, 440, y, 150, 30);
+      await ea.addElementsToView(false, true, true);
+      ea.destroy();
+    }, y);
+    await page.waitForTimeout(400);
+    await clickBookmark("text");
+    await waitView("markdown", state.text);
+    return ev((p) => __t.read(p), state.text);
+  };
+  const before = await ev(() => __t.plugin().ocr.cloudStatus());
+  const md = await writeAt(3400);
+  check("handwriting transcribed through Ink Notebook Cloud", md.includes("Recognised by the cloud"), md.slice(-800));
+  const status = await ev(() => __t.plugin().ocr.cloudStatus());
+  check("the cloud counts the recognition", status.used === before.used + 1 && status.limit === 100, JSON.stringify({ before, status }));
+
+  // Obsidian opens the settings in a window of their own; the plugin tab lives in app.setting.activeTab
+  await ev(() => __t.plugin().openSettings());
+  await page.waitForTimeout(1500);
+  const ui = await ev(() => {
+    const root = app.setting.activeTab?.containerEl;
+    const select = [...(root?.querySelectorAll(".setting-item") ?? [])].find((el) => el.querySelector(".setting-item-name")?.textContent === "Service")?.querySelector("select");
+    return { tab: app.setting.activeTab?.id, service: select?.value ?? null, subscribe: !!root?.querySelector('a[href="https://example.com/checkout"]'), azureFields: !!root?.querySelector('input[placeholder^="https://<name>"]') };
+  });
+  check("settings offer the cloud, with a Subscribe link and no Azure fields", ui.service === "cloud" && ui.subscribe && !ui.azureFields, JSON.stringify(ui));
+  const checked = await ev(async () => {
+    const root = app.setting.activeTab.containerEl;
+    [...root.querySelectorAll("button")].find((b) => b.textContent.trim() === "Check")?.click();
+    await __t.waitFor(() => /Active|✗/.test(root.querySelector(".ink-test-status")?.textContent ?? ""), 8000, "subscription check").catch(() => null);
+    [...root.querySelectorAll(".setting-item-heading")].find((h) => /Handwriting/.test(h.textContent))?.scrollIntoView();
+    return root.querySelector(".ink-test-status")?.textContent;
+  });
+  check("Check shows the subscription and usage", (checked ?? "").includes(`Active – ${status.used} of 100 recognitions used this month`), checked);
+  const settingsPage = browser.contexts().flatMap((c) => c.pages()).find((p) => p !== page && p.url() === "about:blank");
+  if (settingsPage) await settingsPage.screenshot({ path: path.join(SHOTS, "18-cloud-settings.png") }).catch(() => {});
+  await ev(() => app.setting.close());
+  await page.waitForTimeout(300);
+
+  await setSettings({ cloudLicenseKey: "INK_e2e-ended-license" });
+  const md2 = await writeAt(3500);
+  check("an ended subscription is explained on the text page", /recognition failed[\s\S]*license key is not active/i.test(md2), md2.slice(0, 600));
+  check("nothing is lost while the key is not active", md2.includes("Recognised by the cloud"));
+  await setSettings({ cloudLicenseKey: "INK_e2e-active-license" });
+  await mock({ responses: [["Renewed and working"]] });
+  await ev(() => __t.plugin().processQueue());
+  const md3 = await ev((p) => __t.read(p), state.text);
+  check("recognition resumes with an active key", md3.includes("Renewed and working") && !/not active/.test(md3), md3.slice(0, 600));
+  await setSettings({ ocrProvider: "azure", cloudEndpoint: "", cloudLicenseKey: "", azureKey: "test-key" });
 };
 
 steps.pdf = async () => {
@@ -990,7 +1052,7 @@ steps.collision = async () => {
   await setWindow(800, 1200);
 };
 
-const order = ["setup", "createPage", "write", "flipToText", "editText", "flipToInk", "flipBack", "editCard", "updateTyped", "undoSafety", "addPage", "markDiagram", "offline", "v3", "errors", "livePreview", "wizardTest", "pdf", "image", "rename", "eink", "reopen", "folders", "paperPages", "renameSub", "collision", "mobile"];
+const order = ["setup", "createPage", "write", "flipToText", "editText", "flipToInk", "flipBack", "editCard", "updateTyped", "undoSafety", "addPage", "markDiagram", "offline", "v3", "errors", "cloud", "livePreview", "wizardTest", "pdf", "image", "rename", "eink", "reopen", "folders", "paperPages", "renameSub", "collision", "mobile"];
 for (const name of order) {
   if (only && !only.split(",").includes(name) && name !== "setup") continue;
   try {

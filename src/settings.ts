@@ -1,7 +1,10 @@
 import { DEFAULT_PAPER, isPaperStyle, normalizePaperSpec, type PaperSpec } from "./core/paper";
 import { cleanSubfolder } from "./core/folders";
+import { CLOUD_ENDPOINT } from "./core/cloud";
 
 export type AzureApi = "auto" | "v4" | "v3.2";
+/** cloud: Ink Notebook Cloud subscription; azure: the user's own Azure resource. */
+export type OcrProvider = "cloud" | "azure";
 export type EinkMode = "auto" | "on" | "off";
 export type BookmarkPosition = "top" | "middle" | "bottom";
 export type TextViewMode = "reading" | "editing" | "keep";
@@ -28,6 +31,11 @@ export interface InkSettings {
   keepNamesInSync: boolean;
 
   // ---- handwriting recognition ----
+  ocrProvider: OcrProvider;
+  /** License key of the Ink Notebook Cloud subscription. */
+  cloudLicenseKey: string;
+  /** Override of the Ink Notebook Cloud server (development and tests only; not in the UI). */
+  cloudEndpoint: string;
   azureEndpoint: string;
   azureKey: string;
   azureApi: AzureApi;
@@ -75,6 +83,9 @@ export const DEFAULT_SETTINGS: InkSettings = {
   askForPageName: false,
   keepNamesInSync: true,
 
+  ocrProvider: "azure",
+  cloudLicenseKey: "",
+  cloudEndpoint: "",
   azureEndpoint: "",
   azureKey: "",
   azureApi: "auto",
@@ -136,6 +147,9 @@ export function loadSettings(raw: unknown): InkSettings {
     askForPageName: bool(r.askForPageName, d.askForPageName),
     keepNamesInSync: bool(r.keepNamesInSync, d.keepNamesInSync),
 
+    ocrProvider: oneOf(r.ocrProvider, ["cloud", "azure"] as const, d.ocrProvider),
+    cloudLicenseKey: str(r.cloudLicenseKey, d.cloudLicenseKey).trim(),
+    cloudEndpoint: str(r.cloudEndpoint, d.cloudEndpoint).trim(),
     azureEndpoint: str(r.azureEndpoint, d.azureEndpoint).trim(),
     azureKey: str(r.azureKey, d.azureKey).trim(),
     azureApi: oneOf(r.azureApi, ["auto", "v4", "v3.2"] as const, d.azureApi),
@@ -167,7 +181,11 @@ export function loadSettings(raw: unknown): InkSettings {
 }
 
 export function isOcrConfigured(s: InkSettings): boolean {
-  return !!s.azureEndpoint && !!s.azureKey;
+  return s.ocrProvider === "cloud" ? !!s.cloudLicenseKey : !!s.azureEndpoint && !!s.azureKey;
+}
+
+export function cloudEndpointFor(s: InkSettings): string {
+  return (s.cloudEndpoint || CLOUD_ENDPOINT).replace(/\/+$/, "");
 }
 
 export function classifyOptionsFor(s: InkSettings): { diagramGap: number; minDiagramSize: number } {

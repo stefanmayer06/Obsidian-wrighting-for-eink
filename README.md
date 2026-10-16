@@ -32,7 +32,7 @@ Taken by the automated end-to-end tests in real Obsidian + Excalidraw (the "hand
 ## Features
 
 - **Bookmark switcher** – two ribbon bookmarks on the right edge of every ink page: *Ink* (the drawing) and *Text* (the Markdown page). Tap to flip the page in the same tab. A third ribbon, *+ Page*, adds a page. Long‑press (or right‑click) for more: transcribe now, re‑transcribe, open side by side, add a page, change the paper. The bookmarks measure Excalidraw's toolbars and panels, the view header and the status bar and always sit clear of them, on any screen (on very short screens they shrink to icons).
-- **Handwriting → text with Azure AI Vision** – supports both *Image Analysis 4.0* and *Read 3.2* (picked automatically). Lines become paragraphs, `-`/`•` lines become lists, `[ ]` becomes a task, bigger writing becomes a heading, handwritten `[[links]]` become real Obsidian links – on the text page, and as a tappable link icon right on your handwriting on the ink page. Uncertain words can be highlighted for proofreading.
+- **Handwriting → text with Azure AI Vision** – with your own free Azure key, or with the optional *Ink Notebook Cloud* subscription (no Azure account needed). Supports both *Image Analysis 4.0* and *Read 3.2* (picked automatically). Lines become paragraphs, `-`/`•` lines become lists, `[ ]` becomes a task, bigger writing becomes a heading, handwritten `[[links]]` become real Obsidian links – on the text page, and as a tappable link icon right on your handwriting on the ink page. Uncertain words can be highlighted for proofreading.
 - **Drawings embedded live** – flowcharts, boxes, arrows and sketches are detected automatically and embedded on the text page with Excalidraw's area embeds (`![[page.excalidraw#^area=…]]`). Change the drawing and the text page shows the change. Put something in a frame named *Diagram …* (or use *Turn the selection into a diagram*) to force it.
 - **Your edits are kept** – fix a recognition mistake directly on the text page; the correction stays until you change that handwriting. Deleted or added paragraphs are remembered too.
 - **Typed notes on the drawing** – anything you type on the text page (outside the transcript) appears on the ink page as a text card, and edits to that card flow back.
@@ -69,9 +69,15 @@ You need **Obsidian 1.8.7+** and the **Excalidraw** plugin (Community plugins �
 
 When Ink Notebook starts the first time, a **setup assistant** opens (you can reopen it from the settings or the command *Open setup assistant*). It checks Excalidraw, turns on the e‑ink optimisations, offers the recommended pen settings, connects handwriting recognition and creates your first page.
 
-## Setting up handwriting recognition (Azure, free tier)
+## Setting up handwriting recognition
 
-Handwriting recognition is optional. Without it, the text page shows your handwriting as a picture (still with typed notes, links and diagrams).
+Handwriting recognition is optional. Without it, the text page shows your handwriting as a picture (still with typed notes, links and diagrams). There are two ways to turn it on – choose under *Settings → Ink Notebook → Handwriting recognition → Service* (or in the setup assistant):
+
+### Ink Notebook Cloud (subscription)
+
+No Azure account needed: subscribe, paste the license key from your purchase e-mail, press **Check** – done. The subscription includes a monthly allowance of recognitions (each changed writing area of a page counts as one); *Check* shows how much is used. Subscriptions are sold through [Polar](https://polar.sh), which also handles invoices and taxes; you manage or cancel yours in Polar's customer portal (linked in the settings). The option appears in the plugin while the service is open for subscriptions.
+
+### Your own Azure key (free tier)
 
 1. Sign in at the [Azure portal](https://portal.azure.com) (a free account is enough).
 2. Open [**Create Computer Vision**](https://portal.azure.com/#create/Microsoft.CognitiveServicesComputerVision).
@@ -82,7 +88,7 @@ Handwriting recognition is optional. Without it, the text page shows your handwr
 
 How many requests are used? One per *writing area* that changed since the last time (a page is split into areas so that writing in one corner does not re‑send the whole page). Results are cached, so flipping back and forth costs nothing.
 
-Privacy: only your handwriting strokes are rendered and sent (black on white – never the PDF or paper background, never your typed text), to the Azure region you picked. The key is stored in `.obsidian/plugins/ink-notebook/data.json` inside your vault – keep that in mind if you share your vault.
+Privacy: only your handwriting strokes are rendered and sent (black on white – never the PDF or paper background, never your typed text) – with your own key to the Azure region you picked, with Ink Notebook Cloud to the Ink Notebook server (EU), which passes them to Azure AI Vision and keeps nothing; Azure deletes them within 24 hours. The key (Azure key or license key) is stored in `.obsidian/plugins/ink-notebook/data.json` inside your vault – keep that in mind if you share your vault.
 
 ## Using it on a Boox (Note Air, Tab Ultra, Go, …)
 
@@ -130,7 +136,7 @@ The two `%% … %%` lines mark the transcript; in Live Preview they are shown as
 ## Settings
 
 - **Pages** – where new pages go (folder of the current note, or a fixed folder), the subfolder for ink files (`Attachments` by default; empty = next to the text page), paper for new pages and whether to choose it every time, ask for a name, open the text page in reading or editing view, keep names in sync on rename/move.
-- **Handwriting recognition** – endpoint, key, API version, language hint, highlight uncertain words, transcribe while writing, how long to wait when flipping, requests per minute, clickable handwritten links, diagram detection sensitivity, offline queue and cache.
+- **Handwriting recognition** – service (Ink Notebook Cloud or your own Azure key), license key or endpoint and key, API version, language hint, highlight uncertain words, transcribe while writing, how long to wait when flipping, requests per minute, clickable handwritten links, diagram detection sensitivity, offline queue and cache.
 - **Typed notes** – show them on the ink page, font and width of the card.
 - **Display & e‑ink** – e‑ink mode (automatic / on / off), large touch targets, Excalidraw stylus settings, preferred bookmark position (they still move out of the way of toolbars), bookmark on all drawings.
 - **PDF annotation** – page width on the ink page, how many pages to import without asking.
@@ -138,6 +144,8 @@ The two `%% … %%` lines mark the transcript; in Live Preview they are shown as
 ## Troubleshooting
 
 - **"Ink Notebook is built on the Excalidraw plugin"** – install/enable Excalidraw and reopen the setup assistant.
+- **"This license key is not active"** (Ink Notebook Cloud) – check the key in the settings (press *Check*), or renew the subscription in Polar's customer portal. Pages are transcribed automatically once the key works again.
+- **"You have used all … recognitions for this month"** – the allowance renews on the first of the month; until then pages are kept as pictures and queued.
 - **Test connection fails** – 401 means a wrong key; 404 a wrong endpoint (copy it exactly from *Keys and Endpoint*); 429 means the free tier's 20 requests/minute were reached (it retries automatically).
 - **Something was embedded as a picture instead of text** – that area was recognised as a drawing. Change *Diagram detection* to *Only clear drawings*, or write a little larger. Unrecognised handwriting is always shown as a picture rather than lost.
 - **Text on the text page is wrong** – just correct it there; your correction stays.
@@ -166,6 +174,14 @@ The pure logic (OCR parsing, classification, layout, transcript merging, PDF mat
 **Releasing:** bump `version` in `manifest.json`/`package.json` (and add it to `versions.json`), then on GitHub open *Actions → Build & release → Run workflow* (or push a tag like `1.0.1`). The workflow runs the tests, builds and publishes a release with `main.js`, `manifest.json` and `styles.css` – which is what BRAT and manual installs download.
 
 `e2e/` contains end-to-end tests that run the plugin inside the real Obsidian desktop app with the real Excalidraw plugin and a fake Azure server (see `e2e/README.md`).
+
+`supabase/` is the Ink Notebook Cloud server (a Supabase Edge Function and its database migrations); [docs/cloud-setup.md](docs/cloud-setup.md) explains how it is configured and run.
+
+## Payments, accounts and network use
+
+- **Payment:** Ink Notebook Cloud is an optional paid subscription. Everything else – including handwriting recognition with your own Azure key – is free.
+- **Account:** Ink Notebook Cloud needs a license key from a purchase (sold through Polar). Nothing else needs an account.
+- **Network use:** Ink Notebook works offline. It connects to the internet only for handwriting recognition: with your own key it sends handwriting images to *your* Azure AI Vision resource; with Ink Notebook Cloud it sends handwriting images and your license key to the Ink Notebook server (Supabase, Frankfurt), which checks the key with Polar and passes the images to Azure AI Vision. When you open the handwriting recognition settings or the setup assistant, the plugin asks the Ink Notebook server whether the subscription is offered (no personal data is sent). There is no telemetry and no ads.
 
 ## License
 

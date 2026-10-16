@@ -13,3 +13,6 @@ e2e/node_modules/
 e2e/*.log
 e2e/*.pid
 e2e/state.json
+supabase/.temp/
+supabase/.branches/
+supabase/functions/.env
