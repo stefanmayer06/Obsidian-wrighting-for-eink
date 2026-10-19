@@ -129,7 +129,9 @@ export class InkSettingTab extends PluginSettingTab {
     renderRecognitionSettings(containerEl, this.plugin, { advanced: true });
     new Setting(containerEl)
       .setName("Mark uncertain words")
-      .setDesc("Highlight words the recognition is unsure about (==like this==) so they are easy to proofread.")
+      .setDesc(
+        "Highlight words the recognition is unsure about (==like this==) on the text page so they are easy to proofread – also words it read correctly but found hard to read. The highlights stay in the note until you remove them.",
+      )
       .addToggle((t) =>
         t.setValue(s.highlightUncertain).onChange(async (v) => {
           s.highlightUncertain = v;

@@ -45,6 +45,7 @@ export interface InkSettings {
   requestsPerMinute: number;
   transcribeTimeoutSec: number;
   autoTranscribe: boolean;
+  /** Highlight words the recognition is unsure about with ==…== (opt-in). */
   highlightUncertain: boolean;
   uncertainThreshold: number;
   diagramSensitivity: DiagramSensitivity;
@@ -70,7 +71,11 @@ export interface InkSettings {
   // ---- internal ----
   /** Drawing paths waiting for handwriting recognition (offline queue). */
   queue: string[];
+  /** Version of the stored settings, for one-time migrations in loadSettings. */
+  settingsVersion: number;
 }
+
+export const SETTINGS_VERSION = 2;
 
 export const DEFAULT_SETTINGS: InkSettings = {
   setupDone: false,
@@ -94,7 +99,7 @@ export const DEFAULT_SETTINGS: InkSettings = {
   requestsPerMinute: 18,
   transcribeTimeoutSec: 15,
   autoTranscribe: false,
-  highlightUncertain: true,
+  highlightUncertain: false,
   uncertainThreshold: 0.6,
   diagramSensitivity: "normal",
   linkHandwriting: true,
@@ -113,6 +118,7 @@ export const DEFAULT_SETTINGS: InkSettings = {
   pdfMaxPagesWithoutAsking: 30,
 
   queue: [],
+  settingsVersion: SETTINGS_VERSION,
 };
 
 function oneOf<T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {
@@ -135,6 +141,8 @@ function str(value: unknown, fallback: string): string {
 export function loadSettings(raw: unknown): InkSettings {
   const d = DEFAULT_SETTINGS;
   const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  // data from before version 2 has no settingsVersion
+  const version = numberIn(r.settingsVersion, 1, SETTINGS_VERSION, 1);
   return {
     setupDone: bool(r.setupDone, d.setupDone),
     pageLocation: oneOf(r.pageLocation, ["current", "fixed"] as const, d.pageLocation),
@@ -158,7 +166,9 @@ export function loadSettings(raw: unknown): InkSettings {
     requestsPerMinute: numberIn(r.requestsPerMinute, 1, 600, d.requestsPerMinute),
     transcribeTimeoutSec: numberIn(r.transcribeTimeoutSec, 3, 120, d.transcribeTimeoutSec),
     autoTranscribe: bool(r.autoTranscribe, d.autoTranscribe),
-    highlightUncertain: bool(r.highlightUncertain, d.highlightUncertain),
+    // Version 1 highlighted uncertain words by default, which looked like highlights nobody made;
+    // it is opt-in now, so earlier data starts with it off.
+    highlightUncertain: version >= 2 && bool(r.highlightUncertain, d.highlightUncertain),
     uncertainThreshold: numberIn(r.uncertainThreshold, 0, 1, d.uncertainThreshold),
     diagramSensitivity: oneOf(r.diagramSensitivity, ["low", "normal", "high"] as const, d.diagramSensitivity),
     linkHandwriting: bool(r.linkHandwriting, d.linkHandwriting),
@@ -177,6 +187,7 @@ export function loadSettings(raw: unknown): InkSettings {
     pdfMaxPagesWithoutAsking: numberIn(r.pdfMaxPagesWithoutAsking, 1, 1000, d.pdfMaxPagesWithoutAsking),
 
     queue: Array.isArray(r.queue) ? r.queue.filter((q): q is string => typeof q === "string").slice(0, 500) : [],
+    settingsVersion: SETTINGS_VERSION,
   };
 }
 

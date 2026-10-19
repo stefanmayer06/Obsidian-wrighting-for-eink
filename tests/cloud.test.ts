@@ -61,6 +61,15 @@ describe("recognition settings", () => {
     expect(loadSettings({ ocrProvider: "something" }).ocrProvider).toBe("azure");
   });
 
+  it("marks uncertain words only when the user turned it on", () => {
+    expect(loadSettings({}).highlightUncertain).toBe(false);
+    // stored before version 2, when it was on by default
+    expect(loadSettings({ highlightUncertain: true }).highlightUncertain).toBe(false);
+    const turnedOn = loadSettings({ ...loadSettings({}), highlightUncertain: true });
+    expect(turnedOn.highlightUncertain).toBe(true);
+    expect(loadSettings(JSON.parse(JSON.stringify(turnedOn))).highlightUncertain).toBe(true);
+  });
+
   it("uses the built-in server unless overridden", () => {
     expect(cloudEndpointFor(loadSettings({}))).toMatch(/^https:\/\/\w+\.supabase\.co\/functions\/v1\/ocr$/);
     expect(cloudEndpointFor(loadSettings({ cloudEndpoint: "http://127.0.0.1:8765/ocr/" }))).toBe("http://127.0.0.1:8765/ocr");
