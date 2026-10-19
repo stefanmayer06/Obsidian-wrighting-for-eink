@@ -422,27 +422,30 @@ steps.tasksTables = async () => {
     __t.word(ea, 245, 605, 60, 30);
     __t.box(ea, 100, 670, 40, 40);
     __t.word(ea, 160, 675, 90, 30);
-    // a table: a header line, two column lines, the headings above the line and one row below it
+    // a 3×3 table: a line under the headings, one between the rows, two column lines
     __t.path(ea, [[100, 1200], [400, 1201], [700, 1203]]);
-    __t.path(ea, [[300, 1150], [301, 1300], [300, 1450]]);
-    __t.path(ea, [[500, 1150], [500, 1300], [501, 1450]]);
-    for (const x of [150, 350, 550]) {
-      __t.word(ea, x, 1160, 80, 30);
-      __t.word(ea, x, 1250, 60, 30);
-    }
+    __t.path(ea, [[100, 1300], [400, 1299], [700, 1297]]);
+    __t.path(ea, [[300, 1150], [301, 1300], [300, 1420]]);
+    __t.path(ea, [[500, 1150], [500, 1300], [501, 1420]]);
+    for (const x of [150, 350, 550]) for (const y of [1160, 1240, 1345]) __t.word(ea, x, y, 60, 30);
     await ea.addElementsToView(false, true, true);
     ea.destroy();
   });
   await page.waitForTimeout(800);
   await shot("tasks-tables-ink.png");
-  // OCR reads the drawn boxes as "D" and "0"; the table lines are a drawing to it
-  await mock({ responses: [["D get the", "0 milk"], ["a b c", "1 2 3"]] });
+  const units = await ev(() => {
+    const strokes = __t.view().excalidrawAPI.getSceneElements().filter((e) => e.type === "freedraw" && !e.isDeleted && !e.customData?.inkNotebook);
+    return __t.plugin().internals.planOcrUnits(strokes, 150).map((u) => ({ all: u.elementIds.length, drawn: u.renderIds.length }));
+  });
+  check("the four table lines are left out of the OCR image", units.some((u) => u.all === 13 && u.drawn === 9), JSON.stringify(units));
+  // OCR reads the drawn boxes as "D" and "0"; the table lines are left out of its image
+  await mock({ responses: [["D get the", "0 milk"], ["a b c", "d e f", "g h i"]] });
   await clickBookmark("text");
   await waitView("markdown", text);
   const md = await ev((p) => __t.read(p), text);
   console.log("----- text page -----\n" + md + "\n---------------------");
   check("hand-drawn boxes become tasks (ticked = done)", md.includes("- [x] get the\n- [ ] milk"), md);
-  check("hand-drawn table becomes a Markdown table", md.includes("| a | b | c |\n| --- | --- | --- |\n| 1 | 2 | 3 |"), md);
+  check("hand-drawn table becomes a Markdown table", md.includes("| a | b | c |\n| --- | --- | --- |\n| d | e | f |\n| g | h | i |"), md);
   check("neither is embedded as a picture", !md.includes("#^area="), md);
   const rendered = await ev(async () => {
     await __t.waitFor(() => document.querySelector(".workspace-leaf.mod-active .markdown-reading-view table"), 5000, "table");

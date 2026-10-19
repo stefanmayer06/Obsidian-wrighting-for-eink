@@ -1,6 +1,7 @@
 import type { ExElement } from "../types/excalidraw";
-import { absolutePoints, bottom, clusterRects, elementRect, unionAll, type Pt, type Rect } from "./geometry";
+import { absolutePoints, bottom, clusterRects, elementRect, median, straightLineDirection, unionAll, type Pt, type Rect } from "./geometry";
 import { shortHash } from "./hash";
+import { strokeLines } from "./table";
 
 /**
  * Planning of OCR images: which strokes go into which image, at which scale,
@@ -68,7 +69,26 @@ export interface OcrUnit {
   /** Stable cache key derived from the strokes' ids and versions. */
   key: string;
   elementIds: string[];
+  /**
+   * The strokes drawn into the image. Long straight lines (table lines, underlines,
+   * strike-throughs) are left out: they are never writing, and OCR reads them as "|", "l",
+   * "—" or misses the writing that touches them.
+   */
+  renderIds: string[];
   plan: RenderPlan;
+}
+
+/** Strokes of a unit that only draw long straight lines, relative to the size of its other strokes. */
+export function guideLineIds(strokes: ReadonlyArray<ExElement>, rects: ReadonlyArray<Rect>): Set<string> {
+  const points = strokes.map((s) => absolutePoints(s));
+  // the size of the writing: strokes that are not straight lines (a "1" or "l" is, and counts as writing anyway)
+  const size = median(rects.filter((_, i) => !straightLineDirection(points[i], 0)).map((r) => Math.max(r.w, r.h)));
+  const minLen = Math.max(120, 4 * size);
+  const out = new Set<string>();
+  strokes.forEach((s, i) => {
+    if (Math.max(rects[i].w, rects[i].h) >= minLen && strokeLines(points[i], minLen, size || 30).length > 0) out.add(s.id);
+  });
+  return out;
 }
 
 /**
@@ -118,11 +138,22 @@ export function planOcrUnits(
     const r = unionAll(idx.map((i) => rects[i]));
     if (!r) return;
     const ids = idx.map((i) => strokes[i].id);
-    const sig = idx
-      .map((i) => strokeSignature(strokes[i]))
-      .sort()
-      .join("|");
-    units.push({ key: shortHash(sig, 8) + shortHash(`${sig}#`, 8), elementIds: ids, plan: makeRenderPlan(r, limits) });
+    const guides = guideLineIds(
+      idx.map((i) => strokes[i]),
+      idx.map((i) => rects[i]),
+    );
+    // images without the lines read differently: they get their own cache entries
+    const sig =
+      idx
+        .map((i) => strokeSignature(strokes[i]))
+        .sort()
+        .join("|") + (guides.size > 0 ? "|no-lines" : "");
+    units.push({
+      key: shortHash(sig, 8) + shortHash(`${sig}#`, 8),
+      elementIds: ids,
+      renderIds: ids.filter((id) => !guides.has(id)),
+      plan: makeRenderPlan(r, limits),
+    });
   };
   const maxSceneSide = (limits.maxSide - 2 * limits.padding) / limits.minScale;
   for (const g of groups) {

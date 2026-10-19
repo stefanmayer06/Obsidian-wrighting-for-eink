@@ -375,3 +375,52 @@ export function insideConvex(p: Pt, poly: ReadonlyArray<Pt>): boolean {
   }
   return true;
 }
+
+/** Ramer–Douglas–Peucker: indices of the points that keep the polyline within `epsilon`. */
+export function simplifyIndices(points: ReadonlyArray<Pt>, epsilon: number): number[] {
+  if (points.length <= 2) return points.map((_, i) => i);
+  const keep = new Uint8Array(points.length);
+  keep[0] = 1;
+  keep[points.length - 1] = 1;
+  const stack: Array<[number, number]> = [[0, points.length - 1]];
+  while (stack.length > 0) {
+    const [a, b] = stack.pop() as [number, number];
+    let worst = -1;
+    let worstD = epsilon;
+    for (let i = a + 1; i < b; i++) {
+      const d = distanceToSegment(points[i], points[a], points[b]);
+      if (d > worstD) {
+        worst = i;
+        worstD = d;
+      }
+    }
+    if (worst >= 0) {
+      keep[worst] = 1;
+      stack.push([a, worst], [worst, b]);
+    }
+  }
+  const out: number[] = [];
+  keep.forEach((k, i) => k && out.push(i));
+  return out;
+}
+
+const MAX_LINE_TILT = (20 * Math.PI) / 180;
+
+/**
+ * Is the polyline one long, fairly straight, roughly horizontal or vertical line (a ruled
+ * line, an underline, a table line)? Gentle curves and a hook at the end are allowed.
+ */
+export function straightLineDirection(pts: ReadonlyArray<Pt>, minLen: number): "h" | "v" | null {
+  if (pts.length < 2) return null;
+  const a = pts[0];
+  const b = pts[pts.length - 1];
+  const chord = Math.hypot(b.x - a.x, b.y - a.y);
+  if (chord < minLen) return null;
+  const angle = Math.abs(Math.atan2(b.y - a.y, b.x - a.x));
+  const fromHorizontal = Math.min(angle, Math.PI - angle);
+  const horizontal = fromHorizontal <= Math.PI / 4;
+  if ((horizontal ? fromHorizontal : Math.PI / 2 - fromHorizontal) > MAX_LINE_TILT) return null;
+  if (polylineLength(pts) > 1.25 * chord) return null;
+  for (const p of pts) if (distanceToSegment(p, a, b) > 0.12 * chord) return null;
+  return horizontal ? "h" : "v";
+}

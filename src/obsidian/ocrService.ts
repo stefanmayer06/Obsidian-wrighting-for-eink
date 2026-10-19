@@ -96,7 +96,7 @@ export class OcrService {
   }
 
   hasCached(unit: OcrUnit): boolean {
-    return this.cache.has(unit.key);
+    return unit.renderIds.length === 0 || this.cache.has(unit.key);
   }
 
   private async rateLimit(deadline: number): Promise<boolean> {
@@ -173,6 +173,8 @@ export class OcrService {
     const markPending = (u: OcrUnit) => u.elementIds.forEach((id) => pendingIds.add(id));
 
     for (const unit of units) {
+      // only table lines or underlines: nothing to read
+      if (unit.renderIds.length === 0) continue;
       const cached = this.cache.get(unit.key);
       if (cached) {
         cached.t = Date.now();
@@ -200,7 +202,7 @@ export class OcrService {
         continue;
       }
       try {
-        const strokes = unit.elementIds.map((id) => elementsById.get(id)).filter((e): e is ExElement => !!e);
+        const strokes = unit.renderIds.map((id) => elementsById.get(id)).filter((e): e is ExElement => !!e);
         const png = await renderStrokesPng(unit.plan, strokes);
         requests++;
         const imageLines = await this.recognizePng(png);
