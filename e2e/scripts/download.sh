@@ -1,5 +1,5 @@
 #!/bin/bash
-# Download Obsidian (AppImage) used by the tests. Excalidraw is built into Ink Notebook (vendor/excalidraw).
+# Download Obsidian (AppImage) used by the tests.
 set -e
 E2E=$(cd "$(dirname "$0")/.." && pwd)
 OBSIDIAN_VERSION=${OBSIDIAN_VERSION:-1.14.4}

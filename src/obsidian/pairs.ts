@@ -1,12 +1,12 @@
 import { App, normalizePath, TAbstractFile, TFile, TFolder } from "obsidian";
-import { isExcalidrawFile } from "./excalidrawBridge";
 import { renderRegion } from "../core/transcript";
+import { INK_FRONTMATTER_KEY } from "../core/ink/codec";
 import { cleanSubfolder, homeFolder, joinPath, parentPath, partnerTarget } from "../core/folders";
 
 /**
  * An "ink page" is a pair of files:
- *   - the drawing      `Attachments/Name.excalidraw.md` (frontmatter `ink-text: "[[Folder/Name]]"`)
- *   - the text page    `Name.md`  (frontmatter `ink-drawing: "[[Folder/Attachments/Name.excalidraw]]"`)
+ *   - the drawing      `Attachments/Name.ink.md` (frontmatter `ink-notebook: 1`, `ink-text: "[[Folder/Name]]"`)
+ *   - the text page    `Name.md`  (frontmatter `ink-drawing: "[[Folder/Attachments/Name.ink]]"`)
  * The drawing sits in the ink subfolder of the text page's folder (or next to it).
  * The frontmatter links use full paths – names like "Week 1" repeat across folders –
  * make the pair visible in the graph/backlinks and let us find the partner after renames.
@@ -32,8 +32,15 @@ function linkFromFrontmatter(value: unknown): string | null {
   return plain ? plain : null;
 }
 
+export const INK_SUFFIX = ".ink.md";
+
 export function drawingBaseName(file: TFile): string {
-  return file.basename.replace(/\.excalidraw$/i, "");
+  return file.basename.replace(/\.ink$/i, "");
+}
+
+/** Is this the path of an ink page file (by its name)? */
+export function isInkPath(path: string): boolean {
+  return path.toLowerCase().endsWith(INK_SUFFIX);
 }
 
 /** Folder path of a file ("" for the vault root). */
@@ -63,8 +70,12 @@ export class PairManager {
     return f instanceof TFile ? f : null;
   }
 
+  /** An ink page file: `Name.ink.md`, or any note with the `ink-notebook` property. */
   isDrawing(file: TFile | null | undefined): file is TFile {
-    return !!file && isExcalidrawFile(this.app, file);
+    if (!file || !(file instanceof TFile) || file.extension !== "md") return false;
+    if (isInkPath(file.path)) return true;
+    const fm = this.app.metadataCache.getFileCache(file)?.frontmatter;
+    return !!fm && fm[INK_FRONTMATTER_KEY] !== undefined;
   }
 
   /** A markdown file that is the text side of an ink page. */
@@ -79,10 +90,10 @@ export class PairManager {
     const fm = this.app.metadataCache.getFileCache(text)?.frontmatter;
     const viaLink = this.resolve(linkFromFrontmatter(fm?.[FM_TEXT_TO_DRAWING]), text);
     if (viaLink && this.isDrawing(viaLink)) return viaLink;
-    // convention fallback: Name.excalidraw.md next to the text page or in its ink subfolder
+    // convention fallback: Name.ink.md next to the text page or in its ink subfolder
     const folder = folderOf(text);
     for (const dir of this.sub ? [folder, joinPath(folder, this.sub)] : [folder]) {
-      const candidate = this.fileAt(joinPath(dir, `${text.basename}.excalidraw.md`));
+      const candidate = this.fileAt(joinPath(dir, `${text.basename}${INK_SUFFIX}`));
       if (candidate && this.isDrawing(candidate)) return candidate;
     }
     return null;
@@ -155,7 +166,7 @@ export class PairManager {
     let n = 2;
     const exists = (nm: string) =>
       !!this.app.vault.getAbstractFileByPath(normalizePath(joinPath(textFolder, `${nm}.md`))) ||
-      !!this.app.vault.getAbstractFileByPath(normalizePath(joinPath(inkFolder, `${nm}.excalidraw.md`))) ||
+      !!this.app.vault.getAbstractFileByPath(normalizePath(joinPath(inkFolder, `${nm}${INK_SUFFIX}`))) ||
       !!this.app.vault.getAbstractFileByPath(normalizePath(joinPath(inkFolder, `${nm}.md`)));
     while (exists(name)) name = `${clean} ${n++}`;
     return name;

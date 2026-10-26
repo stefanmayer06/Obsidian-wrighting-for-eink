@@ -6,8 +6,7 @@
  *
  *   Computer Architecture/
  *     Attachments/
- *       Week 1.excalidraw.md
- *       ink-paper-lined.svg
+ *       Week 1.ink.md
  *     Week 1.md
  *
  * Paths are vault paths without leading/trailing slashes; "" is the vault root.
@@ -52,14 +51,14 @@ export function homeFolder(folder: string, sub: string): string {
   return isInkSubfolder(folder, sub) ? folder.slice(0, Math.max(0, folder.length - sub.length - 1)) : folder;
 }
 
-/** "a/Week 1.excalidraw.md" → "Week 1" */
+/** "a/Week 1.ink.md" → "Week 1" */
 export function plainName(path: string): string {
-  return lastSegment(path).replace(/\.md$/i, "").replace(/\.excalidraw$/i, "");
+  return lastSegment(path).replace(/\.md$/i, "").replace(/\.ink$/i, "");
 }
 
-/** ".excalidraw.md", ".excalidraw" or ".md" */
+/** ".ink.md" or ".md" */
 function pageSuffix(path: string): string {
-  const m = /(\.excalidraw\.md|\.excalidraw|\.md)$/i.exec(path);
+  const m = /(\.ink\.md|\.md)$/i.exec(path);
   return m ? m[1] : "";
 }
 

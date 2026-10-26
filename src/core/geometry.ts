@@ -1,4 +1,4 @@
-import type { ExElement } from "../types/excalidraw";
+import type { SceneElement } from "./scene";
 
 /** Axis-aligned rectangle in scene coordinates. */
 export interface Rect {
@@ -108,10 +108,10 @@ const LINEAR_TYPES = new Set(["freedraw", "line", "arrow"]);
 
 /**
  * Absolute points of a linear element (freedraw / line / arrow), with the
- * element's rotation applied. Excalidraw stores points relative to (x, y)
+ * element's rotation applied. The scene stores points relative to (x, y)
  * and rotates around the centre of the points' bounding box.
  */
-export function absolutePoints(el: ExElement): Pt[] {
+export function absolutePoints(el: SceneElement): Pt[] {
   const pts = el.points ?? [];
   const abs: Pt[] = [];
   for (const p of pts) {
@@ -126,7 +126,7 @@ export function absolutePoints(el: ExElement): Pt[] {
 }
 
 /** Axis-aligned bounding box of an element in scene coordinates. */
-export function elementRect(el: ExElement): Rect {
+export function elementRect(el: SceneElement): Rect {
   if (LINEAR_TYPES.has(el.type) && el.points && el.points.length > 0) {
     const r = rectFromPoints(absolutePoints(el));
     if (r) return r;

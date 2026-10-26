@@ -1,11 +1,11 @@
-import type { ExElement } from "../src/types/excalidraw";
+import type { SceneElement } from "../src/core/scene";
 import type { OcrLine, OcrWord } from "../src/core/ocrTypes";
 import type { Rect } from "../src/core/geometry";
 
 let version = 1;
 
 /** A zig-zag freedraw stroke filling the given box (like a handwritten word). */
-export function stroke(id: string, x: number, y: number, w: number, h: number, extra: Partial<ExElement> = {}): ExElement {
+export function stroke(id: string, x: number, y: number, w: number, h: number, extra: Partial<SceneElement> = {}): SceneElement {
   const points: Array<[number, number]> = [];
   const n = 24;
   for (let i = 0; i <= n; i++) {
@@ -15,7 +15,7 @@ export function stroke(id: string, x: number, y: number, w: number, h: number, e
 }
 
 /** A hand-drawn rectangle outline as a single freedraw stroke. */
-export function boxStroke(id: string, x: number, y: number, w: number, h: number): ExElement {
+export function boxStroke(id: string, x: number, y: number, w: number, h: number): SceneElement {
   const pts: Array<[number, number]> = [];
   const steps = 20;
   for (let i = 0; i <= steps; i++) pts.push([(w * i) / steps, 0]);
@@ -25,11 +25,11 @@ export function boxStroke(id: string, x: number, y: number, w: number, h: number
   return { id, type: "freedraw", x, y, width: w, height: h, points: pts, strokeWidth: 1, version: version++ };
 }
 
-export function shape(id: string, type: string, x: number, y: number, w: number, h: number, extra: Partial<ExElement> = {}): ExElement {
+export function shape(id: string, type: string, x: number, y: number, w: number, h: number, extra: Partial<SceneElement> = {}): SceneElement {
   return { id, type, x, y, width: w, height: h, version: version++, ...extra };
 }
 
-export function textEl(id: string, text: string, x: number, y: number, w = 200, h = 25, extra: Partial<ExElement> = {}): ExElement {
+export function textEl(id: string, text: string, x: number, y: number, w = 200, h = 25, extra: Partial<SceneElement> = {}): SceneElement {
   return { id, type: "text", x, y, width: w, height: h, text, originalText: text, rawText: text, fontSize: 20, version: version++, ...extra };
 }
 
@@ -49,7 +49,7 @@ export function line(text: string, box: Rect, confidence = 0.95): OcrLine {
 }
 
 /** A freedraw stroke through the given points (densified like real pen input). */
-export function poly(id: string, pts: ReadonlyArray<[number, number]>, extra: Partial<ExElement> = {}): ExElement {
+export function poly(id: string, pts: ReadonlyArray<[number, number]>, extra: Partial<SceneElement> = {}): SceneElement {
   const dense: Array<[number, number]> = [];
   for (let i = 0; i < pts.length; i++) {
     if (i === 0) {

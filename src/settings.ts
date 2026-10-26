@@ -1,6 +1,11 @@
 import { DEFAULT_PAPER, isPaperStyle, normalizePaperSpec, type PaperSpec } from "./core/paper";
 import { cleanSubfolder } from "./core/folders";
 import { CLOUD_ENDPOINT } from "./core/cloud";
+import { PENS } from "./core/ink/pens";
+import { PEN_TYPES } from "./core/ink/model";
+import { SHAPES, type ShapeKind } from "./core/ink/shapes";
+import { DEFAULT_TOOL_STATE, type FitMode, type PenButtonAction, type ToolState, type WritingPen } from "./ink/types";
+import type { ToolbarPosition } from "./ink/ui/toolbar";
 
 export type AzureApi = "auto" | "v4" | "v3.2";
 /** cloud: Ink Notebook Cloud subscription; azure: the user's own Azure resource. */
@@ -52,20 +57,29 @@ export interface InkSettings {
   /** Make handwritten [[links]] clickable on the ink page. */
   linkHandwriting: boolean;
 
-  // ---- typed notes ----
-  syncTypedNotes: boolean;
-  typedFontFamily: number;
-  typedFontSize: number;
-  typedWidth: number;
+  // ---- writing (the ink page) ----
+  /** The selected tool, pens, colours and sizes (remembered between sessions). */
+  tools: ToolState;
+  /** Fingers draw (otherwise they turn pages, pan and zoom). */
+  fingerDrawing: boolean;
+  /** What holding the pen's side button does. */
+  sideButton: PenButtonAction;
+  pressure: boolean;
+  twoFingerUndo: boolean;
+  threeFingerRedo: boolean;
+  swipePages: boolean;
+  scribbleErase: boolean;
+  holdToShape: boolean;
+  fit: FitMode;
+  toolbarPosition: ToolbarPosition;
+  lowLatency: boolean;
 
   // ---- display ----
   einkMode: EinkMode;
   bookmarkPosition: BookmarkPosition;
-  showBookmarkOnAllDrawings: boolean;
   largeTouchTargets: boolean;
 
   // ---- pdf ----
-  pdfPageWidth: number;
   pdfMaxPagesWithoutAsking: number;
 
   // ---- internal ----
@@ -75,7 +89,7 @@ export interface InkSettings {
   settingsVersion: number;
 }
 
-export const SETTINGS_VERSION = 2;
+export const SETTINGS_VERSION = 3;
 
 export const DEFAULT_SETTINGS: InkSettings = {
   setupDone: false,
@@ -104,17 +118,23 @@ export const DEFAULT_SETTINGS: InkSettings = {
   diagramSensitivity: "normal",
   linkHandwriting: true,
 
-  syncTypedNotes: true,
-  typedFontFamily: 6,
-  typedFontSize: 20,
-  typedWidth: 560,
+  tools: DEFAULT_TOOL_STATE,
+  fingerDrawing: false,
+  sideButton: "eraser",
+  pressure: true,
+  twoFingerUndo: true,
+  threeFingerRedo: true,
+  swipePages: true,
+  scribbleErase: true,
+  holdToShape: true,
+  fit: "page",
+  toolbarPosition: "top",
+  lowLatency: true,
 
   einkMode: "auto",
   bookmarkPosition: "top",
-  showBookmarkOnAllDrawings: true,
   largeTouchTargets: true,
 
-  pdfPageWidth: 1000,
   pdfMaxPagesWithoutAsking: 30,
 
   queue: [],
@@ -173,21 +193,61 @@ export function loadSettings(raw: unknown): InkSettings {
     diagramSensitivity: oneOf(r.diagramSensitivity, ["low", "normal", "high"] as const, d.diagramSensitivity),
     linkHandwriting: bool(r.linkHandwriting, d.linkHandwriting),
 
-    syncTypedNotes: bool(r.syncTypedNotes, d.syncTypedNotes),
-    typedFontFamily: numberIn(r.typedFontFamily, 1, 10, d.typedFontFamily),
-    typedFontSize: numberIn(r.typedFontSize, 8, 72, d.typedFontSize),
-    typedWidth: numberIn(r.typedWidth, 200, 2000, d.typedWidth),
+    tools: loadTools(r.tools),
+    fingerDrawing: bool(r.fingerDrawing, d.fingerDrawing),
+    sideButton: oneOf(r.sideButton, ["eraser", "lasso", "none"] as const, d.sideButton),
+    pressure: bool(r.pressure, d.pressure),
+    twoFingerUndo: bool(r.twoFingerUndo, d.twoFingerUndo),
+    threeFingerRedo: bool(r.threeFingerRedo, d.threeFingerRedo),
+    swipePages: bool(r.swipePages, d.swipePages),
+    scribbleErase: bool(r.scribbleErase, d.scribbleErase),
+    holdToShape: bool(r.holdToShape, d.holdToShape),
+    fit: oneOf(r.fit, ["page", "width"] as const, d.fit),
+    toolbarPosition: oneOf(r.toolbarPosition, ["top", "bottom", "left", "right"] as const, d.toolbarPosition),
+    lowLatency: bool(r.lowLatency, d.lowLatency),
 
     einkMode: oneOf(r.einkMode, ["auto", "on", "off"] as const, d.einkMode),
     bookmarkPosition: oneOf(r.bookmarkPosition, ["top", "middle", "bottom"] as const, d.bookmarkPosition),
-    showBookmarkOnAllDrawings: bool(r.showBookmarkOnAllDrawings, d.showBookmarkOnAllDrawings),
     largeTouchTargets: bool(r.largeTouchTargets, d.largeTouchTargets),
 
-    pdfPageWidth: numberIn(r.pdfPageWidth, 300, 4000, d.pdfPageWidth),
     pdfMaxPagesWithoutAsking: numberIn(r.pdfMaxPagesWithoutAsking, 1, 1000, d.pdfMaxPagesWithoutAsking),
 
     queue: Array.isArray(r.queue) ? r.queue.filter((q): q is string => typeof q === "string").slice(0, 500) : [],
     settingsVersion: SETTINGS_VERSION,
+  };
+}
+
+const COLOR_RE = /^#[0-9a-f]{6}$/i;
+const WRITING_PENS = PEN_TYPES.filter((p): p is WritingPen => p !== "marker");
+
+/** Tool state from stored data (anything unknown falls back to the defaults). */
+export function loadTools(raw: unknown): ToolState {
+  const d = DEFAULT_TOOL_STATE;
+  const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const color = (v: unknown, fallback: string) => (typeof v === "string" && COLOR_RE.test(v) ? v.toLowerCase() : fallback);
+  const widths = { ...d.widths };
+  const rw = (r.widths && typeof r.widths === "object" ? r.widths : {}) as Record<string, unknown>;
+  for (const p of PEN_TYPES) widths[p] = numberIn(rw[p], 0.3, PENS[p].presets[4] * 2, d.widths[p]);
+  const favs = Array.isArray(r.favorites) ? r.favorites : [];
+  const favorites = d.favorites.map((f, i) => {
+    const x = (favs[i] && typeof favs[i] === "object" ? favs[i] : {}) as Record<string, unknown>;
+    return {
+      pen: oneOf(x.pen, WRITING_PENS, f.pen),
+      color: color(x.color, f.color),
+      width: numberIn(x.width, 0.3, 40, f.width),
+    };
+  });
+  return {
+    tool: oneOf(r.tool, ["pen", "marker", "eraser", "lasso", "shape", "text"] as const, d.tool),
+    pen: oneOf(r.pen, WRITING_PENS, d.pen),
+    color: color(r.color, d.color),
+    widths,
+    markerColor: color(r.markerColor, d.markerColor),
+    eraser: oneOf(r.eraser, ["partial", "stroke", "lasso"] as const, d.eraser),
+    eraserSize: numberIn(r.eraserSize, 2, 80, d.eraserSize),
+    shape: oneOf(r.shape, Object.keys(SHAPES) as ShapeKind[], d.shape),
+    textSize: numberIn(r.textSize, 8, 120, d.textSize),
+    favorites,
   };
 }
 

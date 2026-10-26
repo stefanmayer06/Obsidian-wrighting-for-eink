@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { detectDevice } from "../src/core/device";
 import { applyTransform, displayedSize, normalizeRotation, parsePageRange, unrotateTransform } from "../src/core/pdfMath";
 import { imageRectToScene, makeRenderPlan, planOcrUnits, sceneToImage, DEFAULT_RASTER_LIMITS } from "../src/core/rasterPlan";
-import { applyTypedNotes, decideTypedSync, extractTypedNotes, typedHash } from "../src/core/typedNotes";
+import { applyTypedNotes, extractTypedNotes } from "../src/core/typedNotes";
 import { START_MARKER, parseNote } from "../src/core/transcript";
 import { stroke } from "./helpers";
 
@@ -126,11 +126,7 @@ describe("typed notes", () => {
     expect(out).toBe(`${fm}intro\n\n${region}\n\nnew end\n`);
   });
 
-  it("hashes ignore trailing whitespace", () => {
-    expect(typedHash("a  \nb\n\n")).toBe(typedHash("a\nb"));
-  });
-
-  it("round-trips comments and hard line breaks through the card", () => {
+  it("round-trips comments and hard line breaks through the notes panel", () => {
     const md = `${fm}${region}\n\nline one  \nline two\n%% private reminder %%\n`;
     const typed = extractTypedNotes(md);
     expect(typed).toBe("line one  \nline two\n%% private reminder %%");
@@ -146,16 +142,3 @@ describe("typed notes", () => {
   });
 });
 
-describe("typed notes 3-way sync", () => {
-  const h = (t: string) => typedHash(t);
-  it("decides who wins", () => {
-    expect(decideTypedSync(null, h(""), undefined)).toBe("none");
-    expect(decideTypedSync(null, h("new"), undefined)).toBe("push");
-    expect(decideTypedSync(h("a"), h("a"), h("a"))).toBe("none");
-    expect(decideTypedSync(h("a"), h("a"), h("old"))).toBe("mark");
-    expect(decideTypedSync(h("card edit"), h("a"), h("a"))).toBe("pull");
-    expect(decideTypedSync(h("a"), h("text edit"), h("a"))).toBe("push");
-    expect(decideTypedSync(h("card edit"), h("text edit"), h("a"))).toBe("conflict");
-    expect(decideTypedSync(h("x"), h("y"), undefined)).toBe("push");
-  });
-});

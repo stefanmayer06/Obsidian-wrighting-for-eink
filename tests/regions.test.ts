@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import { planRegions, REGION_PADDING } from "../src/core/regions";
-import { cardPosition } from "../src/core/placement";
 import type { DiagramItem } from "../src/core/classify";
 import { shape, stroke } from "./helpers";
 
@@ -58,31 +57,5 @@ describe("planRegions", () => {
     const refs = [plan.refs.get(a), plan.refs.get(b)];
     expect(refs.filter((r) => r === "area=R1")).toHaveLength(1);
     expect(plan.create).toHaveLength(1);
-  });
-});
-
-describe("cardPosition", () => {
-  it("places the card below content on an empty canvas", () => {
-    expect(cardPosition([], 500)).toEqual({ x: 40, y: 40, width: 500 });
-    const pos = cardPosition([stroke("s", 100, 100, 200, 50)], 500);
-    expect(pos.x).toBe(100);
-    expect(pos.y).toBe(210);
-  });
-
-  it("places the card inside the page holding the lowest content", () => {
-    const paper1 = shape("p1", "image", 0, 0, 1000, 1414, { customData: { inkNotebook: { role: "paper" } } });
-    const paper2 = shape("p2", "image", 0, 1500, 1000, 1414, { customData: { inkNotebook: { role: "paper" } } });
-    const ink = stroke("s", 100, 1600, 300, 40);
-    const pos = cardPosition([paper1, paper2, ink], 560);
-    expect(pos.y).toBe(1680);
-    expect(pos.x).toBe(100);
-    expect(pos.width).toBe(560);
-    // empty page: below the header area of the first page
-    expect(cardPosition([paper1], 560).y).toBe(110);
-  });
-
-  it("ignores helper elements", () => {
-    const region = shape("r", "rectangle", 0, 5000, 10, 10, { customData: { inkNotebook: { role: "region" } } });
-    expect(cardPosition([region], 400)).toEqual({ x: 40, y: 40, width: 400 });
   });
 });

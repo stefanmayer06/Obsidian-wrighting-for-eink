@@ -1,4 +1,4 @@
-import type { ExElement } from "../types/excalidraw";
+import type { SceneElement } from "./scene";
 import type { SceneLine, TextItem } from "./classify";
 import type { OcrWord } from "./ocrTypes";
 import {
@@ -49,9 +49,9 @@ export interface TableItem {
 
 export interface TableContext {
   /** Strokes (and line shapes) that may be lines of a table. */
-  candidates: ReadonlyArray<ExElement>;
+  candidates: ReadonlyArray<SceneElement>;
   /** The other drawing parts: a big one inside a grid makes it a diagram rather than a table. */
-  others: ReadonlyArray<ExElement>;
+  others: ReadonlyArray<SceneElement>;
   strokeRects: ReadonlyMap<string, Rect>;
   /** Median height of the recognised lines. */
   medianH: number;

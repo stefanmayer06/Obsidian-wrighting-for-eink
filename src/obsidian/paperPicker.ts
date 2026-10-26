@@ -9,7 +9,7 @@ import {
   type PaperSpec,
   type PaperStyle,
 } from "../core/paper";
-import type { PagePosition } from "../core/pages";
+export type PagePosition = "after" | "before" | "end";
 
 /**
  * Choose a paper template, like the template picker in GoodNotes: a grid of

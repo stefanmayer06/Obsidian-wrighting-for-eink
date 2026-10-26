@@ -1,4 +1,4 @@
-import { elementText, getInkData, type ExElement } from "../types/excalidraw";
+import { elementText, getInkData, type SceneElement } from "./scene";
 import {
   absolutePoints,
   area,
@@ -22,7 +22,7 @@ import { detectCheckboxes } from "./checkbox";
 import { detectTables, type TableItem } from "./table";
 
 /**
- * Classification of an Excalidraw scene into the parts of a text page:
+ * Classification of an ink scene (see core/ink/scene.ts) into the parts of a text page:
  * handwritten lines (via OCR), typed text elements, diagrams and pages.
  *
  * Pure function – no Obsidian or DOM dependencies – so it can be unit tested.
@@ -170,18 +170,18 @@ function attachedWordLine(r: Rect, pts: ReadonlyArray<Pt>, step: number, candida
  * all strokes that are not in `pendingStrokeIds`.
  */
 export function classifyScene(
-  elements: ReadonlyArray<ExElement>,
+  elements: ReadonlyArray<SceneElement>,
   ocrLines: ReadonlyArray<OcrLine>,
   pendingStrokeIds: ReadonlySet<string>,
   opts: ClassifyOptions = DEFAULT_CLASSIFY_OPTIONS,
 ): ClassifiedScene {
   const pages: PageInfo[] = [];
-  const diagramFrames: { el: ExElement; rect: Rect }[] = [];
-  const strokes: ExElement[] = [];
-  const shapes: ExElement[] = [];
-  const textEls: ExElement[] = [];
+  const diagramFrames: { el: SceneElement; rect: Rect }[] = [];
+  const strokes: SceneElement[] = [];
+  const shapes: SceneElement[] = [];
+  const textEls: SceneElement[] = [];
   const boundTextByContainer = new Map<string, string[]>();
-  const elementById = new Map<string, ExElement>();
+  const elementById = new Map<string, SceneElement>();
 
   for (const el of elements) {
     if (!el || el.isDeleted) continue;
@@ -231,7 +231,7 @@ export function classifyScene(
   }
 
   // Locked shapes/images that fill a page are page backgrounds (e.g. Excalidraw's PDF import box).
-  const isPageBackground = (el: ExElement, r: Rect): boolean => {
+  const isPageBackground = (el: SceneElement, r: Rect): boolean => {
     for (const p of pages) {
       const inter = intersection(p.rect, r);
       if (inter && area(inter) >= 0.85 * area(p.rect) && area(r) <= 1.2 * area(p.rect)) return true;
@@ -277,8 +277,8 @@ export function classifyScene(
   const textStrokeIds = new Set<string>();
   const strokesOfLine: string[][] = usableLines.map(() => []);
   const strokeRects = new Map<string, Rect>();
-  const nonTextStrokes: ExElement[] = [];
-  const pendingStrokes: ExElement[] = [];
+  const nonTextStrokes: SceneElement[] = [];
+  const pendingStrokes: SceneElement[] = [];
 
   for (const s of strokes) {
     const r = elementRect(s);
@@ -385,7 +385,7 @@ export function classifyScene(
     rect: elementRect(el),
     fontSize: el.fontSize,
   }));
-  const free = (el: ExElement) => !claimed.has(el.id);
+  const free = (el: SceneElement) => !claimed.has(el.id);
   const found = detectTables(sceneLines, textItems, {
     candidates: [...recognised.filter(free), ...shapeParts.filter((el) => el.type === "line" && free(el))],
     others: [...nonTextStrokes, ...shapeParts].filter(free),

@@ -1,233 +1,35 @@
-import { loadPdfJs, Notice, normalizePath, TFile, type WorkspaceLeaf } from "obsidian";
-import { PDFDocument } from "pdf-lib";
+import { Notice, normalizePath, TFile, type WorkspaceLeaf } from "obsidian";
+import { BlendMode, degrees, LineCapStyle, PDFDocument, rgb, StandardFonts, type PDFFont, type PDFPage } from "pdf-lib";
 import type InkNotebookPlugin from "../main";
-import { area, elementRect, intersection, intersects, type Rect } from "../core/geometry";
-import { displayedSize, normalizeRotation, parsePageRange, unrotateTransform } from "../core/pdfMath";
-import { getInkData, INK_CUSTOM_DATA_KEY, type ExElement, type InkCustomData } from "../types/excalidraw";
-import { getEA, isExcalidrawView, release, viewElements, type ExcalidrawViewLike } from "./excalidrawBridge";
+import { normalizeRotation, parsePageRange, type PdfRotation } from "../core/pdfMath";
+import { cleanSubfolder, homeFolder, joinPath } from "../core/folders";
+import { emptyPage, insertPage, type InkDoc, type Page, type TextBox } from "../core/ink/model";
+import { dashPattern, isMarker, strokeRuns } from "../core/ink/pens";
+import { paperDrawing } from "../core/paper";
+import { renderPageCanvas, TEXT_LINE_HEIGHT, wrapText, measuringContext, drawText } from "../ink/render";
 import { FilePickModal, PdfImportModal } from "./modals";
 import { FM_PDF } from "./pairs";
-import { cleanSubfolder, homeFolder, joinPath } from "../core/folders";
+import type { InkView } from "./inkView";
+import { IMAGE_EXTENSIONS } from "./inkView";
 
 /**
- * Annotating PDFs and images, like in the Boox Notes app:
- *  - "Annotate PDF" puts the PDF pages on an ink page as locked backgrounds
- *    (linked to the original PDF, nothing is copied).
- *  - "Export annotated PDF" writes a new PDF: the original pages (text stays
- *    selectable) with your ink drawn on top.
+ * PDFs and pictures, like in the Boox Notes app:
+ *  - "Annotate PDF" makes a notebook whose pages are the PDF's pages (linked, not copied)
+ *  - "Export annotated PDF" writes the original PDF with the ink drawn on top (as vectors;
+ *    the PDF's text stays selectable)
+ *  - "Export as PDF" writes the whole notebook, paper and all, as a PDF
  */
 
-const PAGE_GAP = 40;
+/** Width of a PDF/image page on the ink page, in page units (A4 paper is 1000 wide). */
+const PAGE_W = 1000;
+/** PDF points per page unit for paper pages (A4: 1000 units = 595 pt). */
+const PT_PER_UNIT = 595.28 / 1000;
 
-/** Exports go next to the text page (not into the ink subfolder with the drawing). */
+/** Exports go next to the text page (not into the ink subfolder). */
 function exportFolder(plugin: InkNotebookPlugin, drawing: TFile): string {
   const text = plugin.pairs.textFor(drawing);
   if (text) return joinPath(text.parent?.path ?? "");
   return homeFolder(joinPath(drawing.parent?.path ?? ""), cleanSubfolder(plugin.settings.inkSubfolder));
-}
-
-interface PdfPageRef {
-  element: ExElement;
-  rect: Rect;
-  pdfPath: string;
-  page: number;
-}
-
-function parsePdfLink(link: string | null | undefined): { path: string; page: number } | null {
-  if (!link) return null;
-  const m = /^\[*([^\]#|]+\.pdf)#page=(\d+)/i.exec(link.trim());
-  return m ? { path: m[1], page: parseInt(m[2], 10) } : null;
-}
-
-/** Find PDF pages on an ink page (ours, and Excalidraw's own "Import PDF" marker frames). */
-export function findPdfPages(plugin: InkNotebookPlugin, elements: ReadonlyArray<ExElement>, sourcePath: string): PdfPageRef[] {
-  const pages: PdfPageRef[] = [];
-  for (const el of elements) {
-    const data = getInkData(el);
-    if (data?.role === "pdf-page" && data.pdf && data.page) {
-      pages.push({ element: el, rect: elementRect(el), pdfPath: data.pdf, page: data.page });
-    } else if ((el.type === "frame" || el.type === "magicframe") && el.frameRole === "marker") {
-      const link = parsePdfLink(el.link);
-      if (!link) continue;
-      const file = plugin.app.metadataCache.getFirstLinkpathDest(link.path, sourcePath);
-      if (file) pages.push({ element: el, rect: elementRect(el), pdfPath: file.path, page: link.page });
-    }
-  }
-  return pages.sort((a, b) => a.rect.y - b.rect.y || a.rect.x - b.rect.x);
-}
-
-interface PdfInfo {
-  count: number;
-  sizes: Map<number, { w: number; h: number }>;
-}
-
-async function readPdfInfo(plugin: InkNotebookPlugin, file: TFile, pages?: number[]): Promise<PdfInfo> {
-  const pdfjs = await loadPdfJs();
-  const data = new Uint8Array(await plugin.app.vault.readBinary(file));
-  const doc = await pdfjs.getDocument({ data }).promise;
-  try {
-    const sizes = new Map<number, { w: number; h: number }>();
-    const wanted = pages ?? Array.from({ length: doc.numPages }, (_, i) => i + 1);
-    for (const n of wanted) {
-      const page = await doc.getPage(n);
-      const vp = page.getViewport({ scale: 1 });
-      sizes.set(n, { w: vp.width, h: vp.height });
-      page.cleanup?.();
-    }
-    return { count: doc.numPages, sizes };
-  } finally {
-    await doc.destroy?.();
-  }
-}
-
-async function pdfPageCount(plugin: InkNotebookPlugin, file: TFile): Promise<number> {
-  const pdfjs = await loadPdfJs();
-  const data = new Uint8Array(await plugin.app.vault.readBinary(file));
-  const doc = await pdfjs.getDocument({ data }).promise;
-  try {
-    return doc.numPages as number;
-  } finally {
-    await doc.destroy?.();
-  }
-}
-
-export async function annotatePdf(plugin: InkNotebookPlugin, file?: TFile | null, leaf?: WorkspaceLeaf): Promise<void> {
-  const pdf = file ?? (await FilePickModal.pick(plugin.app, ["pdf"], "Choose a PDF to annotate…"));
-  if (!pdf) return;
-  let notice: Notice | null = new Notice(`Opening "${pdf.basename}"…`, 0);
-  try {
-    const count = await pdfPageCount(plugin, pdf);
-    const limit = plugin.settings.pdfMaxPagesWithoutAsking;
-    let range = "all";
-    if (count > limit) {
-      notice.hide();
-      notice = null;
-      const answer = await PdfImportModal.ask(plugin.app, pdf.basename, count, `1-${limit}`);
-      if (answer === null) return;
-      range = answer;
-      notice = new Notice(`Preparing pages of "${pdf.basename}"…`, 0);
-    }
-    const pages = parsePageRange(range, count);
-    if (pages.length === 0) {
-      new Notice("No pages selected.");
-      return;
-    }
-    const info = await readPdfInfo(plugin, pdf, pages);
-    const width = plugin.settings.pdfPageWidth;
-    const created = await plugin.switcher.createPage({
-      name: `${pdf.basename} (annotated)`,
-      leaf,
-      // the annotated page goes next to the PDF (when new pages go into the current folder)
-      context: pdf,
-      extraTextFrontmatter: { [FM_PDF]: `[[${pdf.path}]]` },
-      build: async (ea) => {
-        let y = 0;
-        let i = 0;
-        for (const n of pages) {
-          i++;
-          notice?.setMessage(`Adding page ${n} (${i} of ${pages.length})…`);
-          const size = info.sizes.get(n) ?? { w: 595, h: 842 };
-          const id = await ea.addImage(0, y, `${pdf.path}#page=${n}`, false, false);
-          if (!id) throw new Error(`Page ${n} could not be rendered`);
-          const el = ea.getElement(id);
-          const h = Math.round((width * size.h) / size.w);
-          el.width = width;
-          el.height = h;
-          el.locked = true;
-          el.customData = {
-            ...(el.customData ?? {}),
-            [INK_CUSTOM_DATA_KEY]: { role: "pdf-page", pdf: pdf.path, page: n, sourceWidth: size.w, sourceHeight: size.h } satisfies InkCustomData,
-          };
-          // a thin, locked border so the white page stands out on the white canvas
-          ea.style.strokeColor = "#9e9e9e";
-          ea.style.backgroundColor = "transparent";
-          ea.style.strokeWidth = 1;
-          ea.style.roughness = 0;
-          ea.style.strokeStyle = "solid";
-          const borderId = ea.addRect(0, y, width, h);
-          const border = ea.getElement(borderId);
-          border.locked = true;
-          border.roundness = null;
-          border.customData = { ...(border.customData ?? {}), [INK_CUSTOM_DATA_KEY]: { role: "page-border" } satisfies InkCustomData };
-          y += h + PAGE_GAP;
-        }
-      },
-    });
-    if (created) new Notice(`Ready – write on the pages. Use "Export annotated PDF" to save a copy with your notes.`, 6000);
-  } catch (e) {
-    plugin.switcher.reportError("Could not open the PDF for annotation", e);
-  } finally {
-    notice?.hide();
-  }
-}
-
-export async function annotateImage(plugin: InkNotebookPlugin, file?: TFile | null, leaf?: WorkspaceLeaf): Promise<void> {
-  const img = file ?? (await FilePickModal.pick(plugin.app, ["png", "jpg", "jpeg", "webp", "gif", "bmp", "svg"], "Choose an image to annotate…"));
-  if (!img) return;
-  try {
-    await plugin.switcher.createPage({
-      name: `${img.basename} (annotated)`,
-      leaf,
-      context: img,
-      build: async (ea) => {
-        const id = await ea.addImage(0, 0, img, false, false);
-        if (!id) throw new Error("The image could not be loaded");
-        const el = ea.getElement(id);
-        const maxW = 1400;
-        if (el.width > maxW) {
-          el.height = Math.round((el.height * maxW) / el.width);
-          el.width = maxW;
-        }
-        el.locked = true;
-        el.customData = {
-          ...(el.customData ?? {}),
-          [INK_CUSTOM_DATA_KEY]: { role: "image-page", image: img.path, sourceWidth: el.width, sourceHeight: el.height } satisfies InkCustomData,
-        };
-      },
-    });
-  } catch (e) {
-    plugin.switcher.reportError("Could not open the image for annotation", e);
-  }
-}
-
-/** Elements drawn on top of a page (everything except page backgrounds and our helpers). */
-function overlayFor(elements: ReadonlyArray<ExElement>, page: Rect, pageIds: Set<string>): ExElement[] {
-  return elements.filter((e) => {
-    if (e.isDeleted || pageIds.has(e.id)) return false;
-    const role = getInkData(e)?.role;
-    if (role === "region" || role === "paper" || role === "pdf-page" || role === "image-page" || role === "page-border") return false;
-    if ((e.type === "frame" || e.type === "magicframe") && e.frameRole === "marker") return false;
-    const r = elementRect(e);
-    if (!intersects(r, page)) return false;
-    // page-sized images/boxes (e.g. from Excalidraw's own PDF import) are backgrounds
-    const inter = intersection(r, page);
-    if (inter && area(inter) >= 0.85 * area(page) && (e.type === "image" || (e.type === "rectangle" && e.locked))) return false;
-    return true;
-  });
-}
-
-async function blobToImage(blob: Blob): Promise<HTMLImageElement> {
-  const url = URL.createObjectURL(blob);
-  try {
-    const img = new Image();
-    img.src = url;
-    await img.decode();
-    return img;
-  } finally {
-    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-  }
-}
-
-async function canvasPng(canvas: HTMLCanvasElement): Promise<Uint8Array> {
-  const blob = await new Promise<Blob | null>((r) => canvas.toBlob(r, "image/png"));
-  if (!blob) throw new Error("Could not encode image");
-  return new Uint8Array(await blob.arrayBuffer());
-}
-
-function activeExcalidrawView(plugin: InkNotebookPlugin, leaf?: WorkspaceLeaf | null): ExcalidrawViewLike | null {
-  const v = (leaf ?? plugin.app.workspace.getMostRecentLeaf())?.view;
-  if (isExcalidrawView(v)) return v;
-  return null;
 }
 
 async function writeBinary(plugin: InkNotebookPlugin, path: string, data: ArrayBuffer): Promise<TFile> {
@@ -239,29 +41,266 @@ async function writeBinary(plugin: InkNotebookPlugin, path: string, data: ArrayB
   return plugin.app.vault.createBinary(path, data);
 }
 
-export async function exportAnnotatedPdf(plugin: InkNotebookPlugin, leaf?: WorkspaceLeaf | null): Promise<void> {
-  const view = activeExcalidrawView(plugin, leaf);
-  if (!view?.file) {
+function bytes(u8: Uint8Array): ArrayBuffer {
+  return u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength) as ArrayBuffer;
+}
+
+async function pickPages(plugin: InkNotebookPlugin, pdf: TFile): Promise<{ pages: number[]; sizes: Map<number, { w: number; h: number }> } | null> {
+  const info = await plugin.images.pdfInfo(pdf, []);
+  const limit = plugin.settings.pdfMaxPagesWithoutAsking;
+  let range = "all";
+  if (info.count > limit) {
+    const answer = await PdfImportModal.ask(plugin.app, pdf.basename, info.count, `1-${limit}`);
+    if (answer === null) return null;
+    range = answer;
+  }
+  const pages = parsePageRange(range, info.count);
+  if (pages.length === 0) {
+    new Notice("No pages selected.");
+    return null;
+  }
+  const sizes = (await plugin.images.pdfInfo(pdf, pages)).sizes;
+  return { pages, sizes };
+}
+
+function pdfPages(pdf: TFile, pages: number[], sizes: Map<number, { w: number; h: number }>): Page[] {
+  return pages.map((n) => {
+    const size = sizes.get(n) ?? { w: 595, h: 842 };
+    return emptyPage({ kind: "pdf", path: pdf.path, page: n }, PAGE_W, Math.round((PAGE_W * size.h) / size.w));
+  });
+}
+
+export async function annotatePdf(plugin: InkNotebookPlugin, file?: TFile | null, leaf?: WorkspaceLeaf): Promise<void> {
+  const pdf = file ?? (await FilePickModal.pick(plugin.app, ["pdf"], "Choose a PDF to annotate…"));
+  if (!pdf) return;
+  const notice = new Notice(`Opening "${pdf.basename}"…`, 0);
+  try {
+    const picked = await pickPages(plugin, pdf);
+    if (!picked) return;
+    const doc: InkDoc = { pages: pdfPages(pdf, picked.pages, picked.sizes) };
+    const created = await plugin.switcher.createPage({
+      name: `${pdf.basename} (annotated)`,
+      leaf,
+      // the annotated notebook goes next to the PDF (when new pages go into the current folder)
+      context: pdf,
+      doc,
+      extraTextFrontmatter: { [FM_PDF]: `[[${pdf.path}]]` },
+    });
+    if (created) new Notice(`Ready – write on the pages. "Export annotated PDF" saves a copy with your notes.`, 6000);
+  } catch (e) {
+    plugin.switcher.reportError("Could not open the PDF for annotation", e);
+  } finally {
+    notice.hide();
+  }
+}
+
+/** Add pages of a PDF at the end of the open notebook. */
+export async function appendPdfPages(plugin: InkNotebookPlugin, view: InkView): Promise<void> {
+  const pdf = await FilePickModal.pick(plugin.app, ["pdf"], "Choose a PDF…");
+  if (!pdf) return;
+  try {
+    const picked = await pickPages(plugin, pdf);
+    if (!picked) return;
+    const s = view.surface;
+    let doc = s.document;
+    for (const p of pdfPages(pdf, picked.pages, picked.sizes)) doc = insertPage(doc, p, doc.pages.length);
+    const first = s.document.pages.length;
+    s.commit(doc, "all");
+    s.goTo(first);
+  } catch (e) {
+    plugin.switcher.reportError("Could not add the PDF pages", e);
+  }
+}
+
+export async function annotateImage(plugin: InkNotebookPlugin, file?: TFile | null, leaf?: WorkspaceLeaf): Promise<void> {
+  const img = file ?? (await FilePickModal.pick(plugin.app, IMAGE_EXTENSIONS, "Choose an image to annotate…"));
+  if (!img) return;
+  try {
+    const size = (await plugin.images.imageSize(img.path)) ?? { w: 1000, h: 1414 };
+    const h = Math.round((PAGE_W * size.h) / Math.max(1, size.w));
+    await plugin.switcher.createPage({
+      name: `${img.basename} (annotated)`,
+      leaf,
+      context: img,
+      doc: { pages: [emptyPage({ kind: "image", path: img.path }, PAGE_W, h)] },
+    });
+  } catch (e) {
+    plugin.switcher.reportError("Could not open the image for annotation", e);
+  }
+}
+
+// ------------------------------------------------------------------ vector drawing into PDFs
+
+function color(hex: string) {
+  const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex);
+  if (!m) return rgb(0, 0, 0);
+  return rgb(parseInt(m[1], 16) / 255, parseInt(m[2], 16) / 255, parseInt(m[3], 16) / 255);
+}
+
+/** Where page units go on a PDF page: origin, rotation and scale for drawSvgPath. */
+interface Placement {
+  x: number;
+  y: number;
+  rotate: number;
+  scale: number;
+}
+
+/**
+ * The placement that maps page units (top-left origin, y down, as displayed)
+ * onto a PDF page with the given crop box and /Rotate.
+ */
+export function placement(crop: { x: number; y: number; width: number; height: number }, rotation: PdfRotation, scale: number): Placement {
+  switch (rotation) {
+    case 90:
+      return { x: crop.x, y: crop.y, rotate: 90, scale };
+    case 180:
+      return { x: crop.x + crop.width, y: crop.y, rotate: 180, scale };
+    case 270:
+      return { x: crop.x + crop.width, y: crop.y + crop.height, rotate: 270, scale };
+    default:
+      return { x: crop.x, y: crop.y + crop.height, rotate: 0, scale };
+  }
+}
+
+/** Map a point in page units to PDF user space (for text and images). */
+function mapPoint(p: Placement, u: number, v: number): { x: number; y: number } {
+  const a = u * p.scale;
+  const b = -v * p.scale;
+  const r = (p.rotate * Math.PI) / 180;
+  const cos = Math.round(Math.cos(r));
+  const sin = Math.round(Math.sin(r));
+  return { x: p.x + a * cos - b * sin, y: p.y + a * sin + b * cos };
+}
+
+function drawStrokes(out: PDFPage, page: Page, p: Placement): number {
+  let n = 0;
+  const strokes = [...page.strokes.filter(isMarker), ...page.strokes.filter((s) => !isMarker(s))];
+  for (const s of strokes) {
+    const marker = isMarker(s);
+    for (const run of strokeRuns(s)) {
+      out.drawSvgPath(run.d, {
+        x: p.x,
+        y: p.y,
+        scale: p.scale,
+        rotate: degrees(p.rotate),
+        borderColor: color(run.color),
+        borderWidth: run.w,
+        borderLineCap: LineCapStyle.Round,
+        borderDashArray: s.dash ? dashPattern(s.width) : undefined,
+        blendMode: marker ? BlendMode.Multiply : undefined,
+      });
+      n++;
+    }
+  }
+  return n;
+}
+
+/** A picture of a text box (for text the PDF standard fonts cannot write). */
+async function textImage(doc: PDFDocument, t: TextBox): Promise<{ png: Awaited<ReturnType<PDFDocument["embedPng"]>>; w: number; h: number }> {
+  const k = 3;
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.ceil(t.w * k);
+  canvas.height = Math.ceil(t.h * k);
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Canvas is not available");
+  ctx.setTransform(k, 0, 0, k, -t.x * k, -t.y * k);
+  drawText(ctx, t);
+  const blob = await new Promise<Blob | null>((r) => canvas.toBlob(r, "image/png"));
+  if (!blob) throw new Error("Could not encode the text");
+  return { png: await doc.embedPng(new Uint8Array(await blob.arrayBuffer())), w: t.w, h: t.h };
+}
+
+async function drawTexts(doc: PDFDocument, out: PDFPage, page: Page, p: Placement, font: PDFFont): Promise<void> {
+  const ctx = measuringContext();
+  for (const t of page.texts) {
+    const lines = wrapText(ctx, t.text, t.w, t.size);
+    const lh = t.size * TEXT_LINE_HEIGHT;
+    try {
+      lines.forEach((line, i) => {
+        // baseline: the canvas draws text from its top with the em box centred in the line
+        const pos = mapPoint(p, t.x, t.y + i * lh + (lh - t.size) / 2 + t.size * 0.8);
+        out.drawText(line, { x: pos.x, y: pos.y, size: t.size * p.scale, font, color: color(t.color), rotate: degrees(p.rotate) });
+      });
+    } catch {
+      // characters the standard font cannot encode: draw the text as a picture
+      const img = await textImage(doc, t);
+      const pos = mapPoint(p, t.x, t.y + t.h);
+      out.drawImage(img.png, { x: pos.x, y: pos.y, width: img.w * p.scale, height: img.h * p.scale, rotate: degrees(p.rotate) });
+    }
+  }
+}
+
+async function drawImages(plugin: InkNotebookPlugin, doc: PDFDocument, out: PDFPage, page: Page, p: Placement): Promise<void> {
+  for (const it of page.images) {
+    const file = plugin.app.vault.getAbstractFileByPath(it.src);
+    if (!(file instanceof TFile)) continue;
+    let embedded;
+    try {
+      const data = await plugin.app.vault.readBinary(file);
+      const ext = file.extension.toLowerCase();
+      if (ext === "png") embedded = await doc.embedPng(data);
+      else if (ext === "jpg" || ext === "jpeg") embedded = await doc.embedJpg(data);
+    } catch {
+      embedded = undefined;
+    }
+    if (!embedded) {
+      // other formats: through a canvas
+      const img = plugin.images.image(it.src);
+      if (!img) continue;
+      const c = document.createElement("canvas");
+      c.width = Math.max(1, Math.round(it.w * 2));
+      c.height = Math.max(1, Math.round(it.h * 2));
+      c.getContext("2d")?.drawImage(img, 0, 0, c.width, c.height);
+      const blob = await new Promise<Blob | null>((r) => c.toBlob(r, "image/png"));
+      if (!blob) continue;
+      embedded = await doc.embedPng(new Uint8Array(await blob.arrayBuffer()));
+    }
+    const pos = mapPoint(p, it.x, it.y + it.h);
+    out.drawImage(embedded, { x: pos.x, y: pos.y, width: it.w * p.scale, height: it.h * p.scale, rotate: degrees(p.rotate) });
+  }
+}
+
+/** Paper colour and lines as vectors. */
+function drawPaper(out: PDFPage, page: Page, p: Placement): void {
+  if (page.bg.kind !== "paper") return;
+  const d = paperDrawing(page.bg.paper, { width: page.w, height: page.h });
+  out.drawRectangle({ x: 0, y: 0, width: out.getWidth(), height: out.getHeight(), color: color(d.fill) });
+  for (const path of d.paths) {
+    out.drawSvgPath(path.d, {
+      x: p.x,
+      y: p.y,
+      scale: p.scale,
+      borderColor: color(path.stroke),
+      borderWidth: path.width,
+      borderLineCap: path.dots ? LineCapStyle.Round : LineCapStyle.Butt,
+      borderDashArray: path.dots ? [0.01, path.dots.gap - 0.01] : undefined,
+    });
+  }
+}
+
+function activeView(plugin: InkNotebookPlugin, view?: InkView | null): InkView | null {
+  if (view?.inkFile) return view;
+  const v = plugin.app.workspace.getMostRecentLeaf()?.view as InkView | undefined;
+  return v && "inkFile" in v && v.inkFile ? v : null;
+}
+
+/** The original PDF(s) with the ink of the pages drawn on top. */
+export async function exportAnnotatedPdf(plugin: InkNotebookPlugin, view?: InkView | null): Promise<void> {
+  const v = activeView(plugin, view);
+  if (!v?.file) {
     new Notice("Open the annotated ink page first, then run this command again.");
     return;
   }
-  const elements = viewElements(view);
-  const pages = findPdfPages(plugin, elements, view.file.path);
-  if (pages.length === 0) {
-    new Notice("This ink page has no PDF pages. Use \"Annotate PDF\" to start one.");
-    return;
-  }
-  const ea = getEA(plugin.app, view);
-  if (typeof ea.createViewPNG !== "function") {
-    release(ea);
-    new Notice("Exporting needs a newer version of the Excalidraw plugin (2.20 or later). Please update Excalidraw.", 8000);
+  const drawing = v.file;
+  const pages = v.surface.document.pages;
+  const byPdf = new Map<string, Page[]>();
+  for (const p of pages) if (p.bg.kind === "pdf") byPdf.set(p.bg.path, [...(byPdf.get(p.bg.path) ?? []), p]);
+  if (byPdf.size === 0) {
+    new Notice('This ink page has no PDF pages. Use "Annotate a PDF" to start one.');
     return;
   }
   const notice = new Notice("Exporting annotated PDF…", 0);
   try {
-    const pageIds = new Set(pages.map((p) => p.element.id));
-    const byPdf = new Map<string, PdfPageRef[]>();
-    for (const p of pages) byPdf.set(p.pdfPath, [...(byPdf.get(p.pdfPath) ?? []), p]);
     const written: TFile[] = [];
     for (const [pdfPath, refs] of byPdf) {
       const src = plugin.app.vault.getAbstractFileByPath(pdfPath);
@@ -270,50 +309,29 @@ export async function exportAnnotatedPdf(plugin: InkNotebookPlugin, leaf?: Works
         continue;
       }
       const doc = await PDFDocument.load(await plugin.app.vault.readBinary(src), { ignoreEncryption: true, updateMetadata: false });
+      const font = await doc.embedFont(StandardFonts.Helvetica);
       let annotated = 0;
-      for (const ref of refs) {
-        if (ref.page < 1 || ref.page > doc.getPageCount()) continue;
-        const overlay = overlayFor(elements, ref.rect, pageIds);
-        if (overlay.length === 0) continue;
-        notice.setMessage(`Exporting page ${ref.page}…`);
-        const page = doc.getPage(ref.page - 1);
-        const crop = page.getCropBox();
-        const rotation = normalizeRotation(page.getRotation().angle);
-        const disp = displayedSize(crop.width, crop.height, rotation);
-        // ~150 dpi, capped to keep memory reasonable on tablets
-        const targetW = Math.min(2400, Math.max(600, disp.width * 2.1));
-        const scale = targetW / Math.max(1, ref.rect.w);
-        const blob = await ea.createViewPNG({
-          elementsOverride: overlay,
-          exportArea: { x: ref.rect.x, y: ref.rect.y, width: ref.rect.w, height: ref.rect.h },
-          withBackground: false,
-          padding: 0,
-          scale,
-          theme: "light",
-        });
-        if (!blob) continue;
-        const img = await blobToImage(blob);
-        const k = img.width / disp.width;
-        const canvas = document.createElement("canvas");
-        canvas.width = Math.max(1, Math.round(crop.width * k));
-        canvas.height = Math.max(1, Math.round(crop.height * k));
-        const ctx = canvas.getContext("2d");
-        if (!ctx) throw new Error("Canvas is not available");
-        const t = unrotateTransform(canvas.width, canvas.height, rotation);
-        ctx.translate(t.tx, t.ty);
-        ctx.rotate(t.angle);
-        ctx.drawImage(img, 0, 0, img.width, img.height);
-        const png = await doc.embedPng(await canvasPng(canvas));
-        page.drawImage(png, { x: crop.x, y: crop.y, width: crop.width, height: crop.height });
+      for (const page of refs) {
+        if (page.bg.kind !== "pdf") continue;
+        const n = page.bg.page;
+        if (n < 1 || n > doc.getPageCount()) continue;
+        if (page.strokes.length + page.texts.length + page.images.length === 0) continue;
+        const out = doc.getPage(n - 1);
+        const crop = out.getCropBox();
+        const rotation = normalizeRotation(out.getRotation().angle);
+        const displayedW = rotation === 90 || rotation === 270 ? crop.height : crop.width;
+        const p = placement(crop, rotation, displayedW / page.w);
+        await drawImages(plugin, doc, out, page, p);
+        drawStrokes(out, page, p);
+        await drawTexts(doc, out, page, p, font);
         annotated++;
       }
       if (annotated === 0) {
         new Notice(`No ink on the pages of "${src.basename}" yet – nothing to export.`);
         continue;
       }
-      const bytes = await doc.save();
-      const out = normalizePath(joinPath(exportFolder(plugin, view.file), `${src.basename} (annotated).pdf`));
-      written.push(await writeBinary(plugin, out, bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer));
+      const path = normalizePath(joinPath(exportFolder(plugin, drawing), `${src.basename} (annotated).pdf`));
+      written.push(await writeBinary(plugin, path, bytes(await doc.save())));
     }
     notice.hide();
     if (written.length > 0) {
@@ -323,48 +341,93 @@ export async function exportAnnotatedPdf(plugin: InkNotebookPlugin, leaf?: Works
   } catch (e) {
     notice.hide();
     plugin.switcher.reportError("Export failed", e);
-  } finally {
-    release(ea);
   }
 }
 
-export async function exportAnnotatedImage(plugin: InkNotebookPlugin, leaf?: WorkspaceLeaf | null): Promise<void> {
-  const view = activeExcalidrawView(plugin, leaf);
-  if (!view?.file) {
-    new Notice("Open the annotated ink page first.");
-    return;
-  }
-  const elements = viewElements(view);
-  const pageEl = elements.find((e) => getInkData(e)?.role === "image-page");
-  if (!pageEl) {
-    new Notice("This ink page has no annotated image.");
-    return;
-  }
-  const ea = getEA(plugin.app, view);
+/** The whole notebook as a PDF: paper, PDF pages and pictures with the ink, as vectors. */
+export async function exportNotebookPdf(plugin: InkNotebookPlugin, view?: InkView | null): Promise<void> {
+  const v = activeView(plugin, view);
+  if (!v?.file) return;
+  const drawing = v.file;
+  const notice = new Notice("Exporting the notebook as PDF…", 0);
   try {
-    if (typeof ea.createViewPNG !== "function") {
-      new Notice("Exporting needs a newer version of the Excalidraw plugin. Please update Excalidraw.");
-      return;
+    const out = await PDFDocument.create();
+    out.setTitle(drawing.basename.replace(/\.ink$/, ""));
+    out.setCreator("Ink Notebook for Obsidian");
+    const font = await out.embedFont(StandardFonts.Helvetica);
+    const sources = new Map<string, PDFDocument | null>();
+    for (const page of v.surface.document.pages) {
+      const W = page.w * PT_PER_UNIT;
+      const H = page.h * PT_PER_UNIT;
+      const pdfPage = out.addPage([W, H]);
+      const p = placement({ x: 0, y: 0, width: W, height: H }, 0, PT_PER_UNIT);
+      if (page.bg.kind === "paper") drawPaper(pdfPage, page, p);
+      else if (page.bg.kind === "pdf") {
+        let src = sources.get(page.bg.path);
+        if (src === undefined) {
+          const f = plugin.app.vault.getAbstractFileByPath(page.bg.path);
+          src = f instanceof TFile ? await PDFDocument.load(await plugin.app.vault.readBinary(f), { ignoreEncryption: true }) : null;
+          sources.set(page.bg.path, src);
+        }
+        if (src && page.bg.page <= src.getPageCount()) {
+          const srcPage = src.getPage(page.bg.page - 1);
+          const rot = normalizeRotation(srcPage.getRotation().angle);
+          const [embedded] = await out.embedPages([srcPage]);
+          // the embedded page is unrotated: turn it (clockwise by /Rotate) the way it is shown
+          const turned = rot === 90 || rot === 270;
+          const at = rot === 0 ? { x: 0, y: 0 } : rot === 90 ? { x: 0, y: H } : rot === 180 ? { x: W, y: H } : { x: W, y: 0 };
+          pdfPage.drawPage(embedded, { x: at.x, y: at.y, width: turned ? H : W, height: turned ? W : H, rotate: degrees((360 - rot) % 360) });
+        }
+      } else {
+        const f = plugin.app.vault.getAbstractFileByPath(page.bg.path);
+        if (f instanceof TFile) {
+          await drawImages(plugin, out, pdfPage, { ...page, images: [{ id: "bg", x: 0, y: 0, w: page.w, h: page.h, src: f.path }] }, p);
+        }
+      }
+      await drawImages(plugin, out, pdfPage, page, p);
+      drawStrokes(pdfPage, page, p);
+      await drawTexts(out, pdfPage, page, p, font);
     }
-    const rect = elementRect(pageEl);
-    const data = getInkData(pageEl);
-    const scale = Math.max(1, (data?.sourceWidth ?? rect.w) / rect.w);
-    const blob = await ea.createViewPNG({
-      exportArea: { x: rect.x, y: rect.y, width: rect.w, height: rect.h },
-      withBackground: true,
-      padding: 0,
-      scale,
-      theme: "light",
-    });
+    const path = normalizePath(joinPath(exportFolder(plugin, drawing), `${drawing.basename.replace(/\.ink$/, "")}.pdf`));
+    const file = await writeBinary(plugin, path, bytes(await out.save()));
+    notice.hide();
+    new Notice(`Saved ${file.path}`, 6000);
+    await plugin.app.workspace.getLeaf("tab").openFile(file);
+  } catch (e) {
+    notice.hide();
+    plugin.switcher.reportError("Export failed", e);
+  }
+}
+
+/** The page on screen as a PNG picture. */
+export async function exportPageImage(plugin: InkNotebookPlugin, view?: InkView | null): Promise<void> {
+  const v = activeView(plugin, view);
+  if (!v?.file) return;
+  const drawing = v.file;
+  const s = v.surface;
+  const page = s.page;
+  try {
+    let width = 2000;
+    if (page.bg.kind === "image") {
+      const img = plugin.images.image(page.bg.path) as HTMLImageElement | null;
+      if (img?.naturalWidth) width = Math.max(1000, Math.min(4000, img.naturalWidth));
+    }
+    // make sure PDF/picture backgrounds are loaded at the export size
+    if (page.bg.kind === "pdf") {
+      for (let i = 0; i < 50 && !plugin.images.pdfPage(page.bg.path, page.bg.page, width); i++) await sleep(100);
+    }
+    const canvas = renderPageCanvas(page, width, { images: plugin.images, chrome: false });
+    const blob = await new Promise<Blob | null>((r) => canvas.toBlob(r, "image/png"));
     if (!blob) throw new Error("Nothing was exported");
-    const base = data?.image ? (data.image.split("/").pop() ?? "image").replace(/\.[^.]+$/, "") : view.file.basename;
-    const out = normalizePath(joinPath(exportFolder(plugin, view.file), `${base} (annotated).png`));
-    const file = await writeBinary(plugin, out, await blob.arrayBuffer());
+    const base = drawing.basename.replace(/\.ink$/, "");
+    const path = normalizePath(joinPath(exportFolder(plugin, drawing), `${base} – page ${s.pageIndex + 1}.png`));
+    const file = await writeBinary(plugin, path, await blob.arrayBuffer());
     new Notice(`Saved ${file.path}`);
     await plugin.app.workspace.getLeaf("tab").openFile(file);
   } catch (e) {
     plugin.switcher.reportError("Export failed", e);
-  } finally {
-    release(ea);
   }
 }
+
+const sleep = (ms: number) => new Promise<void>((r) => window.setTimeout(r, ms));
+

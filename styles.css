@@ -2,6 +2,693 @@
    Ink Notebook
    ========================================================================== */
 
+/* ---------- Ink page view ------------------------------------------------ */
+
+.workspace-leaf-content[data-type="ink-notebook"] .view-content.ink-view-content {
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+}
+
+.ink-view-content[data-toolbar="bottom"] {
+  flex-direction: column-reverse;
+}
+
+.ink-view-content[data-toolbar="left"] {
+  flex-direction: row;
+}
+
+.ink-view-content[data-toolbar="right"] {
+  flex-direction: row-reverse;
+}
+
+.ink-surface {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  outline: none;
+  cursor: crosshair;
+  background: #e8e8e8;
+}
+
+.ink-stage {
+  position: absolute;
+  inset: 0;
+  transform-origin: 0 0;
+}
+
+.ink-stage canvas {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: block;
+}
+
+/* previews (highlighter, lasso, shapes): blended like a highlighter on paper */
+.ink-stage canvas.ink-wet {
+  pointer-events: none;
+  mix-blend-mode: multiply;
+}
+
+.ink-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.ink-overlay .ink-ui {
+  pointer-events: auto;
+}
+
+/* our display rules must not beat the hidden attribute */
+.ink-overlay [hidden],
+.ink-popover [hidden],
+.ink-toolbar [hidden] {
+  display: none !important;
+}
+
+.ink-selection {
+  position: absolute;
+  box-sizing: border-box;
+  border: 2px dashed #1a1a1a;
+  pointer-events: none;
+}
+
+.ink-handle {
+  position: absolute;
+  box-sizing: border-box;
+  width: 22px;
+  height: 22px;
+  border: 2px solid #1a1a1a;
+  border-radius: 4px;
+  background: #ffffff;
+  pointer-events: none;
+}
+
+.ink-handle-rotate {
+  border-radius: 50%;
+}
+
+.ink-selection-bar {
+  position: absolute;
+  display: flex;
+  flex-wrap: wrap;
+  max-width: calc(100% - 8px);
+  gap: 2px;
+  padding: 4px;
+  border: 2px solid var(--text-normal);
+  border-radius: 12px;
+  background: var(--background-primary);
+  color: var(--text-normal);
+}
+
+.ink-selection-bar .ink-sel-btn.ink-sel-btn,
+.ink-selection-palette .ink-swatch-btn {
+  margin: 0;
+  box-shadow: none;
+}
+
+.ink-selection-bar .ink-sel-btn.ink-sel-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  min-width: 58px;
+  height: 58px;
+  padding: 2px 6px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.ink-sel-icon,
+.ink-btn-icon,
+.ink-menu-icon {
+  display: inline-flex;
+}
+
+.ink-sel-icon svg {
+  width: 24px;
+  height: 24px;
+}
+
+.ink-selection-palette {
+  position: absolute;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px;
+  max-width: calc(100% - 8px);
+  border: 2px solid var(--text-normal);
+  border-radius: 12px;
+  background: var(--background-primary);
+}
+
+.ink-selection-palette .ink-swatch-btn {
+  width: 44px;
+}
+
+.ink-text-editor.ink-text-editor {
+  position: absolute;
+  box-sizing: content-box;
+  margin: 0;
+  padding: 0;
+  min-height: 0;
+  border: 1px dashed #555555;
+  border-radius: 0;
+  background: rgba(255, 255, 255, 0.55);
+  resize: none;
+  overflow: hidden;
+  outline: none;
+  box-shadow: none;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+
+/* ---------- Toolbar ------------------------------------------------------ */
+
+.ink-toolbar {
+  --ink-tb-size: 44px;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  border-bottom: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  color: var(--text-normal);
+}
+
+.ink-toolbar::-webkit-scrollbar {
+  display: none;
+}
+
+.ink-view-content[data-toolbar="bottom"] .ink-toolbar {
+  border-bottom: none;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.ink-toolbar[data-vertical] {
+  flex-direction: column;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 6px 4px;
+  border-bottom: none;
+  border-right: 1px solid var(--background-modifier-border);
+}
+
+.ink-view-content[data-toolbar="right"] .ink-toolbar {
+  border-right: none;
+  border-left: 1px solid var(--background-modifier-border);
+}
+
+.ink-large-targets .ink-toolbar {
+  --ink-tb-size: 48px;
+}
+
+.ink-tb-group {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.ink-toolbar[data-vertical] .ink-tb-group {
+  flex-direction: column;
+}
+
+.ink-tb-group + .ink-tb-group {
+  padding-left: 6px;
+  border-left: 1px solid var(--background-modifier-border);
+}
+
+.ink-toolbar[data-vertical] .ink-tb-group + .ink-tb-group {
+  padding: 6px 0 0;
+  border-left: none;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.ink-tb-spacer {
+  flex: 1 1 auto;
+  min-width: 4px;
+  min-height: 4px;
+}
+
+.ink-toolbar .ink-tb-spacer + .ink-tb-group {
+  border-left: none;
+  border-top: none;
+}
+
+/* doubled class: must beat Obsidian's default button styles */
+.ink-toolbar .ink-btn.ink-tb-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--ink-tb-size);
+  height: var(--ink-tb-size);
+  margin: 0;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  box-shadow: none;
+  color: inherit;
+  cursor: pointer;
+}
+
+.ink-toolbar .ink-btn.ink-tb-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+@media (hover: hover) {
+  .ink-toolbar .ink-btn.ink-tb-btn:not(:disabled):not(.is-active):hover {
+    background: var(--background-modifier-hover);
+  }
+}
+
+.ink-toolbar .ink-btn.ink-tb-btn.is-active {
+  background: var(--text-normal);
+  color: var(--background-primary);
+}
+
+.ink-toolbar .ink-btn.ink-tb-btn.is-open {
+  border-color: var(--text-normal);
+}
+
+.ink-tb-btn .ink-btn-icon svg {
+  width: 24px;
+  height: 24px;
+  stroke-width: 2;
+}
+
+.ink-large-targets .ink-tb-btn .ink-btn-icon svg {
+  width: 27px;
+  height: 27px;
+}
+
+/* the colour of the pen / highlighter under its icon */
+.ink-toolbar .ink-tool-pen::after,
+.ink-toolbar .ink-tool-marker::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: 4px;
+  width: 18px;
+  height: 4px;
+  transform: translateX(-50%);
+  border-radius: 2px;
+  background: var(--ink-pen-color, currentColor);
+  box-shadow: 0 0 0 1px var(--background-primary);
+}
+
+.ink-toolbar .ink-tool-pen .ink-btn-icon,
+.ink-toolbar .ink-tool-marker .ink-btn-icon {
+  margin-top: -4px;
+}
+
+/* a small corner triangle: tap again for options */
+.ink-tb-btn.is-active .ink-tb-caret {
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  width: 0;
+  height: 0;
+  border-style: solid;
+  border-width: 0 0 7px 7px;
+  border-color: transparent transparent currentColor transparent;
+}
+
+.ink-tb-fav .ink-fav-stroke {
+  display: block;
+  width: 24px;
+  height: var(--ink-fav-width, 3px);
+  border-radius: 4px;
+  background: var(--ink-pen-color, currentColor);
+  transform: rotate(-35deg);
+}
+
+.ink-toolbar .ink-btn.ink-tb-btn.ink-tb-fav.is-active {
+  background: transparent;
+  color: inherit;
+  border-color: var(--text-normal);
+}
+
+.ink-toolbar .ink-btn.ink-tb-pagelabel {
+  width: auto;
+  min-width: 64px;
+  padding: 0 10px;
+  font-size: 15px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.ink-toolbar .ink-btn.ink-tb-btn.ink-tb-text {
+  width: auto;
+  gap: 6px;
+  padding: 0 12px;
+  border-color: var(--text-normal);
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.ink-toolbar[data-vertical] .ink-btn.ink-tb-text .ink-btn-label {
+  display: none;
+}
+
+.ink-toolbar[data-vertical] .ink-btn.ink-tb-btn.ink-tb-text {
+  width: var(--ink-tb-size);
+  padding: 0;
+}
+
+/* too narrow: fold the less important buttons into the menu (see Toolbar.fit) */
+.ink-toolbar:not([data-fold="0"]) .ink-tb-favs,
+.ink-toolbar:not([data-fold="0"]) .ink-tb-addpage,
+.ink-toolbar:not([data-fold="0"]) .ink-tb-notes,
+.ink-toolbar:not([data-fold="0"]):not([data-fold="1"]) .ink-tb-text .ink-btn-label,
+.ink-toolbar[data-fold="3"] .ink-tb-insert,
+.ink-toolbar[data-fold="4"] .ink-tb-insert,
+.ink-toolbar[data-fold="5"] .ink-tb-insert,
+.ink-toolbar[data-fold="4"] .ink-tb-pages .ink-tb-btn:not(.ink-tb-pagelabel),
+.ink-toolbar[data-fold="5"] .ink-tb-pages .ink-tb-btn:not(.ink-tb-pagelabel),
+.ink-toolbar[data-fold="5"] .ink-tb-history {
+  display: none;
+}
+
+.ink-toolbar:not([data-fold="0"]):not([data-fold="1"]) .ink-btn.ink-tb-btn.ink-tb-text {
+  width: var(--ink-tb-size);
+  padding: 0;
+}
+
+.ink-toolbar:not([data-fold="0"]) {
+  gap: 4px;
+}
+
+/* narrow screens: slightly smaller buttons (still about 9 mm on a 10" tablet) */
+.ink-toolbar.ink-toolbar:not([data-fold="0"]):not([data-fold="1"]) {
+  --ink-tb-size: 42px;
+}
+
+.ink-toolbar:not([data-fold="0"]) .ink-tb-group + .ink-tb-group {
+  padding-left: 4px;
+}
+
+/* ---------- Popover cards ---------------------------------------------- */
+
+.ink-popover {
+  position: absolute;
+  z-index: var(--layer-popover, 30);
+  box-sizing: border-box;
+  width: min(440px, calc(100% - 12px));
+  overflow-y: auto;
+  padding: 10px 14px 12px;
+  border: 2px solid var(--text-normal);
+  border-radius: 14px;
+  background: var(--background-primary);
+  color: var(--text-normal);
+  font-size: 16px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18);
+}
+
+.ink-popover button {
+  margin: 0;
+  box-shadow: none;
+  font-size: inherit;
+}
+
+.ink-pop-section + .ink-pop-section {
+  margin-top: 10px;
+}
+
+.ink-pop-title {
+  margin: 4px 0 8px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.ink-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(76px, 1fr));
+  gap: 8px;
+}
+
+.ink-popover .ink-btn.ink-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: 76px;
+  padding: 4px;
+  border: 2px solid var(--background-modifier-border);
+  border-radius: 12px;
+  background: transparent;
+  color: inherit;
+  font-size: 13px;
+  line-height: 1.15;
+  text-align: center;
+}
+
+.ink-popover .ink-btn.ink-tile.is-active {
+  border-color: var(--text-normal);
+  background: var(--text-normal);
+  color: var(--background-primary);
+}
+
+.ink-tile .ink-btn-icon svg {
+  width: 28px;
+  height: 28px;
+}
+
+.ink-swatches {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(46px, 1fr));
+  gap: 8px;
+}
+
+.ink-popover .ink-swatch-btn,
+.ink-selection-palette .ink-swatch-btn {
+  width: 100%;
+  max-width: 52px;
+  height: auto;
+  aspect-ratio: 1;
+  padding: 0;
+  border: 2px solid var(--text-normal);
+  border-radius: 50%;
+  background: var(--swatch);
+}
+
+.ink-popover .ink-swatch-btn.is-active {
+  outline: 3px solid var(--text-normal);
+  outline-offset: 3px;
+}
+
+.ink-thickness {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.ink-thickness-dots,
+.ink-fine,
+.ink-size-row,
+.ink-pop-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.ink-popover .ink-dot-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 50px;
+  height: 50px;
+  padding: 0;
+  border: 2px solid var(--background-modifier-border);
+  border-radius: 12px;
+  background: transparent;
+}
+
+.ink-popover .ink-dot-btn.is-active {
+  border-color: var(--text-normal);
+  border-width: 3px;
+}
+
+.ink-dot {
+  display: block;
+  border-radius: 50%;
+}
+
+.ink-popover .ink-fine .ink-btn {
+  width: 50px;
+  height: 50px;
+  padding: 0;
+  border: 2px solid var(--background-modifier-border);
+  border-radius: 12px;
+  background: transparent;
+  color: inherit;
+}
+
+.ink-fine-value {
+  min-width: 2.6em;
+  text-align: center;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.ink-popover .ink-size-btn {
+  min-width: 64px;
+  height: 52px;
+  border: 2px solid var(--background-modifier-border);
+  border-radius: 12px;
+  background: transparent;
+  color: inherit;
+  font-weight: 700;
+}
+
+.ink-popover .ink-size-btn.is-active {
+  border-color: var(--text-normal);
+  background: var(--text-normal);
+  color: var(--background-primary);
+}
+
+.ink-popover .ink-pop-wide {
+  display: inline-flex;
+  flex: 1 1 160px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 52px;
+  padding: 6px 12px;
+  border: 2px solid var(--text-normal);
+  border-radius: 12px;
+  background: transparent;
+  color: inherit;
+  font-weight: 600;
+}
+
+.ink-popover .ink-pop-wide.is-danger,
+.ink-menu-item.is-danger {
+  color: var(--text-error);
+}
+
+.ink-popover .ink-pop-wide:disabled {
+  opacity: 0.4;
+}
+
+.ink-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 52px;
+  cursor: pointer;
+}
+
+.ink-toggle-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ink-toggle-label {
+  font-weight: 600;
+}
+
+.ink-toggle-hint,
+.ink-menu-hint,
+.ink-pop-hint {
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.ink-pop-hint {
+  margin: 4px 0 0;
+}
+
+.ink-pop-text {
+  margin: 4px 0 12px;
+}
+
+.ink-toggle-row input.ink-toggle {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  margin: 0;
+  accent-color: var(--text-normal);
+}
+
+.ink-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ink-popover .ink-menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 14px;
+  width: 100%;
+  min-height: 52px;
+  padding: 6px 10px;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+
+.ink-popover .ink-menu-item:disabled {
+  opacity: 0.4;
+}
+
+@media (hover: hover) {
+  .ink-popover .ink-menu-item:not(:disabled):hover,
+  .ink-popover .ink-tile:not(.is-active):hover {
+    background: var(--background-modifier-hover);
+  }
+}
+
+.ink-menu-icon svg {
+  width: 24px;
+  height: 24px;
+}
+
+.ink-menu-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ink-menu-label {
+  font-size: 16px;
+}
+
 /* ---------- Bookmark switcher -------------------------------------------- */
 
 .ink-has-bookmarks {
@@ -205,6 +892,202 @@
 
 .ink-bookmarks.is-compact .ink-bookmark.ink-bookmark.is-active {
   padding-left: calc(var(--ink-notch) + 14px);
+}
+
+/* ---------- Typed notes panel, page overview ----------------------------- */
+
+.ink-notes-panel {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  bottom: 8px;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  width: min(420px, calc(100% - 16px));
+  border: 2px solid var(--text-normal);
+  border-radius: 12px;
+  background: var(--background-primary);
+  color: var(--text-normal);
+  cursor: auto;
+  user-select: text;
+  -webkit-user-select: text;
+  touch-action: auto;
+}
+
+.ink-notes-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.ink-notes-title {
+  flex: 1 1 auto;
+  font-weight: 700;
+}
+
+.ink-notes-panel button.ink-notes-btn {
+  min-width: 48px;
+  height: 44px;
+  margin: 0;
+}
+
+.ink-notes-body {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 4px 14px 14px;
+}
+
+.ink-notes-empty {
+  color: var(--text-muted);
+}
+
+textarea.ink-notes-input {
+  width: 100%;
+  min-height: calc(100% - 12px);
+  margin-top: 8px;
+  font-size: 16px;
+  resize: none;
+}
+
+.ink-modal.ink-pages-modal {
+  width: min(920px, 96vw);
+}
+
+.ink-pages-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 16px;
+}
+
+.ink-page-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.ink-pages-grid button.ink-page-thumb {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  background: #ffffff;
+  box-shadow: none;
+  cursor: pointer;
+}
+
+.ink-page-tile.is-current button.ink-page-thumb {
+  outline: 3px solid var(--text-normal);
+  outline-offset: 2px;
+}
+
+.ink-page-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.ink-page-bar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.ink-page-num {
+  margin-right: auto;
+  min-width: 1.5em;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.ink-pages-grid button.ink-page-act {
+  width: 38px;
+  height: 38px;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  background: transparent;
+  box-shadow: none;
+}
+
+.ink-pages-grid button.ink-page-act:disabled {
+  opacity: 0.35;
+}
+
+.ink-pages-grid button.ink-page-add {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: auto;
+  min-height: 180px;
+  margin: 0;
+  border: 2px dashed var(--background-modifier-border);
+  border-radius: 8px;
+  background: transparent;
+  box-shadow: none;
+  font-weight: 600;
+}
+
+.ink-broken {
+  position: absolute;
+  inset: 80px 20px auto;
+  z-index: 25;
+  padding: 16px 20px;
+  border: 2px solid var(--text-error);
+  border-radius: 12px;
+  background: var(--background-primary);
+}
+
+/* ---------- Figures on the text page ------------------------------------ */
+
+.ink-figure {
+  margin: 0.4em 0;
+}
+
+.ink-figure canvas.ink-figure-canvas {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.ink-figure-missing {
+  display: inline-block;
+  padding: 6px 10px;
+  border: 1px dashed var(--background-modifier-border);
+  border-radius: 6px;
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+}
+
+.ink-preview-pages {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+canvas.ink-preview-page {
+  width: 140px;
+  height: auto;
+  border: 1px solid var(--background-modifier-border);
+  cursor: pointer;
+}
+
+.ink-preview-more {
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
 }
 
 /* ---------- Text page --------------------------------------------------- */
@@ -509,20 +1392,6 @@ body.ink-eink .ink-segmented button {
 body.ink-eink.theme-dark .ink-bookmarks {
   --ink-ribbon-ink: #ffffff;
   --ink-ribbon-paper: #000000;
-}
-
-/* Excalidraw UI: no floating shadows, crisp outlines */
-body.ink-eink .excalidraw {
-  --shadow-island: none;
-  --button-hover-bg: #e6e6e6;
-  --color-primary: #000000;
-  --color-primary-darker: #000000;
-  --color-primary-darkest: #000000;
-  --color-primary-light: #d9d9d9;
-}
-
-body.ink-eink .excalidraw .Island {
-  border: 1px solid #000000;
 }
 
 body.ink-large-targets .ink-modal button,

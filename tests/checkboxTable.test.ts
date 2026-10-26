@@ -5,16 +5,16 @@ import { classifyScene } from "../src/core/classify";
 import type { Pt, Rect } from "../src/core/geometry";
 import { DEFAULT_LAYOUT_OPTIONS, layoutTranscript, type LayoutOptions } from "../src/core/layout";
 import type { OcrLine } from "../src/core/ocrTypes";
-import type { ExElement } from "../src/types/excalidraw";
+import type { SceneElement } from "../src/core/scene";
 import { poly, shape, textEl, wordsLine } from "./helpers";
 
 const layoutOpts: LayoutOptions = {
   ...DEFAULT_LAYOUT_OPTIONS,
-  drawingLink: "Notes/Page.excalidraw",
+  drawingPath: "Notes/Attachments/Page.ink.md",
   linkFor: (p) => p.replace(/\.md$/, ""),
 };
 
-function transcribe(els: ExElement[], lines: OcrLine[]): string[] {
+function transcribe(els: SceneElement[], lines: OcrLine[]): string[] {
   return layoutTranscript(classifyScene(els, lines, new Set()), () => "area=REG", layoutOpts).map((b) => b.md);
 }
 
@@ -30,7 +30,7 @@ const BOX: Array<[number, number]> = [
 ];
 const TICK: Array<[number, number]> = [[178, 90], [180, 110], [182, 128], [210, 100], [250, 62], [290, 25], [320, -5]];
 
-function getThe(): ExElement[] {
+function getThe(): SceneElement[] {
   return [
     // g, written like a "y" with a long descender
     poly("g", [[372, 98], [376, 120], [384, 138], [394, 140], [403, 125], [407, 100], [407, 140], [403, 180], [396, 220], [385, 243], [365, 252], [345, 250], [332, 238], [328, 222], [335, 205], [342, 200]]),
@@ -103,7 +103,7 @@ describe("hand-drawn checkboxes", () => {
   });
 
   it("makes a list of several checkbox lines", () => {
-    const els: ExElement[] = [];
+    const els: SceneElement[] = [];
     const lines: OcrLine[] = [];
     ["milk", "eggs", "bread"].forEach((name, i) => {
       const y = i * 80;
@@ -149,7 +149,7 @@ describe("hand-drawn checkboxes", () => {
 // A table: one header line (curving down at its end like an arrow), two column lines,
 // headings "+", "Y" and "X" (traced from a real page).
 
-function headerTable(): ExElement[] {
+function headerTable(): SceneElement[] {
   return [
     poly("H", [[0, 128], [100, 128], [205, 128], [300, 130], [440, 134], [560, 142], [700, 160], [800, 178], [860, 196], [900, 215], [918, 232], [926, 248], [912, 236]]),
     poly("V1", [[205, 75], [205, 200], [204, 350], [204, 502]]),
@@ -170,7 +170,7 @@ const X = { x: 522, y: 48, w: 93, h: 79 };
 const ellipse = (cx: number, cy: number, rx: number, ry: number): Array<[number, number]> =>
   Array.from({ length: 41 }, (_, i) => [cx + rx * Math.cos((i / 40) * 2 * Math.PI), cy + ry * Math.sin((i / 40) * 2 * Math.PI)]);
 
-function gridLetters(): ExElement[] {
+function gridLetters(): SceneElement[] {
   return [
     poly("one", [[207, 62], [209, 103]]),
     poly("two", [[470, 88], [488, 74], [505, 80], [498, 95], [473, 101], [526, 99]]),
@@ -186,7 +186,7 @@ function gridLetters(): ExElement[] {
   ];
 }
 
-function grid3x3(): ExElement[] {
+function grid3x3(): SceneElement[] {
   return [
     poly("H1", [[95, 120], [500, 119], [1012, 121]]),
     poly("H2", [[88, 306], [500, 302], [1008, 298]]),
@@ -308,10 +308,10 @@ describe("hand-drawn tables", () => {
   });
 
   it("stays a picture when OCR read nothing in the grid", () => {
-    expect(transcribe(grid3x3(), [])).toEqual(["![[Notes/Page.excalidraw#^area=REG|720]]"]);
+    expect(transcribe(grid3x3(), [])).toEqual(["```ink-figure\narea: REG\nfile: Notes/Attachments/Page.ink.md\nwidth: 720\n```"]);
   });
 
-  it.each<[string, () => ExElement[]]>([
+  it.each<[string, () => SceneElement[]]>([
     [
       "lines drawn in pieces",
       () => [

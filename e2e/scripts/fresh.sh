@@ -1,5 +1,5 @@
 #!/bin/bash
-# Fresh vault + a single Obsidian instance with both plugins enabled, plus the mock Azure and Ink Notebook Cloud servers.
+# Fresh vault + a single Obsidian instance with Ink Notebook enabled, plus the mock Azure and Ink Notebook Cloud servers.
 E2E=$(cd "$(dirname "$0")/.." && pwd)
 pkill -f -- "--remote-debugging-port=9222" 2>/dev/null
 [ -f "$E2E/mock.pid" ] && kill $(cat "$E2E/mock.pid") 2>/dev/null
@@ -19,5 +19,5 @@ sleep 4
 cd "$E2E" && node scripts/cdp.mjs eval 'await app.plugins.setEnable(true); await new Promise(r=>setTimeout(r,6000)); return Object.keys(app.plugins.plugins)'
 for i in 1 2 3 4; do node scripts/cdp.mjs key Escape >/dev/null 2>&1; done
 # the loaded build must be the one on disk
-node scripts/cdp.mjs eval 'const fs = window.require("fs"); const p = app.plugins.plugins["ink-notebook"]; const disk = fs.readFileSync(app.vault.adapter.getFullPath(".obsidian/plugins/ink-notebook/main.js"), "utf8"); return { linkSetting: "linkHandwriting" in p.settings, diskHasCommit: disk.includes("inkNotebookLink") }'
+node scripts/cdp.mjs eval 'const p = app.plugins.plugins["ink-notebook"]; return { loaded: !!p, view: !!app.viewRegistry.viewByType["ink-notebook"] }'
 ps -eo pid,lstart,cmd | grep -- "--remote-debugging-port=9222" | grep -v grep | grep -v "type=" 

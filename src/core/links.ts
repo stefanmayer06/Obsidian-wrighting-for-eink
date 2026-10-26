@@ -3,12 +3,8 @@ import { center, containsPoint, inflate, unionAll, type Rect } from "./geometry"
 
 /**
  * Handwritten [[links]] made clickable on the ink page: the first stroke of a
- * recognised link gets Excalidraw's `link` property (shown as a link icon).
- * We remember which links we set (customData.inkNotebookLink) so we only ever
- * remove our own links, never links the user added.
+ * recognised link carries the link (shown as a small link button next to it).
  */
-
-export const LINK_MARK_KEY = "inkNotebookLink";
 
 export interface LinkTarget {
   strokeId: string;
@@ -56,35 +52,4 @@ export function findHandwrittenLinks(lines: ReadonlyArray<SceneLine>, strokeRect
     }
   }
   return out;
-}
-
-export interface LinkState {
-  id: string;
-  link: string | null | undefined;
-  /** the link we set earlier (from customData), if any */
-  ours: string | undefined;
-}
-
-export interface LinkPlan {
-  set: LinkTarget[];
-  clear: string[];
-}
-
-/** Compare wanted links with the current state of the strokes. */
-export function planLinkUpdates(wanted: ReadonlyArray<LinkTarget>, current: ReadonlyArray<LinkState>): LinkPlan {
-  const byId = new Map(current.map((c) => [c.id, c] as const));
-  const wantedIds = new Set(wanted.map((w) => w.strokeId));
-  const set: LinkTarget[] = [];
-  for (const w of wanted) {
-    const c = byId.get(w.strokeId);
-    if (!c) continue;
-    // never replace a link the user set on that stroke
-    if (c.link && c.link !== c.ours) continue;
-    if (c.link === w.link && c.ours === w.link) continue;
-    set.push(w);
-  }
-  const clear = current
-    .filter((c) => c.ours !== undefined && !wantedIds.has(c.id) && c.link === c.ours)
-    .map((c) => c.id);
-  return { set, clear };
 }

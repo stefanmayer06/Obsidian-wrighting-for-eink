@@ -2,25 +2,14 @@ import { placeDock, type Box, type DockPreference, type DockSize } from "../core
 
 /**
  * Keeps the bookmark stack clear of every other control on the page – the view
- * header, Excalidraw's toolbars and tool panels (desktop, tray and mobile
- * layouts), the status bar – on any screen size. It measures those controls and
- * re-places the stack whenever the page is resized or the controls change.
+ * header, the status bar, the mobile toolbar – on any screen size. It measures
+ * those controls and re-places the stack whenever the page is resized or the
+ * controls change.
  */
 
-/** Controls inside the page. Excalidraw's canvas, embeds and hints are not controls. */
-const LOCAL_OBSTACLES = [
-  ".view-header",
-  ".excalidraw .Island",
-  '.excalidraw [class*="misc-tools-container"]',
-  ".excalidraw .App-toolbar",
-  ".excalidraw .sidebar",
-  ".excalidraw .sidebar-trigger",
-  ".excalidraw .layer-ui__wrapper__top-right",
-  ".excalidraw .layer-ui__wrapper__footer-right",
-  ".excalidraw .ToolIcon",
-  ".excalidraw button",
-].join(", ");
-const NOT_OBSTACLES = ".ink-bookmarks, .excalidraw__embeddable-container, .HintViewer";
+/** Controls inside the page. */
+const LOCAL_OBSTACLES = [".view-header", ".view-actions", ".document-search-container", ".markdown-embed-link"].join(", ");
+const NOT_OBSTACLES = ".ink-bookmarks";
 /** App chrome that can float over the page. */
 const GLOBAL_OBSTACLES = ".status-bar, .mobile-navbar, .mobile-toolbar";
 
@@ -51,11 +40,11 @@ export class DockLayout {
       this.resizeObserver = new ResizeObserver(() => this.schedule());
       this.resizeObserver.observe(container);
     }
-    // Excalidraw's panels come and go (tray/mobile layouts, zen mode, sidebars)
+    // the search bar and the like come and go
     this.mutationObserver = new MutationObserver((records) => {
       for (const r of records) {
         const t = r.target instanceof Element ? r.target : r.target.parentElement;
-        if (!t || root.contains(t) || t.tagName === "CANVAS" || t.closest(".HintViewer")) continue;
+        if (!t || root.contains(t) || t.tagName === "CANVAS" || t.closest(".markdown-preview-view, .cm-content")) continue;
         this.schedule();
         return;
       }

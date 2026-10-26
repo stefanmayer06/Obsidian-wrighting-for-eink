@@ -1,7 +1,6 @@
 /**
  * Placement of the bookmark stack on the right edge of a page so that it never
- * covers other controls (Excalidraw's tool panels, the view header, the status
- * bar, …), whatever the screen size. Pure geometry – the DOM side measures the
+ * covers other controls (the view header, search, the status bar, …), whatever the screen size. Pure geometry – the DOM side measures the
  * boxes and applies the result.
  */
 

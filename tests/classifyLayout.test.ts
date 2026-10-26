@@ -1,18 +1,18 @@
 import { describe, expect, it } from "vitest";
 import { classifyScene, DEFAULT_CLASSIFY_OPTIONS, isDiagramFrameName } from "../src/core/classify";
 import { DEFAULT_LAYOUT_OPTIONS, layoutTranscript, type LayoutOptions } from "../src/core/layout";
-import type { ExElement } from "../src/types/excalidraw";
+import type { SceneElement } from "../src/core/scene";
 import { boxStroke, line, shape, stroke, textEl } from "./helpers";
 
 const layoutOpts: LayoutOptions = {
   ...DEFAULT_LAYOUT_OPTIONS,
-  drawingLink: "Notes/Page.excalidraw",
+  drawingPath: "Notes/Attachments/Page.ink.md",
   linkFor: (p) => p.replace(/\.md$/, ""),
 };
 
 /** A page with a paragraph, a list, a hand-drawn diagram with a label, a typed text element and noise. */
 function scene() {
-  const els: ExElement[] = [
+  const els: SceneElement[] = [
     // paragraph: two lines
     stroke("a1", 0, 100, 90, 30),
     stroke("a2", 100, 100, 90, 30),
@@ -86,7 +86,7 @@ describe("classifyScene", () => {
   });
 
   it("recognises pages, page backgrounds and diagram frames", () => {
-    const els: ExElement[] = [
+    const els: SceneElement[] = [
       shape("paper", "image", 0, 0, 1000, 1414, { locked: true, customData: { inkNotebook: { role: "paper" } } }),
       shape("pdfimg", "image", 0, 1500, 800, 1100, { locked: true, customData: { inkNotebook: { role: "pdf-page", pdf: "Docs/Paper.pdf", page: 3 } } }),
       shape("frameA", "frame", 2000, 0, 500, 500, { name: "Diagram: flow" }),
@@ -111,7 +111,7 @@ describe("classifyScene", () => {
   });
 
   it("ignores page borders around PDF pages", () => {
-    const els: ExElement[] = [
+    const els: SceneElement[] = [
       shape("pg", "image", 0, 0, 800, 1100, { locked: true, customData: { inkNotebook: { role: "pdf-page", pdf: "a.pdf", page: 1 } } }),
       shape("border", "rectangle", 0, 0, 800, 1100, { locked: true, customData: { inkNotebook: { role: "page-border" } } }),
     ];
@@ -129,7 +129,7 @@ describe("classifyScene", () => {
   });
 
   it("keeps a diagram from swallowing the paragraph below it", () => {
-    const els: ExElement[] = [
+    const els: SceneElement[] = [
       shape("rect", "rectangle", 0, 0, 300, 100),
       stroke("l1", 0, 105, 200, 30),
       stroke("l2", 0, 140, 200, 30),
@@ -194,7 +194,7 @@ describe("layoutTranscript", () => {
     const blocks = layoutTranscript(c, () => "area=REG1", layoutOpts);
     expect(blocks.map((b) => b.md)).toEqual([
       "The quick brown fox jumps",
-      "![[Notes/Page.excalidraw#^area=REG1|320]]\n%% Start %%",
+      "```ink-figure\narea: REG1\nfile: Notes/Attachments/Page.ink.md\nwidth: 320\nlabels: Start\n```",
       "- milk\n- eggs",
       "Typed on the [[Ink]] page",
     ]);
@@ -208,9 +208,9 @@ describe("layoutTranscript", () => {
     const { els } = scene();
     const pending = new Set(els.filter((e) => e.type === "freedraw").map((e) => e.id));
     const blocks = layoutTranscript(classifyScene(els, [], pending), () => null, layoutOpts);
-    const embeds = blocks.filter((b) => b.md.startsWith("![["));
+    const embeds = blocks.filter((b) => b.md.startsWith("```ink-figure"));
     expect(embeds).toHaveLength(1);
-    expect(embeds[0].md).toBe("![[Notes/Page.excalidraw]]");
+    expect(embeds[0].md).toBe("```ink-figure\npage: \nfile: Notes/Attachments/Page.ink.md\nwidth: 720\n```");
     expect(blocks.some((b) => b.md === "Typed on the [[Ink]] page")).toBe(true);
   });
 
@@ -243,7 +243,7 @@ describe("layoutTranscript", () => {
   });
 
   it("groups content by PDF page with linked headings", () => {
-    const els: ExElement[] = [
+    const els: SceneElement[] = [
       shape("p1", "image", 0, 0, 800, 1100, { locked: true, customData: { inkNotebook: { role: "pdf-page", pdf: "Docs/Paper.pdf", page: 1 } } }),
       shape("p2", "image", 0, 1200, 800, 1100, { locked: true, customData: { inkNotebook: { role: "pdf-page", pdf: "Docs/Paper.pdf", page: 2 } } }),
       stroke("n1", 50, 1300, 200, 30),

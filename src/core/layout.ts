@@ -4,7 +4,6 @@ import { bottom, center, median, union, verticalOverlapRatio, type Rect } from "
 import { shortHash } from "./hash";
 import {
   classifyLine,
-  commentSafe,
   formatLine,
   joinParagraphLines,
   lineTextWithHighlights,
@@ -24,8 +23,8 @@ export interface TranscriptBlock {
 }
 
 export interface LayoutOptions {
-  /** Link text of the drawing, used for embeds (e.g. "Notes/My page.excalidraw"). */
-  drawingLink: string;
+  /** Vault path of the ink page, written into figure blocks (e.g. "Notes/Attachments/My page.ink.md"). */
+  drawingPath: string;
   /** Words below this confidence are highlighted with ==…== (0 disables). */
   highlightThreshold: number;
   /** A single short line this much taller than the median line becomes a heading. */
@@ -38,7 +37,7 @@ export interface LayoutOptions {
   linkFor: (path: string) => string;
 }
 
-export const DEFAULT_LAYOUT_OPTIONS: Omit<LayoutOptions, "drawingLink" | "linkFor"> = {
+export const DEFAULT_LAYOUT_OPTIONS: Omit<LayoutOptions, "drawingPath" | "linkFor"> = {
   highlightThreshold: 0,
   headingRatio: 1.6,
   paragraphGapRatio: 0.9,
@@ -87,11 +86,29 @@ function renderTable(t: TableItem, threshold: number): string {
   return [row(rows[0]), row(rows[0].map(() => "---")), ...rows.slice(1).map(row)].join("\n");
 }
 
-/** Build a page embed for pending/unknown ink. */
+export const FIGURE_LANG = "ink-figure";
+
+/**
+ * A figure block: the plugin draws that part of the ink page there, live.
+ *
+ *   ```ink-figure
+ *   area: <region id>          (or "frame: <figure id>", "page: <page id>")
+ *   file: <vault path of the ink page>
+ *   width: 600
+ *   labels: Start · End        (text recognised inside the drawing, for search)
+ *   ```
+ */
+export function figureBlock(ref: string, opts: Pick<LayoutOptions, "drawingPath">, width: number, labels: ReadonlyArray<string> = []): string {
+  const eq = ref.indexOf("=");
+  const lines = [`${ref.slice(0, eq)}: ${ref.slice(eq + 1)}`, `file: ${opts.drawingPath}`, `width: ${Math.round(width)}`];
+  const text = labels.join(" · ").replace(/\s+/g, " ").replace(/`/g, "'").trim();
+  if (text) lines.push(`labels: ${text}`);
+  return ["```" + FIGURE_LANG, ...lines, "```"].join("\n");
+}
+
+/** A figure of a whole page, for handwriting that could not be recognised (yet). */
 function pageEmbed(page: PageInfo | null, opts: LayoutOptions): string {
-  if (!page) return `![[${opts.drawingLink}]]`;
-  const ref = page.kind === "frame" ? `frame=${page.id}` : `area=${page.id}`;
-  return `![[${opts.drawingLink}#^${ref}|${opts.diagramMaxWidth}]]`;
+  return figureBlock(`page=${page?.id ?? ""}`, opts, opts.diagramMaxWidth);
 }
 
 function sectionHeading(page: PageInfo, opts: LayoutOptions): string | null {
@@ -190,16 +207,12 @@ export function layoutTranscript(
           continue;
         }
         const ref = resolveDiagram(d);
-        const labels = d.labels.length > 0 ? `\n%% ${commentSafe(d.labels.join(" · "))} %%` : "";
         if (ref) {
-          blocks.push({
-            key: `d${shortHash(ref, 8)}`,
-            md: `![[${opts.drawingLink}#^${ref}|${embedWidth(d, opts)}]]${labels}`,
-          });
+          blocks.push({ key: `d${shortHash(ref, 8)}`, md: figureBlock(ref, opts, embedWidth(d, opts), d.labels) });
         } else if (!pendingEmbedded) {
-          // No region reference available yet: show the page (or drawing) instead.
+          // No region reference available yet: show the page instead.
           pendingEmbedded = true;
-          blocks.push({ key: `e${shortHash(section.page?.id ?? "drawing", 8)}`, md: pageEmbed(section.page, opts) + labels });
+          blocks.push({ key: `e${shortHash(section.page?.id ?? "drawing", 8)}`, md: pageEmbed(section.page, opts) });
         }
         i++;
         continue;

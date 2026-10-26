@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { findHandwrittenLinks, planLinkUpdates } from "../src/core/links";
+import { findHandwrittenLinks } from "../src/core/links";
 import type { SceneLine } from "../src/core/classify";
 import type { Rect } from "../src/core/geometry";
 
@@ -44,26 +44,5 @@ describe("findHandwrittenLinks", () => {
     expect(findHandwrittenLinks([broken], rects)).toEqual([{ strokeId: "s2", link: "[[Anna]]" }]);
     const plain = sceneLine([["[note]", { x: 0, y: 0, w: 80, h: 30 }]], ["s1"]);
     expect(findHandwrittenLinks([plain], rects)).toEqual([]);
-  });
-});
-
-describe("planLinkUpdates", () => {
-  it("sets new links, keeps user links and clears only our stale links", () => {
-    const plan = planLinkUpdates(
-      [
-        { strokeId: "a", link: "[[A]]" },
-        { strokeId: "b", link: "[[B]]" },
-        { strokeId: "c", link: "[[C]]" },
-      ],
-      [
-        { id: "a", link: null, ours: undefined }, // new
-        { id: "b", link: "https://user.example", ours: undefined }, // user link: keep
-        { id: "c", link: "[[C]]", ours: "[[C]]" }, // already ours, unchanged
-        { id: "d", link: "[[Old]]", ours: "[[Old]]" }, // stale, ours: clear
-        { id: "e", link: "[[Mine]]", ours: "[[Other]]" }, // user changed it: keep
-      ],
-    );
-    expect(plan.set).toEqual([{ strokeId: "a", link: "[[A]]" }]);
-    expect(plan.clear).toEqual(["d"]);
   });
 });
