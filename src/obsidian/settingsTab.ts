@@ -3,11 +3,9 @@ import type InkNotebookPlugin from "../main";
 import { paperLabel } from "../core/paper";
 import { cleanSubfolder } from "../core/folders";
 import { PaperPickerModal } from "./paperPicker";
-import { applyEinkClasses } from "./einkMode";
-import { applyEinkExcalidrawSettings, EXCALIDRAW_PLUGIN_ID, excalidrawSettingsDiff, isExcalidrawReady } from "./excalidrawBridge";
 import { SetupWizard } from "./setupWizard";
 import { renderRecognitionSettings } from "./recognitionSettings";
-import type { BookmarkPosition, DiagramSensitivity, PageLocation, TextViewMode } from "../settings";
+import type { BookmarkPosition, DiagramSensitivity, InkSettings, PageLocation, TextViewMode } from "../settings";
 
 export class InkSettingTab extends PluginSettingTab {
   constructor(
@@ -24,19 +22,70 @@ export class InkSettingTab extends PluginSettingTab {
     const s = this.plugin.settings;
     const save = () => this.plugin.saveSettings();
 
+    const apply = async () => {
+      await save();
+      this.plugin.applyInkSettings();
+    };
+    const toggle = (name: string, desc: string, key: { [K in keyof InkSettings]: InkSettings[K] extends boolean ? K : never }[keyof InkSettings]) =>
+      new Setting(containerEl)
+        .setName(name)
+        .setDesc(desc)
+        .addToggle((t) =>
+          t.setValue(s[key]).onChange(async (v) => {
+            s[key] = v;
+            await apply();
+          }),
+        );
+
     new Setting(containerEl)
       .setName("Setup assistant")
-      .setDesc("Walk through the setup again (Excalidraw, e-ink, handwriting recognition).")
+      .setDesc("Walk through the setup again (writing, e-ink, handwriting recognition).")
       .addButton((b) => b.setButtonText("Open").onClick(() => new SetupWizard(this.plugin).open()));
+
+    // ------------------------------------------------------------------ writing
+    new Setting(containerEl).setName("Writing").setHeading();
     new Setting(containerEl)
-      .setName("Excalidraw")
-      .setDesc(this.plugin.excalidraw.describe().text)
-      .addButton((b) =>
-        b
-          .setButtonText("Excalidraw settings")
-          .setDisabled(!isExcalidrawReady(this.app))
-          .onClick(() => (this.app as unknown as { setting?: { openTabById(id: string): unknown } }).setting?.openTabById(EXCALIDRAW_PLUGIN_ID)),
+      .setName("Pen side button")
+      .setDesc("What holding the button on the side of the pen does (the eraser end of the pen always erases).")
+      .addDropdown((d) =>
+        d
+          .addOptions({ eraser: "Erase", lasso: "Lasso (select)", none: "Nothing" })
+          .setValue(s.sideButton)
+          .onChange(async (v) => {
+            s.sideButton = v as InkSettings["sideButton"];
+            await apply();
+          }),
       );
+    toggle("Draw with a finger", "Off: only the pen writes; fingers turn pages, scroll and zoom (best with a stylus – your palm can rest on the screen).", "fingerDrawing");
+    toggle("Pressure sensitivity", "Lines get wider the harder you press (fountain pen, brush, pencil).", "pressure");
+    toggle("Scribble to erase", "Scratch quickly back and forth over writing with the pen to erase it.", "scribbleErase");
+    toggle("Snap shapes when holding the pen", "Draw a line, rectangle, triangle or circle and keep the pen still at the end: it becomes a clean shape.", "holdToShape");
+    toggle("Swipe to turn pages", "Swipe left/right (or up/down) with one finger.", "swipePages");
+    toggle("Two-finger tap undoes", "", "twoFingerUndo");
+    toggle("Three-finger tap redoes", "", "threeFingerRedo");
+    new Setting(containerEl)
+      .setName("Page on screen")
+      .addDropdown((d) =>
+        d
+          .addOptions({ page: "Whole page", width: "Page width (scroll down)" })
+          .setValue(s.fit)
+          .onChange(async (v) => {
+            s.fit = v === "width" ? "width" : "page";
+            await apply();
+          }),
+      );
+    new Setting(containerEl)
+      .setName("Toolbar")
+      .addDropdown((d) =>
+        d
+          .addOptions({ top: "Top", bottom: "Bottom", left: "Left", right: "Right" })
+          .setValue(s.toolbarPosition)
+          .onChange(async (v) => {
+            s.toolbarPosition = v as InkSettings["toolbarPosition"];
+            await apply();
+          }),
+      );
+    toggle("Low-latency drawing", "Draws the ink straight to the screen. Turn off if the page flickers on your device.", "lowLatency");
 
     // ------------------------------------------------------------------ pages
     new Setting(containerEl).setName("Pages").setHeading();
@@ -63,7 +112,7 @@ export class InkSettingTab extends PluginSettingTab {
       );
     new Setting(containerEl)
       .setName("Subfolder for ink files")
-      .setDesc("Drawings and paper backgrounds go into this subfolder of the text page's folder, so your folders only show your notes. Leave empty to keep them next to the text page.")
+      .setDesc("The ink pages (Name.ink.md) go into this subfolder of the text page's folder, so your folders only show your notes. Leave empty to keep them next to the text page.")
       .addText((t) =>
         t
           .setPlaceholder("next to the text page")
@@ -140,7 +189,7 @@ export class InkSettingTab extends PluginSettingTab {
       );
     new Setting(containerEl)
       .setName("Transcribe while writing")
-      .setDesc("Also update the text page whenever the drawing is saved (uses more requests). Otherwise it updates when you flip the bookmark or leave the page.")
+      .setDesc("Also update the text page a few seconds after you stop writing (uses more requests). Otherwise it updates when you open the text page or leave the ink page.")
       .addToggle((t) =>
         t.setValue(s.autoTranscribe).onChange(async (v) => {
           s.autoTranscribe = v;
@@ -162,7 +211,7 @@ export class InkSettingTab extends PluginSettingTab {
       );
     new Setting(containerEl)
       .setName("Clickable handwritten links")
-      .setDesc("A handwritten [[Page]] gets a link icon on the ink page, so you can jump to the page from your handwriting.")
+      .setDesc("A handwritten [[Page]] gets a link button on the ink page, so you can jump to the page from your handwriting.")
       .addToggle((t) =>
         t.setValue(s.linkHandwriting).onChange(async (v) => {
           s.linkHandwriting = v;
@@ -171,7 +220,7 @@ export class InkSettingTab extends PluginSettingTab {
       );
     new Setting(containerEl)
       .setName("Diagram detection")
-      .setDesc("How eagerly drawings (not text) are turned into embedded diagrams on the text page. Tip: put a drawing in a frame named \"Diagram …\" to force it.")
+      .setDesc("How eagerly drawings (not text) are shown as pictures on the text page. Tip: select a drawing with the lasso and tap \"Figure\" to force it.")
       .addDropdown((d) =>
         d
           .addOptions({ low: "Only clear drawings", normal: "Normal", high: "Also small sketches" })
@@ -192,41 +241,6 @@ export class InkSettingTab extends PluginSettingTab {
         }),
       );
 
-    // ------------------------------------------------------------------ typed notes
-    new Setting(containerEl).setName("Typed notes").setHeading();
-    new Setting(containerEl)
-      .setName("Show typed notes on the ink page")
-      .setDesc("Text you type on the text page appears as a text card on the drawing (and edits to the card come back).")
-      .addToggle((t) =>
-        t.setValue(s.syncTypedNotes).onChange(async (v) => {
-          s.syncTypedNotes = v;
-          await save();
-        }),
-      );
-    new Setting(containerEl)
-      .setName("Font of the typed notes card")
-      .addDropdown((d) =>
-        d
-          .addOptions({ "6": "Nunito (clean)", "5": "Excalifont (hand-drawn)", "2": "Helvetica", "3": "Cascadia (monospace)" })
-          .setValue(String(s.typedFontFamily))
-          .onChange(async (v) => {
-            s.typedFontFamily = parseInt(v, 10);
-            await save();
-          }),
-      );
-    new Setting(containerEl)
-      .setName("Card width")
-      .addSlider((sl) =>
-        sl
-          .setLimits(300, 1200, 20)
-          .setValue(s.typedWidth)
-          .setDynamicTooltip()
-          .onChange(async (v) => {
-            s.typedWidth = v;
-            await save();
-          }),
-      );
-
     // ------------------------------------------------------------------ display
     new Setting(containerEl).setName("Display & e-ink").setHeading();
     new Setting(containerEl)
@@ -238,8 +252,7 @@ export class InkSettingTab extends PluginSettingTab {
           .setValue(s.einkMode)
           .onChange(async (v) => {
             s.einkMode = v as typeof s.einkMode;
-            await save();
-            applyEinkClasses(s);
+            await apply();
           }),
       );
     new Setting(containerEl)
@@ -248,29 +261,12 @@ export class InkSettingTab extends PluginSettingTab {
       .addToggle((t) =>
         t.setValue(s.largeTouchTargets).onChange(async (v) => {
           s.largeTouchTargets = v;
-          await save();
-          applyEinkClasses(s);
+          await apply();
         }),
       );
-    if (isExcalidrawReady(this.app)) {
-      const diff = excalidrawSettingsDiff(this.app);
-      new Setting(containerEl)
-        .setName("Excalidraw stylus settings")
-        .setDesc(diff.length === 0 ? "✓ Using the recommended e-ink pen settings." : "Pen draws, one finger pans, double-tap with the pen erases.")
-        .addButton((b) =>
-          b
-            .setButtonText(diff.length === 0 ? "Applied" : "Apply")
-            .setDisabled(diff.length === 0)
-            .onClick(async () => {
-              await applyEinkExcalidrawSettings(this.app);
-              new Notice("Excalidraw pen settings updated.");
-              this.display();
-            }),
-        );
-    }
     new Setting(containerEl)
       .setName("Bookmark position")
-      .setDesc("Where the bookmarks prefer to sit on the right edge of the page. They always move out of the way of toolbars and panels.")
+      .setDesc("Where the Ink/Text bookmarks prefer to sit on the right edge of the text page.")
       .addDropdown((d) =>
         d
           .addOptions({ top: "Upper", middle: "Middle", bottom: "Lower" })
@@ -281,30 +277,8 @@ export class InkSettingTab extends PluginSettingTab {
             this.plugin.bookmarks.refreshAll();
           }),
       );
-    new Setting(containerEl)
-      .setName("Bookmark on every drawing")
-      .setDesc("Also show a \"+ Text\" bookmark on Excalidraw drawings that do not have a text page yet.")
-      .addToggle((t) =>
-        t.setValue(s.showBookmarkOnAllDrawings).onChange(async (v) => {
-          s.showBookmarkOnAllDrawings = v;
-          await save();
-        }),
-      );
-
     // ------------------------------------------------------------------ pdf
     new Setting(containerEl).setName("PDF annotation").setHeading();
-    new Setting(containerEl)
-      .setName("Page width on the ink page")
-      .addSlider((sl) =>
-        sl
-          .setLimits(600, 2000, 50)
-          .setValue(s.pdfPageWidth)
-          .setDynamicTooltip()
-          .onChange(async (v) => {
-            s.pdfPageWidth = v;
-            await save();
-          }),
-      );
     new Setting(containerEl)
       .setName("Ask which pages to import above")
       .setDesc("PDFs with more pages ask for a page range (big PDFs are slow on e-ink devices).")
@@ -315,6 +289,15 @@ export class InkSettingTab extends PluginSettingTab {
             s.pdfMaxPagesWithoutAsking = n;
             await save();
           }
+        }),
+      );
+    new Setting(containerEl)
+      .setName("Folder for papers from arXiv")
+      .setDesc("Imported papers get a text page here (with title, authors and abstract); the PDF and the ink page go into its subfolder for ink files.")
+      .addText((t) =>
+        t.setValue(s.papersFolder).onChange(async (v) => {
+          s.papersFolder = v.trim().replace(/^\/+|\/+$/g, "") || "Papers";
+          await save();
         }),
       );
   }

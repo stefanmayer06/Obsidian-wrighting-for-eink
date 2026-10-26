@@ -1,13 +1,13 @@
-import type { ExElement } from "../types/excalidraw";
+import type { SceneElement } from "../core/scene";
 import { renderStrokeWidth, strokeImagePoints, type RenderPlan } from "../core/rasterPlan";
 
 /**
  * Renders handwriting strokes to a black-on-white PNG for OCR.
- * We draw the strokes ourselves (instead of using Excalidraw's exporter) so
- * that the mapping between image pixels and scene coordinates is exact and so
- * it also works for drawings that are not open in a view.
+ * We draw the strokes ourselves so that the mapping between image pixels and
+ * scene coordinates is exact and so it also works for ink pages that are not
+ * open in a view.
  */
-export async function renderStrokesPng(plan: RenderPlan, strokes: ReadonlyArray<ExElement>): Promise<ArrayBuffer> {
+export async function renderStrokesPng(plan: RenderPlan, strokes: ReadonlyArray<SceneElement>): Promise<ArrayBuffer> {
   const canvas = document.createElement("canvas");
   canvas.width = plan.width;
   canvas.height = plan.height;

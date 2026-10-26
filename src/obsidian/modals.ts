@@ -163,3 +163,90 @@ export class PdfImportModal extends Modal {
     }
   }
 }
+
+/** Pick a note (Markdown file). */
+export class NotePickModal extends FuzzySuggestModal<TFile> {
+  private picked = false;
+
+  private constructor(
+    app: App,
+    private files: TFile[],
+    private resolve: (f: TFile | null) => void,
+  ) {
+    super(app);
+    this.setPlaceholder("Link to which note?");
+  }
+
+  static pick(app: App, filter: (f: TFile) => boolean = () => true): Promise<TFile | null> {
+    const files = app.vault
+      .getMarkdownFiles()
+      .filter(filter)
+      .sort((a, b) => b.stat.mtime - a.stat.mtime);
+    return new Promise((resolve) => new NotePickModal(app, files, resolve).open());
+  }
+
+  getItems(): TFile[] {
+    return this.files;
+  }
+
+  getItemText(f: TFile): string {
+    return f.path.replace(/\.md$/, "");
+  }
+
+  onChooseItem(f: TFile): void {
+    this.picked = true;
+    this.resolve(f);
+  }
+
+  onClose(): void {
+    super.onClose();
+    window.setTimeout(() => {
+      if (!this.picked) this.resolve(null);
+    }, 50);
+  }
+}
+
+/** A yes/no question with large buttons. */
+export class ConfirmModal extends Modal {
+  private done = false;
+
+  private constructor(
+    app: App,
+    private opts: { title: string; text?: string; confirm: string; danger?: boolean },
+    private resolve: (ok: boolean) => void,
+  ) {
+    super(app);
+  }
+
+  static ask(app: App, opts: { title: string; text?: string; confirm: string; danger?: boolean }): Promise<boolean> {
+    return new Promise((resolve) => new ConfirmModal(app, opts, resolve).open());
+  }
+
+  onOpen(): void {
+    this.modalEl.addClass("ink-modal", "ink-confirm");
+    this.titleEl.setText(this.opts.title);
+    if (this.opts.text) this.contentEl.createEl("p", { text: this.opts.text });
+    new Setting(this.contentEl)
+      .addButton((b) => b.setButtonText("Cancel").onClick(() => this.finish(false)))
+      .addButton((b) => {
+        b.setButtonText(this.opts.confirm).onClick(() => this.finish(true));
+        if (this.opts.danger) b.setWarning();
+        else b.setCta();
+      });
+  }
+
+  private finish(ok: boolean): void {
+    if (this.done) return;
+    this.done = true;
+    this.resolve(ok);
+    this.close();
+  }
+
+  onClose(): void {
+    this.contentEl.empty();
+    if (!this.done) {
+      this.done = true;
+      this.resolve(false);
+    }
+  }
+}

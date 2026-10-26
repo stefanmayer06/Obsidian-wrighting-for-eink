@@ -1,4 +1,4 @@
-import type { ExElement } from "../types/excalidraw";
+import type { SceneElement } from "./scene";
 import { absolutePoints, bottom, clusterRects, elementRect, median, straightLineDirection, unionAll, type Pt, type Rect } from "./geometry";
 import { shortHash } from "./hash";
 import { strokeLines } from "./table";
@@ -79,7 +79,7 @@ export interface OcrUnit {
 }
 
 /** Strokes of a unit that only draw long straight lines, relative to the size of its other strokes. */
-export function guideLineIds(strokes: ReadonlyArray<ExElement>, rects: ReadonlyArray<Rect>): Set<string> {
+export function guideLineIds(strokes: ReadonlyArray<SceneElement>, rects: ReadonlyArray<Rect>): Set<string> {
   const points = strokes.map((s) => absolutePoints(s));
   // the size of the writing: strokes that are not straight lines (a "1" or "l" is, and counts as writing anyway)
   const size = median(rects.filter((_, i) => !straightLineDirection(points[i], 0)).map((r) => Math.max(r.w, r.h)));
@@ -95,7 +95,7 @@ export function guideLineIds(strokes: ReadonlyArray<ExElement>, rects: ReadonlyA
  * Signature of a stroke for caching. It only depends on the stroke's geometry,
  * so changing its colour or attaching a link does not cause a new OCR request.
  */
-export function strokeSignature(el: ExElement): string {
+export function strokeSignature(el: SceneElement): string {
   const pts = el.points ?? [];
   const last = pts.length > 0 ? pts[pts.length - 1] : [0, 0];
   const mid = pts.length > 2 ? pts[Math.floor(pts.length / 2)] : [0, 0];
@@ -117,7 +117,7 @@ export function strokeSignature(el: ExElement): string {
 }
 
 /** Elements that can contain handwriting. */
-export function isInkStroke(el: ExElement): boolean {
+export function isInkStroke(el: SceneElement): boolean {
   return el.type === "freedraw" && !el.isDeleted && (el.points?.length ?? 0) > 0 && (el.opacity ?? 100) > 0;
 }
 
@@ -127,7 +127,7 @@ export function isInkStroke(el: ExElement): boolean {
  * Units that would need a too-small scale are split into horizontal bands.
  */
 export function planOcrUnits(
-  strokes: ReadonlyArray<ExElement>,
+  strokes: ReadonlyArray<SceneElement>,
   unitGap: number,
   limits: RasterLimits = DEFAULT_RASTER_LIMITS,
 ): OcrUnit[] {
@@ -185,14 +185,12 @@ export function planOcrUnits(
 }
 
 /** Visual stroke width (in scene units) used when rendering a freedraw element for OCR. */
-export function renderStrokeWidth(el: ExElement): number {
-  const sw = el.strokeWidth ?? 1;
-  // Excalidraw renders freedraw with perfect-freehand using size = strokeWidth * 4.25,
-  // which averages to roughly half of that once pressure thinning is applied.
-  return Math.max(1.5, sw * 2.2);
+export function renderStrokeWidth(el: SceneElement): number {
+  // the stroke's base width is its width at medium pressure; recognition likes clear lines
+  return Math.max(1.5, (el.strokeWidth ?? 1.5) * 1.1);
 }
 
 /** Polyline points of a stroke in image pixel space. */
-export function strokeImagePoints(plan: RenderPlan, el: ExElement): Pt[] {
+export function strokeImagePoints(plan: RenderPlan, el: SceneElement): Pt[] {
   return absolutePoints(el).map((p) => sceneToImage(plan, p));
 }

@@ -1,6 +1,6 @@
 /**
- * Paper templates (like the page templates in GoodNotes or the Boox Notes app), generated as SVG.
- * Each template is stored once per folder and placed as a locked image on ink pages.
+ * Paper templates (like the page templates in GoodNotes or the Boox Notes app). The ink
+ * view draws them on the canvas; the paper picker shows them as SVG.
  */
 
 export type PaperStyle = "blank" | "lined" | "dots" | "grid" | "graph" | "isometric" | "cornell" | "checklist" | "music";
@@ -83,16 +83,6 @@ export function paperLineSpacing(spec: Pick<PaperSpec, "spacing">): number {
   return LINE_SPACINGS[spec.spacing] ?? LINE_SPACING;
 }
 
-/** File name of the SVG for a spec (the default variant of each style keeps its old name). */
-export function paperFileName(spec: PaperSpec | PaperStyle): string {
-  const s = normalizePaperSpec(spec);
-  const parts = [`ink-paper-${s.style}`];
-  if (s.spacing !== "normal") parts.push(s.spacing);
-  if (s.color !== "white") parts.push(s.color);
-  if (s.orientation === "landscape") parts.push("landscape");
-  return `${parts.join("-")}.svg`;
-}
-
 /** Short human readable description, e.g. "Dotted · narrow · ivory". */
 export function paperLabel(spec: PaperSpec): string {
   const parts = [PAPER_STYLES[spec.style]];
@@ -109,16 +99,36 @@ export interface PaperSvgOptions {
   strokeScale?: number;
 }
 
-/** SVG for a paper spec. Lines are light grey so they print well; OCR never sees them (only strokes are sent). */
-export function paperSvg(specOrStyle: PaperSpec | PaperStyle, opts: PaperSvgOptions = {}): string {
+/** One set of lines of a paper template (SVG path data, usable with canvas' Path2D too). */
+export interface PaperPath {
+  d: string;
+  stroke: string;
+  width: number;
+  /** Round caps with a dash pattern draw dots. */
+  dots?: { gap: number };
+}
+
+export interface PaperDrawing {
+  width: number;
+  height: number;
+  fill: string;
+  paths: PaperPath[];
+}
+
+/**
+ * The lines of a paper template for a page of the given size (default: the
+ * spec's A4 size). Lines are light grey so they print well; OCR never sees them
+ * (only strokes are sent).
+ */
+export function paperDrawing(specOrStyle: PaperSpec | PaperStyle, size?: { width: number; height: number }, opts: PaperSvgOptions = {}): PaperDrawing {
   const spec = normalizePaperSpec(specOrStyle);
-  const { width: W, height: H } = paperSize(spec);
+  const { width: W, height: H } = size ?? paperSize(spec);
   const s = paperLineSpacing(spec);
   const k = opts.strokeScale ?? 1;
-  const sw = (n: number) => fmt(n * k);
-  const parts: string[] = [];
-  const path = (d: string, stroke: string, width: number, extra = "") =>
-    d ? parts.push(`<path d="${d}" fill="none" stroke="${stroke}" stroke-width="${sw(width)}"${extra}/>`) : 0;
+  const paths: PaperPath[] = [];
+  const path = (d: string, stroke: string, width: number, dots?: { gap: number }) => {
+    if (d) paths.push({ d, stroke, width: width * k, ...(dots ? { dots } : {}) });
+  };
   const hLines = (from: number, to: number, step: number, x1 = 0, x2 = W) => {
     let d = "";
     for (let y = from; y < to; y += step) d += `M${fmt(x1)} ${fmt(y)}H${fmt(x2)}`;
@@ -134,11 +144,10 @@ export function paperSvg(specOrStyle: PaperSpec | PaperStyle, opts: PaperSvgOpti
   const margin = "#e09a9a";
   const top = s * 2.5;
 
-  parts.push(`<rect x="0" y="0" width="${W}" height="${H}" fill="${PAPER_COLORS[spec.color].fill}" stroke="#d0d0d0" stroke-width="${sw(2)}"/>`);
   switch (spec.style) {
     case "lined": {
       path(hLines(top, H - s / 2, s), line, 1.5);
-      path(`M${fmt(s * 2)} 0V${H}`, margin, 1.5);
+      path(`M${fmt(s * 2)} 0V${fmt(H)}`, margin, 1.5);
       break;
     }
     case "dots": {
@@ -147,7 +156,7 @@ export function paperSvg(specOrStyle: PaperSpec | PaperStyle, opts: PaperSvgOpti
       const lastX = g * Math.floor((W - g / 2) / g);
       let d = "";
       for (let y = g; y < H - g / 2; y += g) d += `M${fmt(g)} ${fmt(y)}H${fmt(lastX)}`;
-      path(d, "#a0a0a0", 3.4, ` stroke-linecap="round" stroke-dasharray="0.01 ${fmt(g - 0.01)}"`);
+      path(d, "#a0a0a0", 3.4, { gap: g });
       break;
     }
     case "grid": {
@@ -160,12 +169,12 @@ export function paperSvg(specOrStyle: PaperSpec | PaperStyle, opts: PaperSvgOpti
       let minor = "";
       let major = "";
       for (let i = 1; i * m < H; i++) {
-        const d = `M0 ${fmt(i * m)}H${W}`;
+        const d = `M0 ${fmt(i * m)}H${fmt(W)}`;
         if (i % 4 === 0) major += d;
         else minor += d;
       }
       for (let i = 1; i * m < W; i++) {
-        const d = `M${fmt(i * m)} 0V${H}`;
+        const d = `M${fmt(i * m)} 0V${fmt(H)}`;
         if (i % 4 === 0) major += d;
         else minor += d;
       }
@@ -178,8 +187,8 @@ export function paperSvg(specOrStyle: PaperSpec | PaperStyle, opts: PaperSvgOpti
       const a = s * 0.8;
       const t = Math.tan(Math.PI / 6);
       let d = vLines(0, W + 0.1, (a * Math.sqrt(3)) / 2);
-      for (let y0 = -Math.ceil((W * t) / a) * a; y0 < H; y0 += a) d += `M0 ${fmt(y0)}L${W} ${fmt(y0 + W * t)}`;
-      for (let y0 = 0; y0 < H + W * t; y0 += a) d += `M0 ${fmt(y0)}L${W} ${fmt(y0 - W * t)}`;
+      for (let y0 = -Math.ceil((W * t) / a) * a; y0 < H; y0 += a) d += `M0 ${fmt(y0)}L${fmt(W)} ${fmt(y0 + W * t)}`;
+      for (let y0 = 0; y0 < H + W * t; y0 += a) d += `M0 ${fmt(y0)}L${fmt(W)} ${fmt(y0 - W * t)}`;
       path(d, "#d2d2d2", 1);
       break;
     }
@@ -187,7 +196,7 @@ export function paperSvg(specOrStyle: PaperSpec | PaperStyle, opts: PaperSvgOpti
       const cue = W * 0.28;
       const summaryTop = H * 0.8;
       path(hLines(top, summaryTop - s / 2, s, cue, W), line, 1.5);
-      path(`M${fmt(cue)} 0V${fmt(summaryTop)}M0 ${fmt(summaryTop)}H${W}`, strong, 2);
+      path(`M${fmt(cue)} 0V${fmt(summaryTop)}M0 ${fmt(summaryTop)}H${fmt(W)}`, strong, 2);
       break;
     }
     case "checklist": {
@@ -218,5 +227,17 @@ export function paperSvg(specOrStyle: PaperSpec | PaperStyle, opts: PaperSvgOpti
     default:
       break;
   }
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${parts.join("")}</svg>`;
+  return { width: W, height: H, fill: PAPER_COLORS[spec.color].fill, paths };
+}
+
+/** SVG for a paper spec (thumbnails in the paper picker). */
+export function paperSvg(specOrStyle: PaperSpec | PaperStyle, opts: PaperSvgOptions = {}): string {
+  const p = paperDrawing(specOrStyle, undefined, opts);
+  const k = opts.strokeScale ?? 1;
+  const parts = [`<rect x="0" y="0" width="${p.width}" height="${p.height}" fill="${p.fill}" stroke="#d0d0d0" stroke-width="${fmt(2 * k)}"/>`];
+  for (const path of p.paths) {
+    const extra = path.dots ? ` stroke-linecap="round" stroke-dasharray="0.01 ${fmt(path.dots.gap - 0.01)}"` : "";
+    parts.push(`<path d="${path.d}" fill="none" stroke="${path.stroke}" stroke-width="${fmt(path.width)}"${extra}/>`);
+  }
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${p.width}" height="${p.height}" viewBox="0 0 ${p.width} ${p.height}">${parts.join("")}</svg>`;
 }

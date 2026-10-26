@@ -5,7 +5,6 @@ import {
   normalizePaperSpec,
   PAPER_COLORS,
   PAPER_STYLES,
-  paperFileName,
   paperLabel,
   paperSize,
   paperSvg,
@@ -53,14 +52,6 @@ describe("paper templates", () => {
   it("thumbnails can use thicker strokes", () => {
     expect(paperSvg("grid")).toContain('stroke-width="1"');
     expect(paperSvg("grid", { strokeScale: 3 })).toContain('stroke-width="3"');
-  });
-
-  it("names files by variant and keeps the old names for the defaults", () => {
-    expect(paperFileName("lined")).toBe("ink-paper-lined.svg");
-    expect(paperFileName(spec({ style: "dots" }))).toBe("ink-paper-dots.svg");
-    expect(paperFileName(spec({ style: "grid", spacing: "narrow", color: "yellow", orientation: "landscape" }))).toBe("ink-paper-grid-narrow-yellow-landscape.svg");
-    // spacing does not matter on blank paper
-    expect(paperFileName(spec({ style: "blank", spacing: "wide" }))).toBe("ink-paper-blank.svg");
   });
 
   it("normalizes stored specs", () => {

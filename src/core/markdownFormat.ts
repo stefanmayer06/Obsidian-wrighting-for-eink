@@ -111,8 +111,3 @@ export function formatLine(kind: LineKind): string {
       return escapePlainLine(kind.text);
   }
 }
-
-/** Collapse whitespace and strip characters that are invalid in a single-line comment. */
-export function commentSafe(text: string): string {
-  return text.replace(/%%/g, "%").replace(/\s+/g, " ").trim();
-}

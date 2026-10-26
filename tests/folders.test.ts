@@ -8,7 +8,7 @@ describe("folder helpers", () => {
     expect(joinPath("/", "a/", "/b")).toBe("a/b");
     expect(parentPath("a/b/c.md")).toBe("a/b");
     expect(parentPath("c.md")).toBe("");
-    expect(plainName("a/Week 1.excalidraw.md")).toBe("Week 1");
+    expect(plainName("a/Week 1.ink.md")).toBe("Week 1");
     expect(plainName("a/Week 1.md")).toBe("Week 1");
   });
 
@@ -35,47 +35,47 @@ describe("keeping a pair together on rename/move", () => {
   const CA = "003 - University/Computer Architecture";
 
   it("renames the drawing in the ink subfolder when the text page is renamed", () => {
-    expect(partnerTarget({ role: "text", oldPath: `${CA}/Week 1.md`, newPath: `${CA}/Week 1 - Intro.md`, partnerPath: `${CA}/Attachments/Week 1.excalidraw.md` })).toBe(
-      `${CA}/Attachments/Week 1 - Intro.excalidraw.md`,
+    expect(partnerTarget({ role: "text", oldPath: `${CA}/Week 1.md`, newPath: `${CA}/Week 1 - Intro.md`, partnerPath: `${CA}/Attachments/Week 1.ink.md` })).toBe(
+      `${CA}/Attachments/Week 1 - Intro.ink.md`,
     );
   });
 
   it("moves the drawing into the new folder's ink subfolder when the text page moves", () => {
-    expect(partnerTarget({ role: "text", oldPath: `${CA}/Week 1.md`, newPath: "Archive/Week 1.md", partnerPath: `${CA}/Attachments/Week 1.excalidraw.md` })).toBe(
-      "Archive/Attachments/Week 1.excalidraw.md",
+    expect(partnerTarget({ role: "text", oldPath: `${CA}/Week 1.md`, newPath: "Archive/Week 1.md", partnerPath: `${CA}/Attachments/Week 1.ink.md` })).toBe(
+      "Archive/Attachments/Week 1.ink.md",
     );
   });
 
   it("renames the text page in the folder above when the drawing is renamed", () => {
-    expect(partnerTarget({ role: "ink", oldPath: `${CA}/Attachments/Week 1.excalidraw.md`, newPath: `${CA}/Attachments/Week 2.excalidraw.md`, partnerPath: `${CA}/Week 1.md` })).toBe(
+    expect(partnerTarget({ role: "ink", oldPath: `${CA}/Attachments/Week 1.ink.md`, newPath: `${CA}/Attachments/Week 2.ink.md`, partnerPath: `${CA}/Week 1.md` })).toBe(
       `${CA}/Week 2.md`,
     );
   });
 
   it("follows a drawing moved into another folder's ink subfolder", () => {
-    expect(partnerTarget({ role: "ink", oldPath: `${CA}/Attachments/Week 1.excalidraw.md`, newPath: "Maths/Attachments/Week 1.excalidraw.md", partnerPath: `${CA}/Week 1.md` })).toBe(
+    expect(partnerTarget({ role: "ink", oldPath: `${CA}/Attachments/Week 1.ink.md`, newPath: "Maths/Attachments/Week 1.ink.md", partnerPath: `${CA}/Week 1.md` })).toBe(
       "Maths/Week 1.md",
     );
     // moved somewhere unrelated: the text page stays where it is
-    expect(partnerTarget({ role: "ink", oldPath: `${CA}/Attachments/Week 1.excalidraw.md`, newPath: "Drawings/Week 1.excalidraw.md", partnerPath: `${CA}/Week 1.md` })).toBeNull();
+    expect(partnerTarget({ role: "ink", oldPath: `${CA}/Attachments/Week 1.ink.md`, newPath: "Drawings/Week 1.ink.md", partnerPath: `${CA}/Week 1.md` })).toBeNull();
   });
 
   it("does nothing when a whole folder moved (both files already moved)", () => {
-    expect(partnerTarget({ role: "text", oldPath: `${CA}/Week 1.md`, newPath: "Uni/CA/Week 1.md", partnerPath: "Uni/CA/Attachments/Week 1.excalidraw.md" })).toBeNull();
-    expect(partnerTarget({ role: "ink", oldPath: `${CA}/Attachments/Week 1.excalidraw.md`, newPath: "Uni/CA/Attachments/Week 1.excalidraw.md", partnerPath: "Uni/CA/Week 1.md" })).toBeNull();
+    expect(partnerTarget({ role: "text", oldPath: `${CA}/Week 1.md`, newPath: "Uni/CA/Week 1.md", partnerPath: "Uni/CA/Attachments/Week 1.ink.md" })).toBeNull();
+    expect(partnerTarget({ role: "ink", oldPath: `${CA}/Attachments/Week 1.ink.md`, newPath: "Uni/CA/Attachments/Week 1.ink.md", partnerPath: "Uni/CA/Week 1.md" })).toBeNull();
   });
 
   it("keeps the old side-by-side layout working", () => {
-    expect(partnerTarget({ role: "ink", oldPath: "Ink/Page.excalidraw.md", newPath: "Ink/Shopping list.excalidraw.md", partnerPath: "Ink/Page.md" })).toBe("Ink/Shopping list.md");
-    expect(partnerTarget({ role: "text", oldPath: "Ink/Page.md", newPath: "Notes/Page.md", partnerPath: "Ink/Page.excalidraw.md" })).toBe("Notes/Page.excalidraw.md");
+    expect(partnerTarget({ role: "ink", oldPath: "Ink/Page.ink.md", newPath: "Ink/Shopping list.ink.md", partnerPath: "Ink/Page.md" })).toBe("Ink/Shopping list.md");
+    expect(partnerTarget({ role: "text", oldPath: "Ink/Page.md", newPath: "Notes/Page.md", partnerPath: "Ink/Page.ink.md" })).toBe("Notes/Page.ink.md");
   });
 
   it("leaves partners with a different name alone", () => {
-    expect(partnerTarget({ role: "text", oldPath: "Ink/Page.md", newPath: "Ink/Other.md", partnerPath: "Ink/Drawing.excalidraw.md" })).toBeNull();
+    expect(partnerTarget({ role: "text", oldPath: "Ink/Page.md", newPath: "Ink/Other.md", partnerPath: "Ink/Drawing.ink.md" })).toBeNull();
   });
 
   it("works at the vault root", () => {
-    expect(partnerTarget({ role: "text", oldPath: "Week 1.md", newPath: "Week 2.md", partnerPath: "Attachments/Week 1.excalidraw.md" })).toBe("Attachments/Week 2.excalidraw.md");
-    expect(partnerTarget({ role: "ink", oldPath: "Attachments/Week 1.excalidraw.md", newPath: "Attachments/Week 2.excalidraw.md", partnerPath: "Week 1.md" })).toBe("Week 2.md");
+    expect(partnerTarget({ role: "text", oldPath: "Week 1.md", newPath: "Week 2.md", partnerPath: "Attachments/Week 1.ink.md" })).toBe("Attachments/Week 2.ink.md");
+    expect(partnerTarget({ role: "ink", oldPath: "Attachments/Week 1.ink.md", newPath: "Attachments/Week 2.ink.md", partnerPath: "Week 1.md" })).toBe("Week 2.md");
   });
 });

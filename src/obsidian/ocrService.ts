@@ -1,7 +1,7 @@
 import type { DataAdapter } from "obsidian";
 import { mapOcrResult, type OcrLine } from "../core/ocrTypes";
 import { imageRectToScene, type OcrUnit } from "../core/rasterPlan";
-import type { ExElement } from "../types/excalidraw";
+import type { SceneElement } from "../core/scene";
 import { AzureHttpError, isApiUnavailable, isOnline, OfflineError, recognize, type ApiVersion } from "./azureClient";
 import { fetchCloudStatus, recognizeCloud, type CloudConfig } from "./cloudClient";
 import { renderStrokesPng } from "./rasterizer";
@@ -159,7 +159,7 @@ export class OcrService {
    */
   async recognizeUnits(
     units: ReadonlyArray<OcrUnit>,
-    elementsById: ReadonlyMap<string, ExElement>,
+    elementsById: ReadonlyMap<string, SceneElement>,
     opts: { network: boolean; deadline: number },
   ): Promise<RecognizeOutcome> {
     const s = this.getSettings();
@@ -202,7 +202,7 @@ export class OcrService {
         continue;
       }
       try {
-        const strokes = unit.renderIds.map((id) => elementsById.get(id)).filter((e): e is ExElement => !!e);
+        const strokes = unit.renderIds.map((id) => elementsById.get(id)).filter((e): e is SceneElement => !!e);
         const png = await renderStrokesPng(unit.plan, strokes);
         requests++;
         const imageLines = await this.recognizePng(png);

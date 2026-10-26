@@ -1,36 +1,26 @@
 import { App, Notice, TFile } from "obsidian";
 import { classifyScene, DEFAULT_CLASSIFY_OPTIONS } from "../core/classify";
-import { cardPosition } from "../core/placement";
 import { DEFAULT_LAYOUT_OPTIONS, layoutTranscript, type TranscriptBlock } from "../core/layout";
 import { isInkStroke, planOcrUnits } from "../core/rasterPlan";
-import { planRegions, type RegionPlan } from "../core/regions";
+import { planRegions } from "../core/regions";
 import { mergeTranscript, parseNote, stripMarkers, writeRegion } from "../core/transcript";
-import { applyTypedNotes, decideTypedSync, extractTypedNotes, typedHash } from "../core/typedNotes";
 import { classifyOptionsFor, isOcrConfigured, type InkSettings } from "../settings";
-import { elementText, getInkData, INK_CUSTOM_DATA_KEY, type ExElement, type InkCustomData } from "../types/excalidraw";
-import {
-  findExcalidrawView,
-  getEA,
-  isViewReady,
-  isViewSettled,
-  newElementId,
-  NO_UNDO,
-  readSceneFromFile,
-  release,
-  saveView,
-  viewElements,
-  type EA,
-  type ExcalidrawViewLike,
-} from "./excalidrawBridge";
-import { findHandwrittenLinks, LINK_MARK_KEY, planLinkUpdates, type LinkPlan } from "../core/links";
+import { getInkData } from "../core/scene";
+import { findHandwrittenLinks } from "../core/links";
 import { elementRect } from "../core/geometry";
+import { newId, type InkFile, type InkMeta } from "../core/ink/model";
+import { parseInkFile, serializeInkFile } from "../core/ink/codec";
+import { inkScene, regionsFromScene } from "../core/ink/scene";
 import type { OcrService, OcrStatus } from "./ocrService";
 import type { PairManager } from "./pairs";
+import type { InkView } from "./inkView";
 
 /**
- * Keeps the two sides of an ink page in sync:
- *   ink → text: handwriting is recognised and written into the transcript region
- *   text → ink: typed notes are mirrored onto the drawing as a text card
+ * Turns the handwriting of an ink page into its text page: strokes are
+ * recognised (OCR), classified into writing, tables, checkboxes and drawings,
+ * and laid out as Markdown in the transcript region. Drawings get a diagram
+ * area in the notebook, which the text page shows live (`ink-figure` blocks);
+ * handwritten [[links]] become tappable on the ink page.
  */
 
 export type PageState = "idle" | "working" | "pending" | "offline" | "error" | "not-configured";
@@ -42,13 +32,11 @@ export interface PageStatus {
 }
 
 export interface InkToTextOptions {
-  /** The open drawing to update; `null` = read the file only; omitted = find a settled open view. */
-  view?: ExcalidrawViewLike | null;
-  /** Allow requests to Azure. */
+  /** Allow requests to the recognition service. */
   network: boolean;
   /** Discard edits made inside the transcript region. */
   resetEdits?: boolean;
-  /** Give up on OCR requests after this many ms (unrecognised ink is shown as an image). */
+  /** Give up on OCR requests after this many ms (unrecognised ink is shown as a picture). */
   timeoutMs?: number;
   /** Create the text page if it does not exist. */
   createText?: boolean;
@@ -66,25 +54,8 @@ export class SyncEngine {
   private locks = new Map<string, Promise<unknown>>();
   /** drawing path -> drawing mtime at the last complete (nothing pending) sync */
   private lastComplete = new Map<string, number>();
-  /**
-   * drawing path -> typed-notes hash at the last sync, when it could not be stored on
-   * the card (drawing not open). Takes precedence over the card's syncedHash.
-   */
-  private typedBase = new Map<string, string>();
-
-  private baseHash(drawingPath: string, card: ExElement | undefined): string | undefined {
-    return this.typedBase.get(drawingPath) ?? (card ? getInkData(card)?.syncedHash : undefined);
-  }
-
-  /** Record the typed-notes base, on the card if the drawing is open, otherwise in memory. */
-  private async setBase(drawing: TFile, view: ExcalidrawViewLike | null, card: ExElement | undefined, hash: string): Promise<void> {
-    if (view && card && view.file?.path === drawing.path) {
-      await this.updateCardHash(view, card.id, hash);
-      this.typedBase.delete(drawing.path);
-    } else {
-      this.typedBase.set(drawing.path, hash);
-    }
-  }
+  /** drawing path -> the notebook version that was last fully synced (open views) */
+  private lastDoc = new Map<string, unknown>();
   readonly status = new Map<string, PageStatus>();
   onStatusChange: () => void = () => {};
 
@@ -94,6 +65,7 @@ export class SyncEngine {
     private ocr: OcrService,
     private getSettings: () => InkSettings,
     private queue: { add(path: string): void; remove(path: string): void },
+    private findView: (drawing: TFile) => InkView | null,
   ) {}
 
   /** Run tasks for the same drawing one after another. */
@@ -119,17 +91,40 @@ export class SyncEngine {
 
   /** True if the drawing has not changed since it was last fully synced. */
   isUpToDate(drawing: TFile): boolean {
+    const live = this.findView(drawing)?.inkFile;
+    if (live) return this.lastDoc.get(drawing.path) === live.doc;
     const m = this.lastComplete.get(drawing.path);
     return m !== undefined && drawing.stat.mtime <= m;
   }
 
   forget(path: string): void {
     this.lastComplete.delete(path);
+    this.lastDoc.delete(path);
     this.status.delete(path);
   }
 
   statusOf(path: string): PageStatus | undefined {
     return this.status.get(path);
+  }
+
+  /** The notebook: from the open view (with unsaved changes) or from the file. */
+  async readInk(drawing: TFile): Promise<InkFile> {
+    const live = this.findView(drawing)?.inkFile;
+    if (live) return live;
+    return parseInkFile(await this.app.vault.read(drawing));
+  }
+
+  /** Store new metadata (diagram areas, handwritten links) in the notebook, without an undo step. */
+  private async writeMeta(drawing: TFile, meta: InkMeta): Promise<void> {
+    const view = this.findView(drawing);
+    if (view?.inkFile) {
+      view.setMeta(meta);
+      return;
+    }
+    await this.app.vault.process(drawing, (data) => {
+      const f = parseInkFile(data);
+      return serializeInkFile(f.frontmatter, { doc: f.doc, meta });
+    });
   }
 
   // ------------------------------------------------------------------ ink → text
@@ -149,14 +144,10 @@ export class SyncEngine {
       text = await this.pairs.createTextPage(drawing);
     }
     this.setStatus(drawing.path, "working");
+    const mtimeAtStart = drawing.stat.mtime;
     try {
-      // `view: null` means "file only" (background work must not touch a drawing that is
-      // still loading); `undefined` means "use the open drawing if there is a settled one".
-      let view = opts.view === undefined ? findExcalidrawView(this.app, drawing, true) : opts.view;
-      // a view that is still loading (or shows another file) is not used: read the file instead
-      if (view && !(view.file?.path === drawing.path && isViewReady(view) && isViewSettled(view))) view = null;
-      const elements = view ? viewElements(view) : await readSceneFromFile(this.app, drawing);
-      if (!elements) throw new Error("The drawing could not be read");
+      const ink = await this.readInk(drawing);
+      const { elements, offsets } = inkScene(ink.doc, ink.meta);
 
       // 1. handwriting recognition
       const strokes = elements.filter((e) => isInkStroke(e) && !getInkData(e));
@@ -173,53 +164,26 @@ export class SyncEngine {
         ...classifyOptionsFor(settings),
       });
 
-      // the OCR await can be long: the view may have closed or switched to another drawing
-      const canModify = !!view && view.file?.path === drawing.path && isViewReady(view);
-      const liveView = canModify ? view : null;
-
-      // 3. diagram regions (only modifiable while the drawing is open)
-      const existingRegions = elements
+      // 3. diagram areas and handwritten links (stored in the notebook, not undoable)
+      const existing = elements
         .filter((e) => getInkData(e)?.role === "region")
         .map((e) => ({ id: e.id, rect: { x: e.x, y: e.y, w: e.width, h: e.height } }));
-      const plan = planRegions(classified.diagrams, existingRegions, canModify, newElementId);
-
-      // 3b. handwritten [[links]] become clickable on the ink page
-      let linkPlan: LinkPlan = { set: [], clear: [] };
-      if (liveView && settings.linkHandwriting) {
+      const plan = planRegions(classified.diagrams, existing, true, () => newId());
+      const regions = regionsFromScene(ink.doc, offsets, ink.meta.regions, plan);
+      const handLinks: Record<string, string> = {};
+      if (settings.linkHandwriting) {
         const rects = new Map(strokes.map((s) => [s.id, elementRect(s)] as const));
-        const wanted = findHandwrittenLinks(classified.lines, rects);
-        const current = strokes.map((s) => {
-          const mark = s.customData?.[LINK_MARK_KEY];
-          return { id: s.id, link: s.link, ours: typeof mark === "string" ? mark : undefined };
-        });
-        linkPlan = planLinkUpdates(wanted, current);
+        for (const l of findHandwrittenLinks(classified.lines, rects)) handLinks[l.strokeId] = l.link;
+        // links on handwriting still waiting for recognition stay as they were
+        for (const [id, link] of Object.entries(ink.meta.handLinks)) if (outcome.pendingIds.has(id)) handLinks[id] = link;
       }
-      if (liveView && (plan.create.length > 0 || plan.update.length > 0 || plan.remove.length > 0 || linkPlan.set.length > 0 || linkPlan.clear.length > 0)) {
-        await this.applyDrawingUpdates(liveView, plan, linkPlan);
-      }
+      const meta: InkMeta = { regions, handLinks };
+      if (JSON.stringify(meta) !== JSON.stringify(ink.meta)) await this.writeMeta(drawing, meta);
 
-      // 4. typed notes: copy edits made on the card to the text page (3-way, see decideTypedSync)
-      const before = await this.app.vault.read(text);
-      let pulledTyped: string | null = null;
-      let newBase: string | null = null;
-      const card = settings.syncTypedNotes ? elements.find((e) => getInkData(e)?.role === "typed") : undefined;
-      if (card) {
-        const cardText = elementText(card);
-        const cardHash = typedHash(cardText);
-        const action = decideTypedSync(cardHash, typedHash(extractTypedNotes(before)), this.baseHash(drawing.path, card));
-        if (action === "pull") {
-          pulledTyped = cardText;
-          newBase = cardHash;
-        } else if (action === "mark") {
-          newBase = cardHash;
-        }
-        // push/conflict: the text page wins; the card is updated by the next text → ink sync
-      }
-
-      // 5. layout
+      // 4. layout
       const blocks = layoutTranscript(classified, (d) => plan.refs.get(d) ?? null, {
         ...DEFAULT_LAYOUT_OPTIONS,
-        drawingLink: this.pairs.linkText(drawing, text.path),
+        drawingPath: drawing.path,
         linkFor: (path) => {
           const f = this.app.vault.getAbstractFileByPath(path);
           return f instanceof TFile ? this.pairs.linkText(f, text?.path ?? "") : path;
@@ -230,8 +194,9 @@ export class SyncEngine {
       const status = statusBlock(outcome.status, hasPendingInk, outcome.error, isOcrConfigured(settings));
       if (status) blocks.unshift(status);
 
-      // 6. write the text page (only if something changed)
+      // 5. write the text page (only if something changed)
       let preservedEdits = 0;
+      const before = await this.app.vault.read(text);
       const compute = (md: string): string => {
         let src = md;
         let parsed = parseNote(src);
@@ -244,9 +209,7 @@ export class SyncEngine {
           keepMissing: !opts.resetEdits && outcome.pendingIds.size > 0,
         });
         preservedEdits = merged.preservedEdits;
-        let out = writeRegion(src, merged.blocks, merged.state);
-        if (pulledTyped !== null) out = applyTypedNotes(out, pulledTyped);
-        return out;
+        return writeRegion(src, merged.blocks, merged.state);
       };
       const after = compute(before);
       let changed = false;
@@ -255,10 +218,7 @@ export class SyncEngine {
         changed = true;
       }
 
-      // 7. remember the new typed-notes base
-      if (newBase !== null) await this.setBase(drawing, liveView, card, newBase);
-
-      // 8. offline queue + status
+      // 6. offline queue + status
       const pending = outcome.pendingIds.size;
       if (pending > 0 && isOcrConfigured(settings) && outcome.status !== "not-configured") this.queue.add(drawing.path);
       else this.queue.remove(drawing.path);
@@ -273,185 +233,17 @@ export class SyncEngine {
                 ? "not-configured"
                 : "pending";
       this.setStatus(drawing.path, state, outcome.error);
-      if (pending === 0) this.lastComplete.set(drawing.path, drawing.stat.mtime);
-      else this.lastComplete.delete(drawing.path);
+      if (pending === 0) {
+        this.lastComplete.set(drawing.path, Math.max(mtimeAtStart, drawing.stat.mtime));
+        this.lastDoc.set(drawing.path, ink.doc);
+      } else {
+        this.lastComplete.delete(drawing.path);
+        this.lastDoc.delete(drawing.path);
+      }
       return { text, status: outcome.status, pending, changed, preservedEdits };
     } catch (e) {
       this.setStatus(drawing.path, "error", e instanceof Error ? e.message : String(e));
       throw e;
-    }
-  }
-
-  /**
-   * Add/replace elements without an undo step and persist them. Excalidraw does
-   * not mark the drawing dirty for changes outside the undo history, so the
-   * drawing is force-saved explicitly.
-   */
-  private async commit(ea: EA, view: ExcalidrawViewLike, onTop: boolean, restore = false): Promise<void> {
-    await ea.addElementsToView(false, false, onTop, restore, NO_UNDO);
-    await saveView(view);
-  }
-
-  /** Region rectangles and handwritten links, applied in one batch. */
-  private async applyDrawingUpdates(view: ExcalidrawViewLike, plan: RegionPlan, links: LinkPlan): Promise<void> {
-    const ea = getEA(this.app, view);
-    try {
-      const byId = new Map(viewElements(view).map((e) => [e.id, e] as const));
-      const removals = plan.remove.map((id) => byId.get(id)).filter((e): e is ExElement => !!e);
-      if (removals.length > 0) ea.deleteViewElements(removals);
-      const linkIds = [...links.set.map((l) => l.strokeId), ...links.clear].filter((id) => byId.has(id));
-      if (linkIds.length > 0) {
-        ea.copyViewElementsToEAforEditing([...new Set(linkIds)].map((id) => byId.get(id) as ExElement));
-        for (const l of links.set) {
-          if (!byId.has(l.strokeId)) continue;
-          const m = ea.getElement(l.strokeId);
-          m.link = l.link;
-          m.customData = { ...(m.customData ?? {}), [LINK_MARK_KEY]: l.link };
-        }
-        for (const id of links.clear) {
-          if (!byId.has(id)) continue;
-          const m = ea.getElement(id);
-          m.link = null;
-          const cd = { ...(m.customData ?? {}) };
-          delete cd[LINK_MARK_KEY];
-          m.customData = cd;
-        }
-      }
-      const updates = plan.update.filter((u) => byId.has(u.id));
-      if (updates.length > 0) {
-        ea.copyViewElementsToEAforEditing(updates.map((u) => byId.get(u.id) as ExElement));
-        for (const u of updates) {
-          const m = ea.getElement(u.id);
-          m.x = u.rect.x;
-          m.y = u.rect.y;
-          m.width = u.rect.w;
-          m.height = u.rect.h;
-        }
-      }
-      for (const c of plan.create) {
-        ea.style.strokeColor = "transparent";
-        ea.style.backgroundColor = "transparent";
-        ea.style.strokeWidth = 1;
-        ea.style.roughness = 0;
-        ea.style.opacity = 100;
-        ea.addRect(c.rect.x, c.rect.y, c.rect.w, c.rect.h, c.id);
-        const m = ea.getElement(c.id);
-        m.locked = true;
-        m.customData = { ...(m.customData ?? {}), [INK_CUSTOM_DATA_KEY]: { role: "region", kind: "diagram" } satisfies InkCustomData };
-      }
-      if (updates.length > 0 || plan.create.length > 0 || linkIds.length > 0) await this.commit(ea, view, false);
-      else if (removals.length > 0) await saveView(view);
-    } finally {
-      release(ea);
-    }
-  }
-
-  private async updateCardHash(view: ExcalidrawViewLike, cardId: string, hash: string): Promise<void> {
-    const ea = getEA(this.app, view);
-    try {
-      const card = viewElements(view).find((e) => e.id === cardId);
-      if (!card) return;
-      ea.copyViewElementsToEAforEditing([card]);
-      const m = ea.getElement(cardId);
-      const data = getInkData(card) ?? { role: "typed" };
-      m.customData = { ...(m.customData ?? {}), [INK_CUSTOM_DATA_KEY]: { ...data, syncedHash: hash } };
-      await this.commit(ea, view, true);
-    } finally {
-      release(ea);
-    }
-  }
-
-  // ------------------------------------------------------------------ text → ink
-
-  syncTextToInk(text: TFile, drawing: TFile, view: ExcalidrawViewLike): Promise<boolean> {
-    return this.withLock(drawing.path, () => this.doTextToInk(text, drawing, view));
-  }
-
-  private async doTextToInk(text: TFile, drawing: TFile, view: ExcalidrawViewLike): Promise<boolean> {
-    const settings = this.getSettings();
-    if (!settings.syncTypedNotes || view.file?.path !== drawing.path) return false;
-    const md = await this.app.vault.read(text);
-    if (view.file?.path !== drawing.path || !isViewReady(view)) return false;
-    const typed = extractTypedNotes(md);
-    const hash = typedHash(typed);
-    const elements = viewElements(view);
-    const card = elements.find((e) => getInkData(e)?.role === "typed");
-    const cardText = card ? elementText(card) : null;
-    const action = decideTypedSync(cardText === null ? null : typedHash(cardText), hash, this.baseHash(drawing.path, card));
-
-    switch (action) {
-      case "none":
-        return false;
-      case "mark":
-        await this.setBase(drawing, view, card, hash);
-        return false;
-      case "pull": {
-        // only the card changed (e.g. edited on the drawing, then the app was closed)
-        const pulled = cardText ?? "";
-        await this.app.vault.process(text, (cur) => applyTypedNotes(cur, pulled));
-        await this.setBase(drawing, view, card, typedHash(pulled));
-        return false;
-      }
-      case "conflict":
-        new Notice("Ink Notebook: typed notes were changed on both pages – the text page version was kept.", 6000);
-        break;
-      default:
-        break;
-    }
-
-    // push: the text page wins
-    this.typedBase.delete(drawing.path);
-    if (!card) {
-      if (!typed) return false;
-      await this.createCard(view, elements, typed, hash);
-      return true;
-    }
-    const ea = getEA(this.app, view);
-    try {
-      if (!typed) {
-        ea.deleteViewElements([card]);
-        await saveView(view);
-        return true;
-      }
-      ea.copyViewElementsToEAforEditing([card]);
-      const m = ea.getElement(card.id);
-      m.text = typed;
-      m.originalText = typed;
-      m.rawText = typed;
-      m.customData = { ...(m.customData ?? {}), [INK_CUSTOM_DATA_KEY]: { role: "typed", syncedHash: hash } satisfies InkCustomData };
-      // let Excalidraw re-wrap the text to the card width
-      await this.commit(ea, view, true, true);
-      return true;
-    } finally {
-      release(ea);
-    }
-  }
-
-  /** Does the typed card on the drawing show the text page's typed notes? */
-  async typedCardInSync(text: TFile, view: ExcalidrawViewLike): Promise<boolean> {
-    const typed = extractTypedNotes(await this.app.vault.read(text));
-    const card = viewElements(view).find((e) => getInkData(e)?.role === "typed");
-    if (!card) return !typed;
-    return typedHash(elementText(card)) === typedHash(typed);
-  }
-
-  private async createCard(view: ExcalidrawViewLike, elements: ExElement[], typed: string, hash: string): Promise<void> {
-    const settings = this.getSettings();
-    const pos = cardPosition(elements, settings.typedWidth);
-    const ea = getEA(this.app, view);
-    try {
-      ea.style.strokeColor = "#1e1e1e";
-      ea.style.backgroundColor = "transparent";
-      ea.style.fontFamily = settings.typedFontFamily;
-      ea.style.fontSize = settings.typedFontSize;
-      ea.style.textAlign = "left";
-      ea.style.opacity = 100;
-      const id = ea.addText(pos.x, pos.y, typed, { width: pos.width, autoResize: false });
-      const m = ea.getElement(id);
-      m.customData = { ...(m.customData ?? {}), [INK_CUSTOM_DATA_KEY]: { role: "typed", syncedHash: hash } satisfies InkCustomData };
-      await this.commit(ea, view, true, true);
-    } finally {
-      release(ea);
     }
   }
 }
@@ -461,7 +253,7 @@ function statusBlock(status: OcrStatus, hasPendingInk: boolean, error: string | 
   if (!configured || status === "not-configured") {
     return {
       key: "status",
-      md: "> [!ink-status] ✍️ Handwriting is shown as an image\n> Set up handwriting recognition in *Settings → Ink Notebook* to turn it into searchable text.",
+      md: "> [!ink-status] ✍️ Handwriting is shown as a picture\n> Set up handwriting recognition in *Settings → Ink Notebook* to turn it into searchable text.",
     };
   }
   if (status === "offline") {
@@ -478,6 +270,6 @@ function statusBlock(status: OcrStatus, hasPendingInk: boolean, error: string | 
   }
   return {
     key: "status",
-    md: "> [!ink-status] ✍️ Transcription in progress\n> Some handwriting is still being recognised and is shown as an image for now.",
+    md: "> [!ink-status] ✍️ Transcription in progress\n> Some handwriting is still being recognised and is shown as a picture for now.",
   };
 }

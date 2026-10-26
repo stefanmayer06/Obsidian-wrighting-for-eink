@@ -1,4 +1,4 @@
-import type { ExElement } from "../types/excalidraw";
+import type { SceneElement } from "./scene";
 import type { SceneLine } from "./classify";
 import type { OcrWord } from "./ocrTypes";
 import {
@@ -94,7 +94,7 @@ export function entersBox(points: ReadonlyArray<Pt>, box: BoxShape): boolean {
 
 export interface CheckboxContext {
   /** Recognised strokes (handwriting included: OCR sometimes reads a box as a letter). */
-  strokes: ReadonlyArray<ExElement>;
+  strokes: ReadonlyArray<SceneElement>;
   strokeRects: ReadonlyMap<string, Rect>;
   textStrokeIds: ReadonlySet<string>;
   /** Lines in such areas (diagram frames) are left alone. */
@@ -137,20 +137,20 @@ export function detectCheckboxes(lines: ReadonlyArray<SceneLine>, ctx: CheckboxC
   const claimed = new Set<string>();
   if (lines.length === 0 || ctx.strokes.length === 0) return { lines: [...lines], claimed };
 
-  const rectOf = (s: ExElement) => ctx.strokeRects.get(s.id) ?? elementRect(s);
+  const rectOf = (s: SceneElement) => ctx.strokeRects.get(s.id) ?? elementRect(s);
   const heights = lines.map((l) => l.box.h).filter((h) => h > 0);
-  const index = new GridIndex<ExElement>(Math.max(40, 2 * (heights.length > 0 ? Math.min(...heights) : 30)));
+  const index = new GridIndex<SceneElement>(Math.max(40, 2 * (heights.length > 0 ? Math.min(...heights) : 30)));
   for (const s of ctx.strokes) index.insert(rectOf(s), s);
   const lineOf = new Map<string, number>();
   lines.forEach((l, i) => l.strokeIds.forEach((id) => lineOf.set(id, i)));
   const pointCache = new Map<string, Pt[]>();
-  const pointsOf = (s: ExElement): Pt[] => {
+  const pointsOf = (s: SceneElement): Pt[] => {
     let p = pointCache.get(s.id);
     if (!p) pointCache.set(s.id, (p = absolutePoints(s)));
     return p;
   };
   /** The word a recognised stroke was read as. */
-  const wordOfStroke = (s: ExElement): OcrWord | undefined => {
+  const wordOfStroke = (s: SceneElement): OcrWord | undefined => {
     const owner = lineOf.get(s.id);
     const ownerLine = owner === undefined ? null : out[owner];
     return ownerLine ? wordAt(ownerLine, center(rectOf(s))) : undefined;
@@ -169,7 +169,7 @@ export function detectCheckboxes(lines: ReadonlyArray<SceneLine>, ctx: CheckboxC
     const zoneRight = (firstShort ? right(first.box) : line.box.x) + 0.35 * H;
     const zone: Rect = { x: zoneLeft, y: line.box.y - 0.6 * H, w: zoneRight - zoneLeft, h: H * 2.2 };
 
-    const isCandidate = (s: ExElement): boolean => {
+    const isCandidate = (s: SceneElement): boolean => {
       if (claimed.has(s.id)) return false;
       const r = rectOf(s);
       const size = Math.max(r.w, r.h);

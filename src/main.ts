@@ -1,6 +1,6 @@
 import { debounce, Menu, Notice, Plugin, TAbstractFile, TFile, TFolder, type WorkspaceLeaf } from "obsidian";
-import { loadSettings, type InkSettings } from "./settings";
-import { PairManager } from "./obsidian/pairs";
+import { isOcrConfigured, loadSettings, type InkSettings } from "./settings";
+import { isInkPath, PairManager } from "./obsidian/pairs";
 import { OcrService } from "./obsidian/ocrService";
 import { SyncEngine } from "./obsidian/syncEngine";
 import { BookmarkManager } from "./obsidian/bookmarks";
@@ -9,25 +9,22 @@ import { InkSettingTab } from "./obsidian/settingsTab";
 import { SetupWizard } from "./obsidian/setupWizard";
 import { applyEinkClasses, einkActive, removeEinkClasses } from "./obsidian/einkMode";
 import { isOnline } from "./obsidian/azureClient";
-import {
-  EXCALIDRAW_VIEW_TYPE,
-  findExcalidrawView,
-  getEA,
-  isExcalidrawReady,
-  isExcalidrawView,
-  release,
-  viewElements,
-} from "./obsidian/excalidrawBridge";
-import { BundledExcalidraw } from "./obsidian/bundledExcalidraw";
-import { annotateImage, annotatePdf, exportAnnotatedImage, exportAnnotatedPdf, findPdfPages } from "./obsidian/pdfAnnotate";
-import { getInkData } from "./types/excalidraw";
-import { elementRect, unionAll } from "./core/geometry";
+import { findInkView, IMAGE_EXTENSIONS, INK_VIEW_TYPE, InkView } from "./obsidian/inkView";
+import { redirectInkFiles } from "./obsidian/viewPatch";
+import { registerFigureBlocks } from "./obsidian/figureBlock";
+import { VaultImages } from "./obsidian/vaultImages";
+import { annotateImage, annotatePdf, appendPdfPages, exportAnnotatedPdf, exportNotebookPdf, exportPageImage } from "./obsidian/pdfAnnotate";
+import { selectionToText } from "./obsidian/lassoText";
+import { migrateExcalidrawPages } from "./obsidian/migrate";
 import { transcriptEditorExtension } from "./obsidian/editorExtension";
+import { PaperService } from "./obsidian/papers";
+import { PaperSearchModal } from "./obsidian/paperSearch";
 import { classifyScene } from "./core/classify";
 import { planOcrUnits } from "./core/rasterPlan";
 import { layoutTranscript } from "./core/layout";
-
-const IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "webp", "gif", "bmp", "svg"];
+import { INK_FRONTMATTER_KEY, parseInkFile, serializeInkFile } from "./core/ink/codec";
+import type { InkFile, PageBackground } from "./core/ink/model";
+import type { ToolId } from "./ink/types";
 
 export default class InkNotebookPlugin extends Plugin {
   settings!: InkSettings;
@@ -36,19 +33,24 @@ export default class InkNotebookPlugin extends Plugin {
   sync!: SyncEngine;
   bookmarks!: BookmarkManager;
   switcher!: PageSwitcher;
-  /** The Excalidraw built into Ink Notebook (idle when the user's own Excalidraw plugin is enabled). */
-  excalidraw!: BundledExcalidraw;
+  /** Pictures and PDF pages for the ink pages. */
+  images!: VaultImages;
+  /** Papers from arXiv. */
+  papers!: PaperService;
+  /** The page each notebook was last open at. */
+  readonly lastPage = new Map<string, number>();
 
   private openDrawings = new Set<string>();
   private queueRunning = false;
-  private typedTimers = new Map<string, number>();
   private inkTimers = new Map<string, number>();
-  private missingNoticeShown = false;
+  private busy = new Set<string>();
+  private inkListeners = new Set<(path: string) => void>();
+  private redirect!: ReturnType<typeof redirectInkFiles>;
 
   async onload(): Promise<void> {
     this.settings = loadSettings(await this.loadData());
-    this.excalidraw = new BundledExcalidraw(this);
-    await this.excalidraw.ensure();
+    this.images = new VaultImages(this.app);
+    this.papers = new PaperService(this);
     this.pairs = new PairManager(this.app, () => this.settings.inkSubfolder);
     this.ocr = new OcrService(
       this.app.vault.adapter,
@@ -56,28 +58,42 @@ export default class InkNotebookPlugin extends Plugin {
       () => this.settings,
       () => this.saveSettings(),
     );
-    this.sync = new SyncEngine(this.app, this.pairs, this.ocr, () => this.settings, {
-      add: (p) => this.queueAdd(p),
-      remove: (p) => this.queueRemove(p),
-    });
+    this.sync = new SyncEngine(
+      this.app,
+      this.pairs,
+      this.ocr,
+      () => this.settings,
+      { add: (p) => this.queueAdd(p), remove: (p) => this.queueRemove(p) },
+      (f) => findInkView(this, f),
+    );
     this.bookmarks = new BookmarkManager(this);
     this.switcher = new PageSwitcher(this);
-    const refreshBookmarks = debounce(() => this.bookmarks.refreshAll(), 80, true);
-    this.sync.onStatusChange = () => refreshBookmarks();
+    const refreshStatus = debounce(
+      () => {
+        this.bookmarks.refreshAll();
+        for (const v of this.inkViews()) v.refreshStatus();
+      },
+      80,
+      true,
+    );
+    this.sync.onStatusChange = () => refreshStatus();
+
+    this.registerView(INK_VIEW_TYPE, (leaf) => new InkView(leaf, this));
+    this.redirect = redirectInkFiles(this, INK_VIEW_TYPE, (path) => this.isInkPath(path));
+    registerFigureBlocks(this);
 
     applyEinkClasses(this.settings);
     this.addSettingTab(new InkSettingTab(this.app, this));
     this.registerEditorExtension(transcriptEditorExtension());
 
     this.addRibbonIcon("pencil-line", "New ink page", () => void this.switcher.createPage().catch((e) => this.switcher.reportError("Could not create the page", e)));
+    this.addRibbonIcon("graduation-cap", "Import a paper from arXiv", () => this.openPaperSearch());
     this.registerCommands();
     this.registerFileMenus();
 
     // ---- workspace & vault events ----
     const onLayout = debounce(
       () => {
-        // the user's own Excalidraw plugin may have been disabled: the built-in one takes over
-        void this.excalidraw.ensure();
         this.bookmarks.refreshAll();
         this.detectClosedDrawings();
       },
@@ -88,9 +104,10 @@ export default class InkNotebookPlugin extends Plugin {
     this.registerEvent(this.app.workspace.on("active-leaf-change", onLayout));
     this.registerEvent(this.app.workspace.on("file-open", onLayout));
     this.registerEvent(this.app.workspace.on("file-open", (file) => this.refreshStaleTextPage(file)));
+    this.registerEvent(this.app.workspace.on("css-change", () => this.applyInkSettings()));
     this.registerEvent(
       this.app.metadataCache.on("changed", (file) => {
-        if (this.pairs.isTextPage(file) || this.pairs.isDrawing(file)) refreshBookmarks();
+        if (this.pairs.isTextPage(file) || this.pairs.isDrawing(file)) refreshStatus();
       }),
     );
     this.registerEvent(this.app.vault.on("rename", (file, oldPath) => void this.onRename(file, oldPath)));
@@ -98,7 +115,8 @@ export default class InkNotebookPlugin extends Plugin {
       this.app.vault.on("delete", (file) => {
         this.queueRemove(file.path);
         this.sync.forget(file.path);
-        refreshBookmarks();
+        this.images.invalidate(file.path);
+        refreshStatus();
       }),
     );
     this.registerEvent(this.app.vault.on("modify", (file) => this.onModify(file)));
@@ -113,24 +131,16 @@ export default class InkNotebookPlugin extends Plugin {
   onunload(): void {
     this.bookmarks?.removeAll();
     removeEinkClasses();
-    for (const t of this.typedTimers.values()) window.clearTimeout(t);
     for (const t of this.inkTimers.values()) window.clearTimeout(t);
     void this.ocr?.flush();
-    this.excalidraw?.unload();
+    this.images?.clear();
   }
 
   private async onLayoutReady(): Promise<void> {
     await this.ocr.loadCache();
     this.bookmarks.refreshAll();
     this.detectClosedDrawings();
-    if (!this.settings.setupDone) {
-      // give the user's own Excalidraw plugin (if any) a moment to finish loading before checking
-      window.setTimeout(() => new SetupWizard(this).open(), 1200);
-    } else if (!isExcalidrawReady(this.app)) {
-      window.setTimeout(() => {
-        if (!isExcalidrawReady(this.app)) this.showExcalidrawMissing();
-      }, 4000);
-    }
+    if (!this.settings.setupDone) window.setTimeout(() => new SetupWizard(this).open(), 800);
     window.setTimeout(() => void this.processQueue(), 8000);
   }
 
@@ -138,7 +148,7 @@ export default class InkNotebookPlugin extends Plugin {
     await this.saveData(this.settings);
   }
 
-  private saveSettingsSoon = debounce(() => void this.saveSettings(), 1000, true);
+  readonly saveSettingsSoon = debounce(() => void this.saveSettings(), 1000, true);
 
   openSettings(): void {
     const setting = (this.app as unknown as { setting?: { open(): void; openTabById(id: string): void } }).setting;
@@ -146,44 +156,105 @@ export default class InkNotebookPlugin extends Plugin {
     setting?.openTabById(this.manifest.id);
   }
 
-  showExcalidrawMissing(): void {
-    // e.g. the user's own Excalidraw plugin was just disabled: start the built-in one
-    if (!this.excalidraw.error && this.excalidraw.canStart()) {
-      void this.excalidraw.ensure().then((ok) => (ok ? new Notice("Excalidraw is ready – please try again.") : this.showExcalidrawMissing()));
-      return;
-    }
-    if (this.missingNoticeShown) return;
-    this.missingNoticeShown = true;
-    window.setTimeout(() => (this.missingNoticeShown = false), 10000);
-    const frag = document.createDocumentFragment();
-    frag.appendText(`Ink Notebook: ${this.excalidraw.describe().text} `);
-    const a = frag.createEl("a", { text: "Open setup", href: "#" });
-    a.addEventListener("click", (e) => {
-      e.preventDefault();
-      new SetupWizard(this).open();
-    });
-    new Notice(frag, 10000);
-  }
-
   /** Pure core functions, exposed for troubleshooting from the developer console. */
-  readonly internals = { classifyScene, planOcrUnits, layoutTranscript };
+  readonly internals = { classifyScene, planOcrUnits, layoutTranscript, parseInkFile, serializeInkFile };
 
-  // ------------------------------------------------------------------ public actions
+  // ------------------------------------------------------------------ ink pages
 
-  annotatePdf(file?: TFile | null): Promise<void> {
-    return annotatePdf(this, file ?? null);
+  /** Is a file (by path) an ink page that should open in the ink view? */
+  isInkPath(path: string): boolean {
+    if (isInkPath(path)) return true;
+    const f = this.app.vault.getAbstractFileByPath(path);
+    if (!(f instanceof TFile) || f.extension !== "md") return false;
+    return this.app.metadataCache.getFileCache(f)?.frontmatter?.[INK_FRONTMATTER_KEY] !== undefined;
   }
 
-  annotateImage(file?: TFile | null): Promise<void> {
-    return annotateImage(this, file ?? null);
+  inkViews(): InkView[] {
+    return this.app.workspace
+      .getLeavesOfType(INK_VIEW_TYPE)
+      .map((l) => l.view)
+      .filter((v): v is InkView => v instanceof InkView);
   }
 
-  exportAnnotatedPdf(leaf?: WorkspaceLeaf | null): Promise<void> {
-    return exportAnnotatedPdf(this, leaf ?? null);
+  /** The notebook as it is in an open ink view (with unsaved changes), if open. */
+  liveInk(file: TFile): InkFile | null {
+    return findInkView(this, file)?.inkFile ?? null;
   }
 
-  exportAnnotatedImage(leaf?: WorkspaceLeaf | null): Promise<void> {
-    return exportAnnotatedImage(this, leaf ?? null);
+  /** Be told when a notebook changes in an ink view (before it is saved). */
+  onInkChange(fn: (path: string) => void): () => void {
+    this.inkListeners.add(fn);
+    return () => this.inkListeners.delete(fn);
+  }
+
+  /** Called by ink views on every change. */
+  inkChanged(file: TFile): void {
+    for (const fn of [...this.inkListeners]) fn(file.path);
+    // optionally transcribe while writing
+    if (!this.settings.autoTranscribe || !this.pairs.textFor(file)) return;
+    const prev = this.inkTimers.get(file.path);
+    if (prev) window.clearTimeout(prev);
+    this.inkTimers.set(
+      file.path,
+      window.setTimeout(() => {
+        this.inkTimers.delete(file.path);
+        void this.sync.syncInkToText(file, { network: true }).catch((e) => console.warn("Ink Notebook: auto transcription failed", e));
+      }, 6000),
+    );
+  }
+
+  setBusy(file: TFile, busy: boolean): void {
+    if (busy) this.busy.add(file.path);
+    else this.busy.delete(file.path);
+    this.bookmarks.refreshAll();
+  }
+
+  isBusy(file: TFile): boolean {
+    return this.busy.has(file.path);
+  }
+
+  /** Apply changed settings to the open ink views and the e-ink look. */
+  applyInkSettings(): void {
+    applyEinkClasses(this.settings);
+    for (const v of this.inkViews()) v.applySettings();
+    this.bookmarks.refreshAll();
+  }
+
+  /** Show an ink page's file as Markdown (the raw data). */
+  async openAsMarkdown(leaf: WorkspaceLeaf): Promise<void> {
+    const file = (leaf.view as { file?: TFile | null }).file;
+    if (!file) return;
+    if (leaf.view instanceof InkView) await leaf.view.save();
+    await this.redirect.asMarkdown(() => leaf.setViewState({ type: "markdown", state: { file: file.path, mode: "source" } }));
+  }
+
+  ocrConfigured(): boolean {
+    return isOcrConfigured(this.settings);
+  }
+
+  selectionToText(view: InkView): Promise<void> {
+    return selectionToText(this, view);
+  }
+
+  /** Search arXiv and import a paper (as a new ink page, or – with `into` – as more pages of that one). */
+  openPaperSearch(into: InkView | null = null): void {
+    new PaperSearchModal(this, into).open();
+  }
+
+  appendPdfPages(view: InkView): Promise<void> {
+    return appendPdfPages(this, view);
+  }
+
+  exportPageImage(view?: InkView | null): Promise<void> {
+    return exportPageImage(this, view);
+  }
+
+  exportNotebookPdf(view?: InkView | null): Promise<void> {
+    return exportNotebookPdf(this, view);
+  }
+
+  exportAnnotatedPdf(view?: InkView | null): Promise<void> {
+    return exportAnnotatedPdf(this, view);
   }
 
   // ------------------------------------------------------------------ queue
@@ -214,7 +285,6 @@ export default class InkNotebookPlugin extends Plugin {
       if (verbose) new Notice("You are offline – the pages will be transcribed when you are back online.");
       return;
     }
-    if (!isExcalidrawReady(this.app)) return;
     this.queueRunning = true;
     let done = 0;
     try {
@@ -225,7 +295,7 @@ export default class InkNotebookPlugin extends Plugin {
           continue;
         }
         try {
-          const r = await this.sync.syncInkToText(file, { view: findExcalidrawView(this.app, file), network: true });
+          const r = await this.sync.syncInkToText(file, { network: true });
           if (r.text && r.pending === 0) done++;
           if (r.status === "offline") break;
         } catch (e) {
@@ -247,6 +317,13 @@ export default class InkNotebookPlugin extends Plugin {
       this.saveSettingsSoon();
     }
     if (this.openDrawings.delete(oldPath)) this.openDrawings.add(file.path);
+    if (this.lastPage.has(oldPath)) {
+      this.lastPage.set(file.path, this.lastPage.get(oldPath) ?? 0);
+      this.lastPage.delete(oldPath);
+    }
+    this.images.invalidate(oldPath);
+    // a PDF or picture used on ink pages moved: follow it
+    if (file instanceof TFile && file.extension !== "md") void this.renameAsset(oldPath, file.path);
     // wait for the metadata cache to pick up the new path
     window.setTimeout(async () => {
       try {
@@ -258,70 +335,83 @@ export default class InkNotebookPlugin extends Plugin {
     }, 300);
   }
 
+  /** Update the paths of a renamed picture/PDF in the ink pages that use it. */
+  private async renameAsset(oldPath: string, newPath: string): Promise<void> {
+    const swapBg = (bg: PageBackground): PageBackground => (bg.kind !== "paper" && bg.path === oldPath ? { ...bg, path: newPath } : bg);
+    const fix = (ink: InkFile): InkFile | null => {
+      let changed = false;
+      const pages = ink.doc.pages.map((p) => {
+        const bg = swapBg(p.bg);
+        const images = p.images.map((im) => (im.src === oldPath ? { ...im, src: newPath } : im));
+        if (bg === p.bg && images.every((im, k) => im === p.images[k])) return p;
+        changed = true;
+        return { ...p, bg, images };
+      });
+      return changed ? { doc: { ...ink.doc, pages }, meta: ink.meta } : null;
+    };
+    for (const f of this.app.vault.getMarkdownFiles()) {
+      if (!this.pairs.isDrawing(f)) continue;
+      const view = findInkView(this, f);
+      try {
+        if (view?.inkFile) {
+          const next = fix(view.inkFile);
+          if (next) view.replaceQuietly(next);
+          continue;
+        }
+        const data = await this.app.vault.cachedRead(f);
+        if (!data.includes(oldPath.replace(/%/g, "\\u0025")) && !data.includes(oldPath)) continue;
+        await this.app.vault.process(f, (cur) => {
+          const parsed = parseInkFile(cur);
+          const next = fix(parsed);
+          return next ? serializeInkFile(parsed.frontmatter, next) : cur;
+        });
+      } catch (e) {
+        console.warn("Ink Notebook: could not update a renamed file on", f.path, e);
+      }
+    }
+  }
+
   private onModify(file: TAbstractFile): void {
-    if (!(file instanceof TFile) || file.extension !== "md") return;
-    // typed notes → drawing (only when the drawing is open somewhere)
-    if (this.settings.syncTypedNotes && this.pairs.isTextPage(file)) {
-      const drawing = this.pairs.drawingFor(file);
-      if (!drawing) return;
-      const prev = this.typedTimers.get(file.path);
-      if (prev) window.clearTimeout(prev);
-      this.typedTimers.set(
-        file.path,
-        window.setTimeout(() => {
-          this.typedTimers.delete(file.path);
-          const view = findExcalidrawView(this.app, drawing);
-          if (view) void this.sync.syncTextToInk(file, drawing, view).catch((e) => console.warn("Ink Notebook: typed notes sync failed", e));
-        }, 1500),
-      );
+    if (!(file instanceof TFile)) return;
+    if (file.extension !== "md") {
+      this.images.invalidate(file.path);
       return;
     }
-    // drawing saved → text page (optional, while writing)
-    if (this.settings.autoTranscribe && this.pairs.isDrawing(file) && this.pairs.textFor(file)) {
-      const prev = this.inkTimers.get(file.path);
-      if (prev) window.clearTimeout(prev);
-      this.inkTimers.set(
-        file.path,
-        window.setTimeout(() => {
-          this.inkTimers.delete(file.path);
-          const view = findExcalidrawView(this.app, file);
-          if (view) void this.sync.syncInkToText(file, { view, network: true }).catch((e) => console.warn("Ink Notebook: auto transcription failed", e));
-        }, 6000),
-      );
+    // typed notes shown on ink pages
+    if (this.pairs.isTextPage(file)) {
+      const drawing = this.pairs.drawingFor(file);
+      if (drawing) findInkView(this, drawing)?.textChanged();
     }
   }
 
   /**
-   * Opening a text page whose drawing changed after the transcript was written
+   * Opening a text page whose ink page changed after the transcript was written
    * (e.g. synced from another device) refreshes it in the background.
    */
   private refreshStaleTextPage(file: TFile | null): void {
     if (!file || !this.pairs.isTextPage(file)) return;
     const drawing = this.pairs.drawingFor(file);
     if (!drawing || drawing.stat.mtime <= file.stat.mtime + 2000) return;
-    if (findExcalidrawView(this.app, drawing)) return; // the open drawing syncs itself
+    if (findInkView(this, drawing)) return; // the open ink page syncs itself
     if (this.sync.isUpToDate(drawing)) return;
     window.setTimeout(() => {
-      void this.sync.syncInkToText(drawing, { view: null, network: true }).catch((e) => console.warn("Ink Notebook: refresh failed", e));
+      void this.sync.syncInkToText(drawing, { network: true }).catch((e) => console.warn("Ink Notebook: refresh failed", e));
     }, 500);
   }
 
-  /** When a drawing is closed (navigated away) update its text page in the background. */
+  /** When an ink page is closed (navigated away) update its text page in the background. */
   private detectClosedDrawings(): void {
     const now = new Set<string>();
-    for (const leaf of this.app.workspace.getLeavesOfType(EXCALIDRAW_VIEW_TYPE)) {
-      const f = (leaf.view as { file?: TFile | null }).file;
-      if (f) now.add(f.path);
-    }
+    for (const v of this.inkViews()) if (v.file) now.add(v.file.path);
     const closed = [...this.openDrawings].filter((p) => !now.has(p));
     this.openDrawings = now;
     for (const path of closed) {
       window.setTimeout(() => {
         const file = this.app.vault.getAbstractFileByPath(path);
         if (!(file instanceof TFile) || !this.pairs.isDrawing(file) || !this.pairs.textFor(file)) return;
-        if (findExcalidrawView(this.app, file)) return; // reopened meanwhile
-        if (this.sync.isUpToDate(file)) return; // e.g. just synced by flipping the bookmark
-        void this.sync.syncInkToText(file, { view: null, network: true }).catch((e) => console.warn("Ink Notebook: background sync failed", e));
+        if (findInkView(this, file)) return; // reopened meanwhile
+        if (this.sync.isUpToDate(file)) return; // e.g. just synced by flipping
+        void this.sync.syncInkToText(file, { network: true }).catch((e) => console.warn("Ink Notebook: background sync failed", e));
       }, 1500);
     }
   }
@@ -334,8 +424,28 @@ export default class InkNotebookPlugin extends Plugin {
     return leaf && file instanceof TFile ? { leaf, file } : null;
   }
 
+  private activeInkView(): InkView | null {
+    const v = this.app.workspace.getMostRecentLeaf()?.view;
+    return v instanceof InkView && v.inkFile ? v : null;
+  }
+
   private registerCommands(): void {
     const run = (p: Promise<unknown>, what: string) => void p.catch((e) => this.switcher.reportError(what, e));
+    const onInk = (id: string, name: string, icon: string, fn: (v: InkView) => unknown) =>
+      this.addCommand({
+        id,
+        name,
+        icon,
+        checkCallback: (checking) => {
+          const v = this.activeInkView();
+          if (!v) return false;
+          if (!checking) {
+            const r = fn(v);
+            if (r instanceof Promise) run(r, name);
+          }
+          return true;
+        },
+      });
 
     this.addCommand({
       id: "new-page",
@@ -381,7 +491,7 @@ export default class InkNotebookPlugin extends Plugin {
     this.addCommand({
       id: "side-by-side",
       name: "Open ink and text page side by side",
-      icon: "columns",
+      icon: "columns-2",
       checkCallback: (checking) => {
         const a = this.activeLeafFile();
         if (!a || !this.pairs.pairOf(a.file)) return false;
@@ -389,99 +499,56 @@ export default class InkNotebookPlugin extends Plugin {
         return true;
       },
     });
-    this.addCommand({
-      id: "create-text-page",
-      name: "Create a text page for this drawing",
-      icon: "file-plus",
-      checkCallback: (checking) => {
-        const a = this.activeLeafFile();
-        if (!a || !this.pairs.isDrawing(a.file) || this.pairs.textFor(a.file)) return false;
-        if (!checking) run(this.switcher.toText(a.leaf, a.file), "Could not create the text page");
-        return true;
-      },
-    });
-    this.addCommand({
-      id: "add-paper-page",
-      name: "Add a page… (choose paper and position)",
-      icon: "file-plus-2",
-      checkCallback: (checking) => {
-        const leaf = this.app.workspace.getMostRecentLeaf();
-        if (!leaf || !isExcalidrawView(leaf.view)) return false;
-        if (!checking) run(this.switcher.addPageInteractive(leaf), "Could not add a page");
-        return true;
-      },
-    });
-    this.addCommand({
-      id: "add-page-after",
-      name: "Add a page after this one (same paper)",
-      icon: "file-plus-2",
-      checkCallback: (checking) => {
-        const leaf = this.app.workspace.getMostRecentLeaf();
-        if (!leaf || !isExcalidrawView(leaf.view)) return false;
-        if (!checking) run(this.switcher.addPaperPage(leaf, { position: "after" }), "Could not add a page");
-        return true;
-      },
-    });
-    this.addCommand({
-      id: "change-paper",
-      name: "Change the paper of this page…",
-      icon: "layout-template",
-      checkCallback: (checking) => {
-        const leaf = this.app.workspace.getMostRecentLeaf();
-        if (!leaf || !isExcalidrawView(leaf.view)) return false;
-        if (!checking) run(this.switcher.changePaperInteractive(leaf), "Could not change the paper");
-        return true;
-      },
-    });
-    this.addCommand({
-      id: "mark-diagram",
-      name: "Turn the selection into a diagram (embedded as a picture on the text page)",
-      icon: "frame",
-      checkCallback: (checking) => {
-        const leaf = this.app.workspace.getMostRecentLeaf();
-        if (!leaf || !isExcalidrawView(leaf.view)) return false;
-        if (!checking) run(this.markSelectionAsDiagram(leaf), "Could not create the diagram frame");
-        return true;
-      },
-    });
+    onInk("add-paper-page", "Add a page… (choose paper and position)", "file-plus-2", (v) => v.addPageInteractive());
+    onInk("add-page-after", "Add a page after this one (same paper)", "file-plus-2", (v) => v.surface.addPage("after"));
+    onInk("change-paper", "Change the paper of this page…", "layout-template", (v) => v.changePaper());
+    onInk("delete-page", "Delete this page", "trash-2", (v) => v.deletePage());
+    onInk("next-page", "Next page", "chevron-right", (v) => v.surface.next());
+    onInk("previous-page", "Previous page", "chevron-left", (v) => v.surface.prev());
+    onInk("undo", "Undo on the ink page", "undo-2", (v) => v.surface.undo());
+    onInk("redo", "Redo on the ink page", "redo-2", (v) => v.surface.redo());
+    const tools: Array<[ToolId, string, string]> = [
+      ["pen", "Pen", "pen-tool"],
+      ["marker", "Highlighter", "highlighter"],
+      ["eraser", "Eraser", "eraser"],
+      ["lasso", "Lasso", "lasso"],
+      ["shape", "Shapes", "shapes"],
+      ["text", "Text", "type"],
+    ];
+    for (const [tool, label, icon] of tools) {
+      onInk(`tool-${tool}`, `Tool: ${label}`, icon, (v) => {
+        v.surface.setTools({ tool });
+        this.settings.tools = structuredClone(v.surface.tools);
+        this.saveSettingsSoon();
+      });
+    }
     this.addCommand({
       id: "annotate-pdf",
       name: "Annotate a PDF…",
       icon: "file-text",
-      callback: () => run(this.annotatePdf(), "Could not annotate the PDF"),
+      callback: () => run(annotatePdf(this, null), "Could not annotate the PDF"),
+    });
+    this.addCommand({
+      id: "import-arxiv",
+      name: "Import a paper from arXiv…",
+      icon: "graduation-cap",
+      callback: () => this.openPaperSearch(),
     });
     this.addCommand({
       id: "annotate-image",
       name: "Annotate an image…",
       icon: "image",
-      callback: () => run(this.annotateImage(), "Could not annotate the image"),
+      callback: () => run(annotateImage(this, null), "Could not annotate the image"),
     });
-    this.addCommand({
-      id: "export-annotated-pdf",
-      name: "Export annotated PDF",
-      icon: "download",
-      checkCallback: (checking) => {
-        const leaf = this.app.workspace.getMostRecentLeaf();
-        const v = leaf?.view;
-        if (!isExcalidrawView(v) || !v.file) return false;
-        if (findPdfPages(this, viewElements(v), v.file.path).length === 0) return false;
-        if (!checking) run(this.exportAnnotatedPdf(leaf), "Export failed");
-        return true;
-      },
+    onInk("export-annotated-pdf", "Export annotated PDF", "download", (v) => {
+      if (!v.surface.document.pages.some((p) => p.bg.kind === "pdf")) {
+        new Notice('This ink page has no PDF pages. Use "Annotate a PDF" to start one.');
+        return;
+      }
+      return this.exportAnnotatedPdf(v);
     });
-    this.addCommand({
-      id: "export-annotated-image",
-      name: "Export annotated image",
-      icon: "download",
-      checkCallback: (checking) => {
-        const leaf = this.app.workspace.getMostRecentLeaf();
-        const v = leaf?.view;
-        if (!isExcalidrawView(v)) return false;
-        if (!viewElements(v).some((e) => getInkData(e)?.role === "image-page")) return false;
-        if (!checking) run(this.exportAnnotatedImage(leaf), "Export failed");
-        return true;
-      },
-    });
+    onInk("export-pdf", "Export the ink page as PDF", "file-down", (v) => this.exportNotebookPdf(v));
+    onInk("export-page-image", "Export this page as an image", "image-down", (v) => this.exportPageImage(v));
     this.addCommand({
       id: "process-queue",
       name: "Transcribe pages waiting for a connection",
@@ -494,10 +561,16 @@ export default class InkNotebookPlugin extends Plugin {
       icon: "monitor",
       callback: async () => {
         this.settings.einkMode = einkActive(this.settings) ? "off" : "on";
-        applyEinkClasses(this.settings);
+        this.applyInkSettings();
         await this.saveSettings();
         new Notice(`E-ink optimisations ${einkActive(this.settings) ? "on" : "off"}.`);
       },
+    });
+    this.addCommand({
+      id: "migrate-excalidraw",
+      name: "Convert ink pages made with Excalidraw (earlier versions)",
+      icon: "wand",
+      callback: () => run(migrateExcalidrawPages(this), "Conversion failed"),
     });
     this.addCommand({
       id: "open-setup",
@@ -526,14 +599,14 @@ export default class InkNotebookPlugin extends Plugin {
             i
               .setTitle("Annotate with Ink Notebook")
               .setIcon("pencil-line")
-              .onClick(() => void this.annotatePdf(file)),
+              .onClick(() => void annotatePdf(this, file)),
           );
         } else if (IMAGE_EXTENSIONS.includes(ext)) {
           menu.addItem((i) =>
             i
               .setTitle("Annotate with Ink Notebook")
               .setIcon("pencil-line")
-              .onClick(() => void this.annotateImage(file)),
+              .onClick(() => void annotateImage(this, file)),
           );
         } else if (this.pairs.isDrawing(file) && !this.pairs.textFor(file)) {
           menu.addItem((i) =>
@@ -543,7 +616,7 @@ export default class InkNotebookPlugin extends Plugin {
               .onClick(async () => {
                 try {
                   await this.pairs.createTextPage(file);
-                  await this.sync.syncInkToText(file, { view: findExcalidrawView(this.app, file), network: true });
+                  await this.sync.syncInkToText(file, { network: true });
                   this.bookmarks.refreshAll();
                 } catch (e) {
                   this.switcher.reportError("Could not create the text page", e);
@@ -553,38 +626,5 @@ export default class InkNotebookPlugin extends Plugin {
         }
       }),
     );
-  }
-
-  /** Wrap the selected elements in a frame named "Diagram" (always embedded as a picture). */
-  private async markSelectionAsDiagram(leaf: WorkspaceLeaf): Promise<void> {
-    const view = leaf.view;
-    if (!isExcalidrawView(view)) return;
-    const api = view.excalidrawAPI;
-    const selectedIds = Object.keys(api?.getAppState?.()?.selectedElementIds ?? {});
-    const selected = viewElements(view).filter((e) => selectedIds.includes(e.id));
-    if (selected.length === 0) {
-      new Notice("Select the strokes of your drawing first (lasso or selection tool).");
-      return;
-    }
-    const box = unionAll(selected.map((e) => elementRect(e)));
-    if (!box) return;
-    const ea = getEA(this.app, view) as ReturnType<typeof getEA> & {
-      addFrame?: (x: number, y: number, w: number, h: number, name?: string) => string;
-      addElementsToFrame?: (frameId: string, ids: string[]) => void;
-    };
-    try {
-      if (!ea.addFrame || !ea.addElementsToFrame) {
-        new Notice("This needs a newer version of the Excalidraw plugin.");
-        return;
-      }
-      ea.copyViewElementsToEAforEditing(selected);
-      const pad = 16;
-      const frameId = ea.addFrame(box.x - pad, box.y - pad, box.w + 2 * pad, box.h + 2 * pad, "Diagram");
-      ea.addElementsToFrame(frameId, selected.map((e) => e.id));
-      await ea.addElementsToView(false, true, false);
-      new Notice("Marked as diagram – it will appear as a picture on the text page.");
-    } finally {
-      release(ea);
-    }
   }
 }

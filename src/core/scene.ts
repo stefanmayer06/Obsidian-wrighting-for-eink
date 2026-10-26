@@ -1,16 +1,18 @@
 /**
- * Minimal structural typings for the parts of the Excalidraw plugin
- * (obsidian-excalidraw-plugin) that Ink Notebook uses.
+ * The "scene": a flat list of elements that the recognition pipeline
+ * (OCR planning, classification, layout) works on. An ink notebook is turned
+ * into a scene by `inkScene` (core/ink/scene.ts): its pages are stacked top to
+ * bottom and every stroke, shape, text box and image becomes one element in
+ * those shared scene coordinates.
  *
- * We deliberately do not depend on the plugin's own typings package: it is
- * very large, changes often and would tie this plugin to one exact version.
- * Everything here is accessed defensively at runtime (see excalidrawBridge.ts).
+ * The element shape is deliberately simple and generic: linear elements
+ * ("freedraw" for handwriting, "line"/"arrow" for shapes) store their points
+ * relative to (x, y); everything else is a box.
  */
 
 export type Point = readonly [number, number];
 
-/** The subset of Excalidraw element fields we read or write. */
-export interface ExElement {
+export interface SceneElement {
   id: string;
   type: string;
   x: number;
@@ -26,22 +28,18 @@ export interface ExElement {
   backgroundColor?: string;
   points?: ReadonlyArray<Point>;
   pressures?: ReadonlyArray<number>;
-  simulatePressure?: boolean;
   text?: string;
   originalText?: string;
   rawText?: string;
   fontSize?: number;
-  fontFamily?: number;
   containerId?: string | null;
   frameId?: string | null;
   frameRole?: string | null;
   groupIds?: ReadonlyArray<string>;
-  boundElements?: ReadonlyArray<{ id: string; type: string }> | null;
   startBinding?: { elementId: string } | null;
   endBinding?: { elementId: string } | null;
   link?: string | null;
   name?: string | null;
-  fileId?: string | null;
   version?: number;
   customData?: Record<string, unknown>;
 }
@@ -51,16 +49,11 @@ export type InkRole = "region" | "typed" | "paper" | "pdf-page" | "image-page" |
 
 export interface InkCustomData {
   role: InkRole;
-  /** For typed cards: hash of the text that was last synced from the text page. */
-  syncedHash?: string;
   /** For pdf pages: vault path of the PDF and 1-based page number. */
   pdf?: string;
   page?: number;
   /** For image pages: vault path of the annotated image. */
   image?: string;
-  /** Page size in PDF points (pdf pages) or pixels (image pages). */
-  sourceWidth?: number;
-  sourceHeight?: number;
   /** For region rectangles: what the region is used for. */
   kind?: "diagram";
   /** For paper pages: the template (style, spacing, colour, orientation). */
@@ -69,7 +62,7 @@ export interface InkCustomData {
 
 export const INK_CUSTOM_DATA_KEY = "inkNotebook";
 
-export function getInkData(el: ExElement): InkCustomData | undefined {
+export function getInkData(el: SceneElement): InkCustomData | undefined {
   const data = el.customData?.[INK_CUSTOM_DATA_KEY];
   if (data && typeof data === "object" && typeof (data as InkCustomData).role === "string") {
     return data as InkCustomData;
@@ -78,6 +71,6 @@ export function getInkData(el: ExElement): InkCustomData | undefined {
 }
 
 /** Text of a text element as typed by the user (with [[links]] preserved). */
-export function elementText(el: ExElement): string {
+export function elementText(el: SceneElement): string {
   return el.rawText ?? el.originalText ?? el.text ?? "";
 }
