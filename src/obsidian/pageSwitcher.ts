@@ -189,7 +189,9 @@ export class PageSwitcher {
     doc?: InkDoc;
     open?: boolean;
     leaf?: WorkspaceLeaf;
-    extraTextFrontmatter?: Record<string, string>;
+    extraTextFrontmatter?: Record<string, string | string[]>;
+    /** Typed notes for the text page (above the transcript). */
+    textBody?: string;
   } = {}): Promise<{ drawing: TFile; text: TFile } | null> {
     const settings = this.plugin.settings;
     // decide the folder first: the picker modal changes the active leaf on some platforms
@@ -220,7 +222,7 @@ export class PageSwitcher {
     const doc = opts.doc ?? newDoc(paper ?? settings.paper);
     const fm = withInkFrontmatter("", { [FM_DRAWING_TO_TEXT]: JSON.stringify(`[[${textPath.replace(/\.md$/, "")}]]`) });
     const drawing = await this.app.vault.create(drawingPath, serializeInkFile(fm, { doc, meta: EMPTY_META }));
-    const text = await this.app.vault.create(textPath, this.plugin.pairs.textPageContent(drawing, textPath, opts.extraTextFrontmatter));
+    const text = await this.app.vault.create(textPath, this.plugin.pairs.textPageContent(drawing, textPath, opts.extraTextFrontmatter, opts.textBody));
     if (opts.open !== false) {
       const leaf = opts.leaf ?? this.app.workspace.getLeaf(false);
       await leaf.setViewState({ type: INK_VIEW_TYPE, state: { file: drawing.path }, active: true });

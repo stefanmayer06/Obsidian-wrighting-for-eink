@@ -81,6 +81,8 @@ export interface InkSettings {
 
   // ---- pdf ----
   pdfMaxPagesWithoutAsking: number;
+  /** Folder for papers imported from arXiv (their text pages; PDF and ink page go into its ink subfolder). */
+  papersFolder: string;
 
   // ---- internal ----
   /** Drawing paths waiting for handwriting recognition (offline queue). */
@@ -136,6 +138,7 @@ export const DEFAULT_SETTINGS: InkSettings = {
   largeTouchTargets: true,
 
   pdfMaxPagesWithoutAsking: 30,
+  papersFolder: "Papers",
 
   queue: [],
   settingsVersion: SETTINGS_VERSION,
@@ -211,6 +214,7 @@ export function loadSettings(raw: unknown): InkSettings {
     largeTouchTargets: bool(r.largeTouchTargets, d.largeTouchTargets),
 
     pdfMaxPagesWithoutAsking: numberIn(r.pdfMaxPagesWithoutAsking, 1, 1000, d.pdfMaxPagesWithoutAsking),
+    papersFolder: str(r.papersFolder, d.papersFolder).replace(/^\/+|\/+$/g, "") || d.papersFolder,
 
     queue: Array.isArray(r.queue) ? r.queue.filter((q): q is string => typeof q === "string").slice(0, 500) : [],
     settingsVersion: SETTINGS_VERSION,

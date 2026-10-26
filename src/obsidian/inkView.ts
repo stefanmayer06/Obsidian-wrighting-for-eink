@@ -344,6 +344,7 @@ export class InkView extends TextFileView {
             },
           },
           { icon: "file-text", label: "Pages from a PDF…", run: () => void this.plugin.appendPdfPages(this) },
+          { icon: "graduation-cap", label: "Pages of a paper from arXiv…", run: () => this.plugin.openPaperSearch(this) },
         ],
       },
     ];

@@ -24,6 +24,8 @@ Taken by the automated end-to-end tests in real Obsidian (the "handwriting" is g
 | ![Ink page with handwriting, a diagram and a text box](docs/ink-page.png) | ![Text page with the transcript and a live figure](docs/text-page-eink.png) |
 | **Pen options** | **All pages** |
 | ![The pen card: pens, thickness, colours](docs/pen-options.png) | ![Page overview](docs/pages.png) |
+| **Papers from arXiv** | |
+| ![Search arXiv; the most popular papers with an Import button](docs/arxiv.png) | |
 
 ## Writing – like in the Boox Notes app
 
@@ -73,6 +75,18 @@ Paper templates like in GoodNotes and Boox Notes: blank, ruled, dotted, squared,
 - **Annotate a PDF** – right-click a PDF → *Annotate with Ink Notebook* (or the command). Its pages become the pages of an ink page (linked, not copied); write on them like on paper. Rotated pages are handled.
 - **Export** (*More → Export*): the **annotated PDF** (the original PDF with your ink drawn on top as vectors – its text stays selectable), the **whole notebook as PDF** (paper, PDF pages, pictures, ink, all as vectors), or **this page as an image**.
 - **Annotate a picture** the same way (right-click an image).
+
+## Papers from arXiv
+
+Find a paper and write on it, without leaving Obsidian:
+
+1. Tap the **graduation cap** in the ribbon (or the command **Import a paper from arXiv**).
+2. With nothing searched you see the **most popular papers** (trending on Hugging Face Papers); tap **Load more** for more. Or **search arXiv**: type words, `"a phrase"`, `au:name` for an author, `ti:` for the title, `cat:cs.LG` for a category – or paste an arXiv link or id (`2405.03150`).
+3. Each card shows the title, authors, date and abstract (tap the abstract to read all of it). Tap **Import**.
+
+The PDF is downloaded and becomes the pages of a new ink page – write, highlight and erase on it like on any page, and *More → Export → Annotated PDF* gives you the paper with your notes. Its text page (in the *Papers* folder, see Settings) has the title, authors, arXiv id and link as properties, and the abstract above the transcript of your handwritten notes. A paper you imported before shows **Open** instead.
+
+From an ink page, *Insert → Pages of a paper from arXiv…* adds a paper's pages to that ink page instead.
 
 ## Files
 
@@ -156,6 +170,7 @@ Privacy: only your handwriting strokes are rendered and sent (black on white –
 | Pages | `+` adds a page after this one, `‹ ›` or a swipe turns pages, the page number opens all pages, *More → Add a page…* chooses paper and position, *More → Paper of this page…* changes the paper |
 | Handwriting → typed text | Lasso the handwriting → **To text** |
 | Annotate a PDF | Right-click a PDF → *Annotate with Ink Notebook*; *More → Export* for the annotated PDF |
+| Read a paper | Ribbon graduation cap → search arXiv or pick a popular paper → **Import** |
 | Offline | Just keep working. Pages waiting for recognition show a small ◦ on **Text**; command **Transcribe pages waiting for a connection** retries immediately |
 
 ### The text page
@@ -179,7 +194,7 @@ The two `%% … %%` lines mark the transcript; in Live Preview they are shown as
 - **Pages** – where new pages go (folder of the current note, or a fixed folder), the subfolder for ink files (`Attachments` by default; empty = next to the text page), paper for new pages and whether to choose it every time, ask for a name, open the text page in reading or editing view, keep names in sync on rename/move.
 - **Handwriting recognition** – service (Ink Notebook Cloud or your own Azure key), license key or endpoint and key, API version, language hint, highlight uncertain words, transcribe while writing, how long to wait when flipping, requests per minute, clickable handwritten links, diagram detection sensitivity, offline queue and cache.
 - **Display & e‑ink** – e‑ink mode (automatic / on / off), large touch targets, position of the bookmarks on the text page.
-- **PDF annotation** – how many pages to import without asking.
+- **PDF annotation** – how many pages to import without asking, the folder for papers from arXiv (`Papers` by default).
 
 ## Troubleshooting
 
@@ -223,7 +238,7 @@ The pure logic (the ink model, file format, pens, erasers, shapes, OCR parsing, 
 
 - **Payment:** Ink Notebook Cloud is an optional paid subscription. Everything else – including handwriting recognition with your own Azure key – is free.
 - **Account:** Ink Notebook Cloud needs a license key from a purchase (sold through Polar). Nothing else needs an account.
-- **Network use:** Ink Notebook works offline. It connects to the internet only for handwriting recognition: with your own key it sends handwriting images to *your* Azure AI Vision resource; with Ink Notebook Cloud it sends handwriting images and your license key to the Ink Notebook server (Supabase, Frankfurt), which checks the key with Polar and passes the images to Azure AI Vision. When you open the handwriting recognition settings or the setup assistant, the plugin asks the Ink Notebook server whether the subscription is offered (no personal data is sent). There is no telemetry and no ads.
+- **Network use:** Ink Notebook works offline. It connects to the internet only for handwriting recognition and, when you use *Papers from arXiv*, to find and download papers: with your own key it sends handwriting images to *your* Azure AI Vision resource; with Ink Notebook Cloud it sends handwriting images and your license key to the Ink Notebook server (Supabase, Frankfurt), which checks the key with Polar and passes the images to Azure AI Vision. When you open the handwriting recognition settings or the setup assistant, the plugin asks the Ink Notebook server whether the subscription is offered (no personal data is sent). *Papers from arXiv* sends your search words to the arXiv API (export.arxiv.org), loads the list of popular papers from Hugging Face (huggingface.co) and downloads the PDF of a paper you import from arxiv.org – only when you open it or search. There is no telemetry and no ads.
 
 ## License
 

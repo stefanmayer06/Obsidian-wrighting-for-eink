@@ -45,7 +45,8 @@ function bytes(u8: Uint8Array): ArrayBuffer {
   return u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength) as ArrayBuffer;
 }
 
-async function pickPages(plugin: InkNotebookPlugin, pdf: TFile): Promise<{ pages: number[]; sizes: Map<number, { w: number; h: number }> } | null> {
+/** The pages of a PDF to use (asks for a range when it has many) and their sizes; null if cancelled. */
+export async function pickPages(plugin: InkNotebookPlugin, pdf: TFile): Promise<{ pages: number[]; sizes: Map<number, { w: number; h: number }> } | null> {
   const info = await plugin.images.pdfInfo(pdf, []);
   const limit = plugin.settings.pdfMaxPagesWithoutAsking;
   let range = "all";
@@ -63,7 +64,8 @@ async function pickPages(plugin: InkNotebookPlugin, pdf: TFile): Promise<{ pages
   return { pages, sizes };
 }
 
-function pdfPages(pdf: TFile, pages: number[], sizes: Map<number, { w: number; h: number }>): Page[] {
+/** Ink pages showing pages of a PDF. */
+export function pdfPages(pdf: TFile, pages: number[], sizes: Map<number, { w: number; h: number }>): Page[] {
   return pages.map((n) => {
     const size = sizes.get(n) ?? { w: 595, h: 842 };
     return emptyPage({ kind: "pdf", path: pdf.path, page: n }, PAGE_W, Math.round((PAGE_W * size.h) / size.w));
@@ -99,17 +101,23 @@ export async function appendPdfPages(plugin: InkNotebookPlugin, view: InkView): 
   const pdf = await FilePickModal.pick(plugin.app, ["pdf"], "Choose a PDF…");
   if (!pdf) return;
   try {
-    const picked = await pickPages(plugin, pdf);
-    if (!picked) return;
-    const s = view.surface;
-    let doc = s.document;
-    for (const p of pdfPages(pdf, picked.pages, picked.sizes)) doc = insertPage(doc, p, doc.pages.length);
-    const first = s.document.pages.length;
-    s.commit(doc, "all");
-    s.goTo(first);
+    await addPdfPages(plugin, view, pdf);
   } catch (e) {
     plugin.switcher.reportError("Could not add the PDF pages", e);
   }
+}
+
+/** Add the pages of `pdf` (asking which, for big ones) after the last page; false if cancelled. */
+export async function addPdfPages(plugin: InkNotebookPlugin, view: InkView, pdf: TFile): Promise<boolean> {
+  const picked = await pickPages(plugin, pdf);
+  if (!picked) return false;
+  const s = view.surface;
+  let doc = s.document;
+  for (const p of pdfPages(pdf, picked.pages, picked.sizes)) doc = insertPage(doc, p, doc.pages.length);
+  const first = s.document.pages.length;
+  s.commit(doc, "all");
+  s.goTo(first);
+  return true;
 }
 
 export async function annotateImage(plugin: InkNotebookPlugin, file?: TFile | null, leaf?: WorkspaceLeaf): Promise<void> {

@@ -17,6 +17,8 @@ import { annotateImage, annotatePdf, appendPdfPages, exportAnnotatedPdf, exportN
 import { selectionToText } from "./obsidian/lassoText";
 import { migrateExcalidrawPages } from "./obsidian/migrate";
 import { transcriptEditorExtension } from "./obsidian/editorExtension";
+import { PaperService } from "./obsidian/papers";
+import { PaperSearchModal } from "./obsidian/paperSearch";
 import { classifyScene } from "./core/classify";
 import { planOcrUnits } from "./core/rasterPlan";
 import { layoutTranscript } from "./core/layout";
@@ -33,6 +35,8 @@ export default class InkNotebookPlugin extends Plugin {
   switcher!: PageSwitcher;
   /** Pictures and PDF pages for the ink pages. */
   images!: VaultImages;
+  /** Papers from arXiv. */
+  papers!: PaperService;
   /** The page each notebook was last open at. */
   readonly lastPage = new Map<string, number>();
 
@@ -46,6 +50,7 @@ export default class InkNotebookPlugin extends Plugin {
   async onload(): Promise<void> {
     this.settings = loadSettings(await this.loadData());
     this.images = new VaultImages(this.app);
+    this.papers = new PaperService(this);
     this.pairs = new PairManager(this.app, () => this.settings.inkSubfolder);
     this.ocr = new OcrService(
       this.app.vault.adapter,
@@ -82,6 +87,7 @@ export default class InkNotebookPlugin extends Plugin {
     this.registerEditorExtension(transcriptEditorExtension());
 
     this.addRibbonIcon("pencil-line", "New ink page", () => void this.switcher.createPage().catch((e) => this.switcher.reportError("Could not create the page", e)));
+    this.addRibbonIcon("graduation-cap", "Import a paper from arXiv", () => this.openPaperSearch());
     this.registerCommands();
     this.registerFileMenus();
 
@@ -228,6 +234,11 @@ export default class InkNotebookPlugin extends Plugin {
 
   selectionToText(view: InkView): Promise<void> {
     return selectionToText(this, view);
+  }
+
+  /** Search arXiv and import a paper (as a new ink page, or – with `into` – as more pages of that one). */
+  openPaperSearch(into: InkView | null = null): void {
+    new PaperSearchModal(this, into).open();
   }
 
   appendPdfPages(view: InkView): Promise<void> {
@@ -516,6 +527,12 @@ export default class InkNotebookPlugin extends Plugin {
       name: "Annotate a PDF…",
       icon: "file-text",
       callback: () => run(annotatePdf(this, null), "Could not annotate the PDF"),
+    });
+    this.addCommand({
+      id: "import-arxiv",
+      name: "Import a paper from arXiv…",
+      icon: "graduation-cap",
+      callback: () => this.openPaperSearch(),
     });
     this.addCommand({
       id: "annotate-image",

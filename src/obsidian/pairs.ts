@@ -160,25 +160,31 @@ export class PairManager {
   }
 
   /** A base name that is free for both the text page (in `textFolder`) and the drawing (in `inkFolder`). */
-  uniqueBaseName(textFolder: string, inkFolder: string, base: string): string {
+  /** A name not used by a text page or ink file yet (nor by `Name<ext>` in the ink folder for each of `alsoFree`). */
+  uniqueBaseName(textFolder: string, inkFolder: string, base: string, alsoFree: ReadonlyArray<string> = []): string {
     const clean = base.replace(/[\\/:*?"<>|#^[\]]/g, "-").trim() || "Ink page";
     let name = clean;
     let n = 2;
+    const taken = (folder: string, file: string) => !!this.app.vault.getAbstractFileByPath(normalizePath(joinPath(folder, file)));
     const exists = (nm: string) =>
-      !!this.app.vault.getAbstractFileByPath(normalizePath(joinPath(textFolder, `${nm}.md`))) ||
-      !!this.app.vault.getAbstractFileByPath(normalizePath(joinPath(inkFolder, `${nm}${INK_SUFFIX}`))) ||
-      !!this.app.vault.getAbstractFileByPath(normalizePath(joinPath(inkFolder, `${nm}.md`)));
+      taken(textFolder, `${nm}.md`) ||
+      taken(inkFolder, `${nm}${INK_SUFFIX}`) ||
+      taken(inkFolder, `${nm}.md`) ||
+      alsoFree.some((ext) => taken(inkFolder, `${nm}${ext}`));
     while (exists(name)) name = `${clean} ${n++}`;
     return name;
   }
 
   /** Initial content of a text page. */
-  textPageContent(drawing: TFile, textPath: string, extraFrontmatter: Record<string, string> = {}): string {
+  /** `body` (typed notes) goes above the handwriting transcript. */
+  textPageContent(drawing: TFile, textPath: string, extraFrontmatter: Record<string, string | string[]> = {}, body = ""): string {
     const link = pairLink(drawing);
+    // JSON is valid YAML: strings stay strings, arrays become list properties
     const extra = Object.entries(extraFrontmatter)
       .map(([k, v]) => `${k}: ${JSON.stringify(v)}\n`)
       .join("");
-    return `---\n${FM_TEXT_TO_DRAWING}: ${JSON.stringify(`[[${link}]]`)}\n${extra}---\n${renderRegion([], [])}\n\n`;
+    const top = body.trim() ? `${body.trim()}\n\n` : "";
+    return `---\n${FM_TEXT_TO_DRAWING}: ${JSON.stringify(`[[${link}]]`)}\n${extra}---\n${top}${renderRegion([], [])}\n\n`;
   }
 
   /** Create the text page for an existing drawing (and link the drawing back). */

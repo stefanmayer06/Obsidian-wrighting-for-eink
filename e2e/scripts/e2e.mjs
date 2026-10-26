@@ -3,6 +3,7 @@
 // fake Azure server that really looks at the handwriting images.
 import { chromium } from "playwright-core";
 import fs from "fs";
+import http from "http";
 import path from "path";
 import { PDFDocument, StandardFonts, degrees } from "pdf-lib";
 import LZString from "../../node_modules/lz-string/libs/lz-string.js";
@@ -38,6 +39,60 @@ const shot = async (name) => {
   await sleep(400);
   await page.screenshot({ path: path.join(SHOTS, name) });
 };
+// ---- a fake arXiv (API + PDFs) and Hugging Face Papers, for the "papers" step
+const PAPERS = "http://127.0.0.1:8769";
+const paperRequests = [];
+let paperPdf = new Uint8Array();
+const xml = (t) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+const SEARCH_RESULTS = [
+  { id: "2401.00001v2", title: "Attention Is All You Need: Again", authors: ["Ada Lovelace", "Alan Turing", "Grace Hopper", "Edsger Dijkstra"], summary: "We revisit attention for <e-ink> tablets. ".repeat(12) },
+  { id: "2401.00002v1", title: "Handwriting on Paper", authors: ["Donald Knuth"], summary: "A short abstract." },
+];
+function atom(entries, total) {
+  const entry = (p) => `<entry>
+    <id>http://arxiv.org/abs/${p.id}</id>
+    <title>${xml(p.title)}</title>
+    <link href="${PAPERS}/abs/${p.id}" rel="alternate" type="text/html"/>
+    <link href="${PAPERS}/pdf/${p.id}" rel="related" type="application/pdf" title="pdf"/>
+    <summary>${xml(p.summary)}</summary>
+    <category term="cs.LG" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2024-01-02T00:00:00Z</published>
+    <arxiv:primary_category term="cs.LG"/>
+    ${p.authors.map((a) => `<author><name>${xml(a)}</name></author>`).join("")}
+  </entry>`;
+  return `<?xml version='1.0' encoding='UTF-8'?>
+<feed xmlns:opensearch="http://a9.com/-/spec/opensearch/1.1/" xmlns:arxiv="http://arxiv.org/schemas/atom" xmlns="http://www.w3.org/2005/Atom">
+  <opensearch:totalResults>${total}</opensearch:totalResults>
+  ${entries.map(entry).join("\n")}
+</feed>`;
+}
+const paperServer = http.createServer((req, res) => {
+  const url = new URL(req.url, PAPERS);
+  paperRequests.push(url.pathname + url.search);
+  if (url.pathname === "/api/query") {
+    const id = url.searchParams.get("id_list");
+    const entries = id ? SEARCH_RESULTS.filter((p) => p.id.startsWith(id)) : SEARCH_RESULTS;
+    res.writeHead(200, { "content-type": "application/atom+xml" });
+    res.end(atom(entries, entries.length));
+  } else if (url.pathname === "/daily_papers") {
+    const p = Number(url.searchParams.get("p") ?? 0);
+    const n = p === 0 ? 20 : p === 1 ? 3 : 0;
+    const items = Array.from({ length: n }, (_, i) => {
+      const k = p * 20 + i + 1;
+      return { paper: { id: `2610.${10000 + k}`, title: `Popular paper ${k}`, summary: `Why paper ${k} is popular. `.repeat(10), authors: [{ name: "Ada Lovelace" }, { name: "Alan Turing" }], publishedAt: "2026-10-20T00:00:00.000Z", upvotes: 300 - k } };
+    });
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify(items));
+  } else if (url.pathname.startsWith("/pdf/")) {
+    res.writeHead(200, { "content-type": "application/pdf" });
+    res.end(Buffer.from(paperPdf));
+  } else {
+    res.writeHead(404);
+    res.end("not found");
+  }
+});
+await new Promise((r) => paperServer.listen(8769, "127.0.0.1", r));
+
 const mock = async (cfg) => fetch(`${MOCK}/__config`, { method: "POST", body: JSON.stringify(cfg) });
 const mockStats = async () => (await fetch(`${MOCK}/__stats`)).json();
 
@@ -487,7 +542,8 @@ steps.pdf = async () => {
   await page.waitForSelector(".prompt-input", { timeout: 5000 });
   await page.fill(".prompt-input", "Slides.pdf");
   await page.keyboard.press("Enter");
-  const p = await waitView("ink-notebook");
+  // wait for the new notebook (an ink page may be open already)
+  const p = await waitView("ink-notebook", "Ink/Attachments/Slides (annotated).ink.md");
   const info = await ev(async () => {
     const s = __t.surface();
     await __t.waitFor(() => __t.plugin().images.pdfPage("Docs/Slides.pdf", 1, 100), 8000, "pdf page").catch(() => null);
@@ -527,6 +583,122 @@ steps.pdf = async () => {
     return name;
   }, p).catch((e) => String(e));
   check("Export as PDF writes the whole notebook", nb.endsWith(".pdf"), nb);
+};
+
+steps.papers = async () => {
+  console.log("\n▶ papers from arXiv");
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  for (let i = 1; i <= 3; i++) doc.addPage([612, 792]).drawText(`Paper page ${i}`, { x: 60, y: 700, size: 28, font });
+  paperPdf = await doc.save();
+  await ev((base) => Object.assign(__t.plugin().papers.endpoints, { arxivApi: `${base}/api/query`, arxivSite: base, popular: `${base}/daily_papers` }), PAPERS);
+  await setSettings({ einkMode: "on" });
+  await setWindow(702, 936);
+  const cards = () => ev(() => document.querySelectorAll(".ink-arxiv-card").length);
+  const listInfo = () =>
+    ev(() => ({
+      heading: document.querySelector(".ink-arxiv-title")?.textContent,
+      sub: document.querySelector(".ink-arxiv-sub")?.textContent,
+      cards: [...document.querySelectorAll(".ink-arxiv-card")].map((c) => ({
+        title: c.querySelector(".ink-arxiv-card-title")?.textContent,
+        meta: c.querySelector(".ink-arxiv-card-meta")?.textContent,
+        button: c.querySelector(".ink-arxiv-import")?.textContent,
+        abstract: !!c.querySelector(".ink-arxiv-card-abstract"),
+      })),
+      more: !!document.querySelector(".ink-arxiv-more:not([hidden])"),
+    }));
+  const waitCards = (n, label) => ev(async ({ n, label }) => __t.waitFor(() => document.querySelectorAll(".ink-arxiv-card").length === n && !document.querySelector(".ink-arxiv-status span"), 15000, label), { n, label });
+
+  // the ribbon button opens the search, showing the most popular papers
+  await page.click('.side-dock-ribbon-action[aria-label="Import a paper from arXiv"]', { timeout: 5000 });
+  await waitCards(20, "popular papers");
+  let info = await listInfo();
+  check("with nothing searched the most popular papers are listed", info.heading === "Most popular papers" && info.cards.length === 20 && info.cards[0].title === "Popular paper 1" && info.cards[0].abstract && info.more, JSON.stringify({ ...info, cards: info.cards.slice(0, 2) }));
+  check("each card shows title, authors, date and an Import button", /Ada Lovelace, Alan Turing/.test(info.cards[0].meta) && /2026-10-20/.test(info.cards[0].meta) && info.cards[0].button === "Import", JSON.stringify(info.cards[0]));
+  await page.click(".ink-arxiv-card:nth-of-type(1) .ink-arxiv-card-abstract");
+  await ev(() => document.querySelectorAll(".notice").forEach((n) => n.remove()));
+  await shot("12-eink-arxiv-popular.png");
+  await page.click(".ink-arxiv-more");
+  await waitCards(23, "more popular papers");
+  info = await listInfo();
+  check("Load more adds the next papers (and goes away at the end)", info.cards.length === 23 && !info.more, JSON.stringify({ n: info.cards.length, more: info.more }));
+
+  // search
+  await page.fill(".ink-arxiv-input", '"attention" transformer');
+  await page.keyboard.press("Enter");
+  await waitCards(2, "search results");
+  info = await listInfo();
+  check("a search lists the papers arXiv finds", /^Results for/.test(info.heading) && info.cards[0].title === "Attention Is All You Need: Again" && /et al\./.test(info.cards[0].meta) && /2 papers/.test(info.sub), JSON.stringify(info));
+  check("the search is sent to the arXiv API", paperRequests.some((r) => r.includes("search_query=all%3A%22attention%22%20AND%20all%3Atransformer")), paperRequests.join("\n"));
+  await shot("13-eink-arxiv-search.png");
+
+  // import: the PDF becomes the pages of a new ink page
+  await page.click(".ink-arxiv-card:nth-of-type(1) .ink-arxiv-import");
+  const name = "Attention Is All You Need - Again";
+  const drawing = await waitView("ink-notebook", `Papers/Attachments/${name}.ink.md`).catch((e) => String(e));
+  check("Import opens the paper as an ink page in the papers folder", drawing === `Papers/Attachments/${name}.ink.md`, drawing);
+  const made = await ev(async (name) => {
+    const s = __t.surface();
+    await __t.waitFor(() => __t.plugin().images.pdfPage(`Papers/Attachments/${name}.pdf`, 1, 100), 8000, "pdf page").catch(() => null);
+    const text = app.vault.getAbstractFileByPath(`Papers/${name}.md`);
+    return {
+      modal: document.querySelectorAll(".ink-arxiv-modal").length,
+      pages: s.document.pages.map((p) => p.bg),
+      md: text ? await app.vault.read(text) : null,
+      fm: text ? app.metadataCache.getFileCache(text)?.frontmatter : null,
+    };
+  }, name);
+  check("its pages are the pages of the downloaded PDF", made.pages.length === 3 && made.pages.every((bg, i) => bg.kind === "pdf" && bg.path === `Papers/Attachments/${name}.pdf` && bg.page === i + 1), JSON.stringify(made.pages));
+  check(
+    "the text page has the paper's title, authors, arXiv id and abstract",
+    made.fm?.title === "Attention Is All You Need: Again" && made.fm?.authors?.length === 4 && made.fm?.arxiv === "2401.00001v2" && /> \[!abstract\]- Abstract\n> We revisit attention for &lt;e-ink> tablets/.test(made.md ?? ""),
+    made.md,
+  );
+  check("the search closes after the import", made.modal === 0);
+  await pen(word(120, 300, 260, 40));
+  await sleep(300);
+  check("you can write on the paper", (await ev(() => __t.surface().document.pages[0].strokes.length)) === 1);
+  await shot("14-eink-paper.png");
+
+  // importing the same paper again opens it
+  const before = await ev(() => app.vault.getFiles().length);
+  await ev(() => app.commands.executeCommandById("ink-notebook:import-arxiv"));
+  await waitCards(20, "popular papers");
+  await page.fill(".ink-arxiv-input", "https://arxiv.org/abs/2401.00001");
+  await page.keyboard.press("Enter");
+  await waitCards(1, "paper by link");
+  info = await listInfo();
+  check("a pasted arXiv link finds that paper", paperRequests.some((r) => r.includes("id_list=2401.00001")) && info.cards[0]?.title === "Attention Is All You Need: Again", JSON.stringify(info.cards));
+  check("a paper imported before shows Open", info.cards[0]?.button === "Open", info.cards[0]?.button);
+  await closeModals();
+  await openFile(state.drawing, "ink-notebook");
+  await waitView("ink-notebook", state.drawing);
+  await ev(() => app.commands.executeCommandById("ink-notebook:import-arxiv"));
+  await waitCards(20, "popular papers");
+  await page.fill(".ink-arxiv-input", "2401.00001");
+  await page.keyboard.press("Enter");
+  await waitCards(1, "paper by id");
+  await page.click(".ink-arxiv-card:nth-of-type(1) .ink-arxiv-import");
+  const reopened = await waitView("ink-notebook", drawing);
+  check("Open goes to its ink page without a second copy", reopened === drawing && (await ev(() => app.vault.getFiles().length)) === before, `${reopened} ${before}`);
+
+  // from an ink page's Insert menu: the paper's pages are added to it
+  await openFile(state.pdfInk, "ink-notebook");
+  await waitView("ink-notebook", state.pdfInk);
+  const n0 = await ev(() => __t.surface().document.pages.length);
+  await ev(() => __t.plugin().openPaperSearch(__t.view()));
+  await waitCards(20, "popular papers");
+  check("from an ink page the button adds the pages", (await listInfo()).cards[1].button === "Add pages");
+  await page.click(".ink-arxiv-card:nth-of-type(2) .ink-arxiv-import");
+  const added = await ev(async (n0) => {
+    await __t.waitFor(() => __t.surface().document.pages.length === n0 + 3, 15000, "added pages");
+    const s = __t.surface();
+    return { pages: s.document.pages.length, at: s.pageIndex, bg: s.document.pages[n0].bg };
+  }, n0).catch((e) => ({ error: String(e) }));
+  check("Pages of a paper from arXiv adds its pages to the open ink page", added.pages === n0 + 3 && added.at === n0 && added.bg?.path === "Ink/Attachments/Popular paper 2.pdf", JSON.stringify(added));
+  await closeModals();
+  await setSettings({ einkMode: "off" });
+  await setWindow(820, 1180);
 };
 
 /** Show a file in a new tab and make it the active one. */
@@ -645,7 +817,7 @@ steps.eink = async () => {
   await setWindow(820, 1180);
 };
 
-const order = ["setup", "createPage", "write", "speed", "flipToText", "flipToInk", "tools", "pages", "typedNotes", "pdf", "reload", "asMarkdown", "migrate", "eink"];
+const order = ["setup", "createPage", "write", "speed", "flipToText", "flipToInk", "tools", "pages", "typedNotes", "pdf", "papers", "reload", "asMarkdown", "migrate", "eink"];
 const run = only ? ["setup", only] : order;
 for (const name of run) {
   try {
@@ -659,5 +831,6 @@ for (const name of run) {
 const unexpected = errors.filter((e) => !/ResizeObserver loop|net::ERR|Failed to load resource/.test(e));
 check("no errors in the console", unexpected.length === 0, unexpected.slice(0, 10).join("\n"));
 console.log(failures === 0 ? "\nall passed" : `\n${failures} failed`);
+paperServer.close();
 await browser.close();
 process.exit(failures === 0 ? 0 : 1);

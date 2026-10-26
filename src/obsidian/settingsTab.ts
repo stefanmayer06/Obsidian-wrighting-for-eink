@@ -291,5 +291,14 @@ export class InkSettingTab extends PluginSettingTab {
           }
         }),
       );
+    new Setting(containerEl)
+      .setName("Folder for papers from arXiv")
+      .setDesc("Imported papers get a text page here (with title, authors and abstract); the PDF and the ink page go into its subfolder for ink files.")
+      .addText((t) =>
+        t.setValue(s.papersFolder).onChange(async (v) => {
+          s.papersFolder = v.trim().replace(/^\/+|\/+$/g, "") || "Papers";
+          await save();
+        }),
+      );
   }
 }
