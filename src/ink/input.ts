@@ -60,6 +60,8 @@ export class InputRouter {
   private link: { target: string; x: number; y: number; pointer: number } | null = null;
   private mousePan: { x: number; y: number; ox: number; oy: number; pointer: number } | null = null;
   private listeners: Array<[EventTarget, string, EventListener, AddEventListenerOptions | undefined]> = [];
+  /** When the pen (or mouse/finger) last wrote, erased or selected (performance.now()). */
+  lastActivity = 0;
 
   constructor(private s: InkSurface) {
     const el = s.el;
@@ -165,8 +167,9 @@ export class InputRouter {
     return null;
   }
 
-  private startSession(e: PointerEvent, tool: ToolId): void {
-    this.rect = this.s.el.getBoundingClientRect();
+  private startSession(e: PointerEvent, tool: ToolId, rect = this.s.el.getBoundingClientRect()): void {
+    this.rect = rect;
+    this.lastActivity = performance.now();
     this.usingRaw = false;
     const pt = this.point(e);
     this.session = createSession(this.s, tool, pt, { isPen: e.pointerType === "pen", ctrl: e.ctrlKey || e.metaKey });
@@ -187,7 +190,7 @@ export class InputRouter {
       if (this.session?.pen || now - this.lastPenTime < PALM_MS) return;
       if (this.s.settings.fingerDrawing && !this.gesture && this.touches.size === 0 && !this.session) {
         e.preventDefault();
-        this.s.el.focus({ preventScroll: true });
+        this.focus();
         this.touches.set(e.pointerId, { x: e.clientX, y: e.clientY, x0: e.clientX, y0: e.clientY });
         this.startTouchDraw(e);
         return;
@@ -210,7 +213,7 @@ export class InputRouter {
     }
     if (this.session) return;
     e.preventDefault();
-    this.s.el.focus({ preventScroll: true });
+    this.focus();
     if (e.pointerType === "mouse" && e.button === 1) {
       this.mousePan = { x: e.clientX, y: e.clientY, ox: this.s.view.ox, oy: this.s.view.oy, pointer: e.pointerId };
       this.s.el.setPointerCapture(e.pointerId);
@@ -218,15 +221,20 @@ export class InputRouter {
     }
     const tool = this.toolFor(e);
     if (tool === "none") return;
+    const rect = this.s.el.getBoundingClientRect();
     if (tool !== "lasso" && tool !== "eraser") {
-      const rect = this.s.el.getBoundingClientRect();
       const target = this.linkAt(this.s.toPage(e.clientX, e.clientY, rect));
       if (target) {
         this.link = { target, x: e.clientX, y: e.clientY, pointer: e.pointerId };
         return;
       }
     }
-    this.startSession(e, tool);
+    this.startSession(e, tool, rect);
+  }
+
+  /** Focus the surface for keyboard shortcuts (only when it is not focused yet). */
+  private focus(): void {
+    if (this.s.el.ownerDocument.activeElement !== this.s.el) this.s.el.focus({ preventScroll: true });
   }
 
   private startTouchDraw(e: PointerEvent): void {
@@ -246,6 +254,7 @@ export class InputRouter {
     if (this.session && e.pointerId === this.sessionPointer) {
       if (raw) this.usingRaw = true;
       else if (this.usingRaw) return;
+      this.lastActivity = performance.now();
       if (e.pointerType === "touch") {
         const t = this.touches.get(e.pointerId);
         if (t) {
@@ -275,6 +284,7 @@ export class InputRouter {
       const sess = this.session;
       this.session = null;
       this.sessionPointer = -1;
+      this.lastActivity = performance.now();
       this.touches.delete(e.pointerId);
       try {
         sess.up(this.point(e));

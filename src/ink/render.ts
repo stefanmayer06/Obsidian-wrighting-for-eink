@@ -59,16 +59,39 @@ export function drawStroke(ctx: Ctx, s: Stroke): void {
   ctx.restore();
 }
 
-/** Draw a piece of a stroke while it is being written. */
-export function drawSegment(ctx: Ctx, seg: Segment): void {
-  ctx.strokeStyle = seg.color;
-  ctx.lineWidth = seg.w;
-  ctx.beginPath();
-  ctx.moveTo(seg.a.x, seg.a.y);
-  if (seg.kind === "dot") ctx.lineTo(seg.a.x + 0.01, seg.a.y);
-  else if (seg.kind === "quad" && seg.c) ctx.quadraticCurveTo(seg.c.x, seg.c.y, seg.b.x, seg.b.y);
-  else ctx.lineTo(seg.b.x, seg.b.y);
-  ctx.stroke();
+/** Add a piece of a stroke to a path (that is already at `seg.a`). */
+export function segmentPath(path: CanvasPath, seg: Segment): void {
+  if (seg.kind === "dot") path.lineTo(seg.a.x + 0.01, seg.a.y);
+  else if (seg.kind === "quad" && seg.c) path.quadraticCurveTo(seg.c.x, seg.c.y, seg.b.x, seg.b.y);
+  else path.lineTo(seg.b.x, seg.b.y);
+}
+
+/**
+ * Draw pieces of a stroke while it is being written. Pieces of the same width
+ * and colour go into one path, so a pen move that brings several points costs
+ * one draw call, not one per point.
+ */
+export function drawSegments(ctx: Ctx, segs: ReadonlyArray<Segment>): void {
+  let i = 0;
+  while (i < segs.length) {
+    const first = segs[i];
+    ctx.strokeStyle = first.color;
+    ctx.lineWidth = first.w;
+    ctx.beginPath();
+    ctx.moveTo(first.a.x, first.a.y);
+    let j = i;
+    for (; j < segs.length; j++) {
+      const seg = segs[j];
+      if (j > i) {
+        if (seg.w !== first.w || seg.color !== first.color) break;
+        const prev = segs[j - 1];
+        if (seg.a.x !== prev.b.x || seg.a.y !== prev.b.y) ctx.moveTo(seg.a.x, seg.a.y);
+      }
+      segmentPath(ctx, seg);
+    }
+    ctx.stroke();
+    i = j;
+  }
 }
 
 // ------------------------------------------------------------------ paper

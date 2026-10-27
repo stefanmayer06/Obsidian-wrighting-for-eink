@@ -29,6 +29,8 @@ function check(name, cond, detail = "") {
 
   // instrument the move handler
   await page.evaluate(() => {
+    window.domChanges = 0;
+    new MutationObserver((list) => (window.domChanges += list.length)).observe(document.body, { subtree: true, childList: true, attributes: true, characterData: true });
     const input = window.surface.input;
     const orig = input.onMove.bind(input);
     window.moveTimes = [];
@@ -61,6 +63,7 @@ function check(name, cond, detail = "") {
     }
     const last = toScreen(...pts[pts.length - 1]);
     if (opts.hold) await page.waitForTimeout(opts.hold);
+    if (opts.beforeUp) await opts.beforeUp();
     await cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: last.x, y: last.y, clickCount: 1, force: 0, ...base, buttons: 0 });
   };
   const along = (corners, step = 3) => {
@@ -101,6 +104,9 @@ function check(name, cond, detail = "") {
   }
   let st = await state();
   check("30 words become 30 strokes", st.strokes === 30, JSON.stringify(st));
+  const domChanges = await page.evaluate(() => window.domChanges);
+  // only the undo button turns on; e-ink screens refresh wherever the page changes
+  check("writing leaves the rest of the page alone", domChanges <= 2, `${domChanges} DOM changes`);
   const times = await page.evaluate(() => {
     const t = window.moveTimes.slice().sort((a, b) => a - b);
     return { n: t.length, median: t[Math.floor(t.length / 2)], p95: t[Math.floor(t.length * 0.95)], max: t[t.length - 1] };
@@ -214,9 +220,16 @@ function check(name, cond, detail = "") {
   await page.evaluate(() => window.surface.setTools({ tool: "shape", shape: "ellipse" }));
   await pen(along([[200, 300], [500, 500]], 10));
   await page.evaluate(() => window.surface.setTools({ tool: "marker" }));
-  await pen(along([[90, 115], [420, 118]], 4));
+  let wetWhileDrawing = "";
+  await pen(along([[90, 115], [420, 118]], 4), {
+    beforeUp: async () => {
+      wetWhileDrawing = await page.evaluate(() => window.surface.wet.style.display);
+    },
+  });
   st = await state();
   check("ellipse and highlighter are added", st.strokes === 2, JSON.stringify(st));
+  const wetAfter = await page.evaluate(() => window.surface.wet.style.display);
+  check("the preview layer shows the highlighter, then goes away", wetWhileDrawing === "" && wetAfter === "none", `${wetWhileDrawing} / ${wetAfter}`);
   await page.screenshot({ path: path.join(SHOTS, "04-page2.png") });
 
   console.log("save and load");

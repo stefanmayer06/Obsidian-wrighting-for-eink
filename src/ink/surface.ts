@@ -29,7 +29,7 @@ import {
 } from "../core/ink/model";
 import { DEFAULT_PAPER, type PaperSpec } from "../core/paper";
 import { itemsBounds } from "../core/ink/transform";
-import { drawPage, drawSegment, measureTextHeight, type ImageSource } from "./render";
+import { drawPage, drawSegments, measureTextHeight, type ImageSource } from "./render";
 import type { Segment } from "../core/ink/pens";
 import { InputRouter } from "./input";
 import { SelectionOverlay } from "./selection";
@@ -106,6 +106,10 @@ export class InkSurface {
   hidden: Set<string> = new Set();
   private clipboard: Items | null = null;
   private backdrop = "#e8e8e8";
+  /** Something was drawn on the preview canvas since it was cleared. */
+  private wetUsed = false;
+  /** The preview canvas is on screen. */
+  private wetShown = true;
 
   readonly input: InputRouter;
   readonly selectionOverlay: SelectionOverlay;
@@ -125,6 +129,7 @@ export class InkSurface {
     this.overlay = this.div(this.stage, "ink-overlay");
     this.bctx = this.context(this.base, true);
     this.wctx = this.context(this.wet, false);
+    this.clearWet();
     this.input = new InputRouter(this);
     this.selectionOverlay = new SelectionOverlay(this);
     this.textEditor = new TextEditor(this);
@@ -527,9 +532,9 @@ export class InkSurface {
     });
   }
 
-  /** Draw a piece of a stroke being written, right onto the page. */
-  drawLive(seg: Segment): void {
-    drawSegment(this.bctx, seg);
+  /** Draw pieces of a stroke being written, right onto the page. */
+  drawLive(segs: ReadonlyArray<Segment>): void {
+    if (segs.length > 0) drawSegments(this.bctx, segs);
   }
 
   /** Prepare the main canvas for live strokes (transform and caps). */
@@ -541,14 +546,34 @@ export class InkSurface {
     this.bctx.setLineDash([]);
   }
 
+  /**
+   * Clear the preview canvas and take it off the screen: while it is not
+   * needed, the page canvas is the only layer and nothing has to be blended
+   * over the ink as it is written.
+   */
   clearWet(): void {
-    this.wctx.setTransform(1, 0, 0, 1, 0, 0);
-    this.wctx.clearRect(0, 0, this.wet.width, this.wet.height);
+    if (this.wetUsed) {
+      this.wctx.setTransform(1, 0, 0, 1, 0, 0);
+      this.wctx.clearRect(0, 0, this.wet.width, this.wet.height);
+      this.wetUsed = false;
+    }
+    if (this.wetShown) {
+      this.wet.style.display = "none";
+      this.wetShown = false;
+    }
   }
 
   /** The preview canvas, cleared, drawing in page units. */
   wetContext(): CanvasRenderingContext2D {
-    this.clearWet();
+    if (this.wetUsed) {
+      this.wctx.setTransform(1, 0, 0, 1, 0, 0);
+      this.wctx.clearRect(0, 0, this.wet.width, this.wet.height);
+    }
+    if (!this.wetShown) {
+      this.wet.style.display = "";
+      this.wetShown = true;
+    }
+    this.wetUsed = true;
     this.pageTransform(this.wctx);
     this.wctx.lineCap = "round";
     this.wctx.lineJoin = "round";
@@ -722,7 +747,10 @@ export class InkSurface {
   // ------------------------------------------------------------------ selection
 
   setSelection(sel: Selection): void {
+    const wasEmpty = selectionSize(this.selection) === 0;
     this.selection = sel;
+    // nothing was selected and nothing is: leave the page alone (this runs after every stroke)
+    if (wasEmpty && selectionSize(sel) === 0) return;
     this.selectionOverlay.update();
     this.host.selectionChanged?.(selectionSize(sel));
   }

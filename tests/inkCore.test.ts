@@ -36,6 +36,7 @@ import { canRotate, IDENTITY, multiply, rotation, scaling, transformItems, trans
 import { History } from "../src/core/ink/history";
 import { inkScene, regionsFromScene, SCENE_PAGE_GAP, toPageRect } from "../src/core/ink/scene";
 import { getInkData } from "../src/core/scene";
+import { drawSegments } from "../src/ink/render";
 
 /** A stroke through the given points (pressure 0.5 unless given). */
 function ink(points: Array<[number, number, number?]>, pen: PenType = "ballpoint", extra: Partial<Stroke> = {}): Stroke {
@@ -192,6 +193,32 @@ describe("pens", () => {
     expect(new Set(pencil.map((r) => r.color)).size).toBeGreaterThan(1);
     const marker = strokeRuns(ink([[0, 0, 0.1], [5, 0, 1], [10, 0, 0.2]], "marker"));
     expect(marker).toHaveLength(1);
+  });
+
+  it("draws live ink in as few calls as the widths allow, the same path as a redraw", () => {
+    const calls: string[] = [];
+    const ctx = {
+      set strokeStyle(v: string) {
+        calls.push(`color ${v}`);
+      },
+      set lineWidth(v: number) {
+        calls.push(`width ${v}`);
+      },
+      beginPath: () => calls.push("begin"),
+      moveTo: (x: number, y: number) => calls.push(`M${x} ${y}`),
+      lineTo: (x: number, y: number) => calls.push(`L${x} ${y}`),
+      quadraticCurveTo: (cx: number, cy: number, x: number, y: number) => calls.push(`Q${cx} ${cy} ${x} ${y}`),
+      stroke: () => calls.push("stroke"),
+    } as unknown as CanvasRenderingContext2D;
+    const even = strokeSegments(ink(along([[0, 0], [30, 0]], 5)));
+    drawSegments(ctx, even);
+    expect(calls.filter((c) => c === "stroke")).toHaveLength(1);
+    expect(calls.filter((c) => c.startsWith("M"))).toHaveLength(1);
+    expect(calls.filter((c) => /^[MLQ]/.test(c)).join("")).toBe(strokeRuns(ink(along([[0, 0], [30, 0]], 5)))[0].d);
+    calls.length = 0;
+    const pressure = strokeSegments(ink([[0, 0, 0.1], [5, 0, 0.1], [10, 0, 1], [15, 0, 1], [20, 0, 1]], "fountain"));
+    drawSegments(ctx, pressure);
+    expect(calls.filter((c) => c === "stroke")).toHaveLength(strokeRuns(ink([[0, 0, 0.1], [5, 0, 0.1], [10, 0, 1], [15, 0, 1], [20, 0, 1]], "fountain")).length);
   });
 
   it("makes calligraphy thin along the nib and wide across it", () => {

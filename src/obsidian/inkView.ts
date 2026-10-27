@@ -19,6 +19,13 @@ export const INK_VIEW_TYPE = "ink-notebook";
 
 export const IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "webp", "gif", "bmp", "svg"];
 
+/** Save this long after the first unsaved change… */
+const SAVE_DELAY_MS = 2000;
+/** …once the pen has rested this long… */
+const PEN_IDLE_MS = 400;
+/** …but after this long, at the next lift of the pen, even while writing on. */
+const SAVE_MAX_WAIT_MS = 10000;
+
 /**
  * The ink page: a notebook of handwritten pages in the style of the Boox
  * Notes app, stored in a Markdown file (see core/ink/codec.ts).
@@ -37,6 +44,9 @@ export class InkView extends TextFileView {
   private ready = false;
   /** File data that arrived before the view was ready. */
   private pending: { data: string; clear: boolean } | null = null;
+  private saveTimer: number | null = null;
+  /** When the oldest unsaved change was made. */
+  private unsavedSince = 0;
 
   constructor(
     leaf: WorkspaceLeaf,
@@ -112,6 +122,7 @@ export class InkView extends TextFileView {
   }
 
   async onClose(): Promise<void> {
+    this.cancelSave();
     Popover.closeAll();
     this.surface?.textEditor.commit();
     // FileView.onClose saves the file (onUnloadFile): do it while the notebook is still here
@@ -196,6 +207,7 @@ export class InkView extends TextFileView {
 
   /** Another file is about to be shown (setViewData follows): stop what is running. */
   clear(): void {
+    this.cancelSave();
     if (!this.ready) return;
     this.surface.input.cancel();
     this.surface.textEditor.commit();
@@ -214,22 +226,56 @@ export class InkView extends TextFileView {
   }
 
   private onChanged(): void {
-    this.requestSave();
+    this.saveSoon();
     if (this.file) this.plugin.inkChanged(this.file);
+  }
+
+  /**
+   * Save a moment after a change – but not while the pen is writing: writing a
+   * big notebook to its file takes a moment, and the pen should never wait.
+   */
+  private saveSoon(): void {
+    if (this.saveTimer !== null) return;
+    this.unsavedSince = performance.now();
+    this.saveTimer = window.setTimeout(() => this.saveWhenIdle(), SAVE_DELAY_MS);
+  }
+
+  private saveWhenIdle(): void {
+    this.saveTimer = null;
+    if (!this.ready) return;
+    const input = this.surface.input;
+    const now = performance.now();
+    const resting = now - input.lastActivity >= PEN_IDLE_MS || now - this.unsavedSince >= SAVE_MAX_WAIT_MS;
+    if (input.busy || !resting) {
+      this.saveTimer = window.setTimeout(() => this.saveWhenIdle(), input.busy ? 100 : PEN_IDLE_MS);
+      return;
+    }
+    void this.save();
+  }
+
+  private cancelSave(): void {
+    if (this.saveTimer !== null) window.clearTimeout(this.saveTimer);
+    this.saveTimer = null;
+  }
+
+  async save(clear?: boolean): Promise<void> {
+    // saved now (flipping to the text page, closing): no need to save again later
+    this.cancelSave();
+    await super.save(clear);
   }
 
   /** Metadata for the text page (diagram areas, handwritten links): applied without an undo step. */
   setMeta(meta: InkMeta): void {
     if (!this.ready || this.broken !== null) return;
     this.surface.setMeta(meta);
-    this.requestSave();
+    this.saveSoon();
   }
 
   /** Replace the notebook without an undo step (e.g. a picture it uses was renamed). */
   replaceQuietly(file: InkFile): void {
     if (!this.ready || this.broken !== null) return;
     this.surface.load(file, { page: this.surface.pageIndex, keepHistory: true });
-    this.requestSave();
+    this.saveSoon();
   }
 
   get inkFile(): InkFile | null {
