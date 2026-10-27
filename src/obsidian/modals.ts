@@ -1,4 +1,5 @@
-import { App, FuzzySuggestModal, Modal, Setting, TFile } from "obsidian";
+import { App, FuzzySuggestModal, Modal, Setting, SuggestModal, TFile, TFolder } from "obsidian";
+import { cleanSubfolder } from "../core/folders";
 
 /** Simple text prompt that resolves to the entered text (or null when cancelled). */
 export class TextPromptModal extends Modal {
@@ -161,6 +162,63 @@ export class PdfImportModal extends Modal {
       this.done = true;
       this.resolve(null);
     }
+  }
+}
+
+interface FolderChoice {
+  path: string;
+  /** A folder that does not exist yet (typed in). */
+  create: boolean;
+}
+
+/** Pick a folder of the vault – or type the name of a new one. */
+export class FolderPickModal extends SuggestModal<FolderChoice> {
+  private picked = false;
+
+  private constructor(
+    app: App,
+    private folders: string[],
+    private resolve: (path: string | null) => void,
+  ) {
+    super(app);
+    this.setPlaceholder("Folder for the new page – type to search, or the name of a new folder");
+    this.modalEl.addClass("ink-modal");
+  }
+
+  /** `initial` is listed first; folders for which `hide` is true are not offered. */
+  static pick(app: App, opts: { initial: string; hide?: (path: string) => boolean }): Promise<string | null> {
+    const all = app.vault
+      .getAllLoadedFiles()
+      .filter((f): f is TFolder => f instanceof TFolder)
+      .map((f) => (f.isRoot() ? "" : f.path))
+      .filter((p) => !opts.hide?.(p))
+      .sort((a, b) => a.localeCompare(b));
+    const folders = [opts.initial, ...all.filter((p) => p !== opts.initial)];
+    return new Promise((resolve) => new FolderPickModal(app, folders, resolve).open());
+  }
+
+  getSuggestions(query: string): FolderChoice[] {
+    const typed = cleanSubfolder(query);
+    const q = typed.toLowerCase();
+    const list: FolderChoice[] = this.folders.filter((p) => !q || p.toLowerCase().includes(q)).map((path) => ({ path, create: false }));
+    if (typed && !this.folders.some((p) => p.toLowerCase() === q)) list.push({ path: typed, create: true });
+    return list;
+  }
+
+  renderSuggestion(c: FolderChoice, el: HTMLElement): void {
+    el.setText(c.create ? `New folder: ${c.path}` : c.path || "/ (vault root)");
+  }
+
+  onChooseSuggestion(c: FolderChoice): void {
+    this.picked = true;
+    this.resolve(c.path);
+  }
+
+  onClose(): void {
+    super.onClose();
+    window.setTimeout(() => {
+      if (!this.picked) this.resolve(null);
+    }, 50);
   }
 }
 

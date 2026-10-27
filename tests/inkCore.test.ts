@@ -9,6 +9,7 @@ import {
   parseInkFile,
   serializeInkFile,
   toBase64Url,
+  typedTextOf,
   withInkFrontmatter,
 } from "../src/core/ink/codec";
 import {
@@ -68,6 +69,13 @@ function zigzag(x: number, y: number, w: number, h: number, turns: number): Arra
 }
 
 describe("codec", () => {
+  it("finds text typed into a note that only has the ink-notebook property", () => {
+    expect(typedTextOf("---\nink-notebook: 1\n---\n# Today\n\n- [ ] call Anna\n")).toBe("# Today\n\n- [ ] call Anna");
+    expect(typedTextOf("---\nink-notebook: 1\n---\n\n")).toBe("");
+    expect(typedTextOf(serializeInkFile("", { doc: newDoc(), meta: EMPTY_META }))).toBe("");
+    expect(typedTextOf("---\nink-notebook: 1\n---\n```ink-notebook\nHandwritten pages\n```\n")).toBe("");
+  });
+
   it("encodes points compactly and losslessly", () => {
     const s = ink([
       [10.04, 20, 0.2],

@@ -1048,6 +1048,22 @@ textarea.ink-notes-input {
   background: var(--background-primary);
 }
 
+.ink-confirm p {
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
+.ink-broken.ink-typed-note {
+  border-color: var(--interactive-accent);
+}
+
+.ink-broken-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
 /* ---------- Figures on the text page ------------------------------------ */
 
 .ink-figure {

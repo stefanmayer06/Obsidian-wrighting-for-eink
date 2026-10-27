@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cleanSubfolder, homeFolder, isInkSubfolder, joinPath, parentPath, partnerTarget, plainName } from "../src/core/folders";
+import { cleanSubfolder, homeFolder, inkFolderOf, isInkSubfolder, joinPath, pairPaths, parentPath, partnerTarget, plainName, withoutTextSuffix } from "../src/core/folders";
 
 describe("folder helpers", () => {
   it("joins and splits vault paths", () => {
@@ -77,5 +77,29 @@ describe("keeping a pair together on rename/move", () => {
   it("works at the vault root", () => {
     expect(partnerTarget({ role: "text", oldPath: "Week 1.md", newPath: "Week 2.md", partnerPath: "Attachments/Week 1.ink.md" })).toBe("Attachments/Week 2.ink.md");
     expect(partnerTarget({ role: "ink", oldPath: "Attachments/Week 1.ink.md", newPath: "Attachments/Week 2.ink.md", partnerPath: "Week 1.md" })).toBe("Week 2.md");
+  });
+
+  it("knows where the files of an ink page belong", () => {
+    expect(inkFolderOf("Uni/CA", "Attachments")).toBe("Uni/CA/Attachments");
+    expect(inkFolderOf("", "Attachments")).toBe("Attachments");
+    expect(inkFolderOf("Uni/CA/Attachments", "Attachments")).toBe("Uni/CA/Attachments");
+    expect(inkFolderOf("Uni/CA", "")).toBe("Uni/CA");
+    expect(withoutTextSuffix("2026-10-27 (text)")).toBe("2026-10-27");
+    expect(withoutTextSuffix("Week 1 (text 3)")).toBe("Week 1");
+    expect(withoutTextSuffix("Notes (textbook)")).toBe("Notes (textbook)");
+    // a daily note that was the drawing itself, with "(text)" text page next to it
+    expect(pairPaths({ textPath: "2026-10-27 (text).md", drawingPath: "2026-10-27.md", sub: "Attachments" })).toEqual({
+      text: "2026-10-27.md",
+      drawing: "Attachments/2026-10-27.ink.md",
+    });
+    // already in place
+    expect(pairPaths({ textPath: "Uni/Week 1.md", drawingPath: "Uni/Attachments/Week 1.ink.md", sub: "Attachments" })).toEqual({
+      text: "Uni/Week 1.md",
+      drawing: "Uni/Attachments/Week 1.ink.md",
+    });
+    // the text page was renamed: the drawing follows its name
+    expect(pairPaths({ textPath: "Uni/Lecture.md", drawingPath: "Uni/Attachments/Ink 2026-10-27 1122.ink.md", sub: "Attachments" }).drawing).toBe("Uni/Attachments/Lecture.ink.md");
+    // a name that really ends in "(text)" stays
+    expect(pairPaths({ textPath: "Diary (text).md", drawingPath: "Attachments/Diary (text).ink.md", sub: "Attachments" }).text).toBe("Diary (text).md");
   });
 });

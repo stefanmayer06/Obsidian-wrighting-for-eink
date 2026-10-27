@@ -1,9 +1,10 @@
 import { Menu, moment, Notice, normalizePath, Scope, setIcon, TextFileView, TFile, type WorkspaceLeaf } from "obsidian";
 import type InkNotebookPlugin from "../main";
-import { inkDataOf, InkParseError, parseInkFile, serializeInkFile } from "../core/ink/codec";
+import { inkDataOf, InkParseError, parseInkFile, serializeInkFile, typedTextOf } from "../core/ink/codec";
 import type { InkFile, InkMeta, PageBackground } from "../core/ink/model";
 import { paperLabel, paperSize } from "../core/paper";
 import { joinPath } from "../core/folders";
+import { splitFrontmatter } from "../core/transcript";
 import { InkSurface } from "../ink/surface";
 import { Toolbar, type ToolbarPosition } from "../ink/ui/toolbar";
 import { Popover, type MenuSection } from "../ink/ui/popover";
@@ -45,6 +46,8 @@ export class InkView extends TextFileView {
   /** File data that arrived before the view was ready. */
   private pending: { data: string; clear: boolean } | null = null;
   private saveTimer: number | null = null;
+  /** The file is a normal note, not an ink page (see onLoadFile). */
+  private notInk = false;
   /** When the oldest unsaved change was made. */
   private unsavedSince = 0;
 
@@ -185,6 +188,11 @@ export class InkView extends TextFileView {
       this.showBroken(data, e);
       return;
     }
+    if (typedTextOf(data)) {
+      // a normal note that got the ink-notebook property: saving would replace its text
+      this.showTypedNote(data);
+      return;
+    }
     this.broken = null;
     this.errorEl?.remove();
     this.errorEl = null;
@@ -225,6 +233,27 @@ export class InkView extends TextFileView {
     this.errorEl = box;
   }
 
+  /** A note with text in it and the ink-notebook property: it is left as it is until the user decides. */
+  private showTypedNote(data: string): void {
+    this.broken = data;
+    this.errorEl?.remove();
+    const box = this.contentEl.createDiv({ cls: "ink-broken ink-typed-note ink-ui" });
+    box.createEl("h3", { text: "This note has text in it" });
+    box.createEl("p", {
+      text: "It has the ink-notebook property, so it opens as an ink page – but writing here would replace its text. Keep the note as it is and give it an ink page of its own instead: the transcript of your handwriting goes below the text.",
+    });
+    const row = box.createDiv({ cls: "ink-broken-buttons" });
+    const add = row.createEl("button", { text: "Keep the text and add an ink page", cls: "mod-cta" });
+    add.addEventListener("click", () => {
+      const file = this.file;
+      if (!file) return;
+      void this.plugin.switcher.keepTextAndAddInk(file, this.leaf).catch((e) => this.plugin.switcher.reportError("Could not add the ink page", e));
+    });
+    const md = row.createEl("button", { text: "Open as Markdown" });
+    md.addEventListener("click", () => void this.plugin.openAsMarkdown(this.leaf));
+    this.errorEl = box;
+  }
+
   private onChanged(): void {
     this.saveSoon();
     if (this.file) this.plugin.inkChanged(this.file);
@@ -261,7 +290,30 @@ export class InkView extends TextFileView {
   async save(clear?: boolean): Promise<void> {
     // saved now (flipping to the text page, closing): no need to save again later
     this.cancelSave();
+    if (this.notInk) return;
     await super.save(clear);
+  }
+
+  /**
+   * Obsidian opens a note in the tab's current view when that view takes ".md"
+   * files – so a normal note opened in a tab that shows an ink page (a link,
+   * the daily notes plugin) lands here. It is shown as Markdown instead, and
+   * never written by this view.
+   */
+  async onLoadFile(file: TFile): Promise<void> {
+    this.notInk = !(await this.isInkFile(file));
+    if (!this.notInk) return super.onLoadFile(file);
+    const active = this.app.workspace.getMostRecentLeaf() === this.leaf;
+    window.setTimeout(() => {
+      if (this.file === file) void this.leaf.setViewState({ type: "markdown", state: { file: file.path }, active });
+    }, 0);
+  }
+
+  private async isInkFile(file: TFile): Promise<boolean> {
+    if (this.plugin.isInkPath(file.path)) return true;
+    // just written (the property is not in the metadata cache yet)
+    const { frontmatter } = splitFrontmatter(await this.app.vault.cachedRead(file));
+    return /^ink-notebook\s*:/m.test(frontmatter);
   }
 
   /** Metadata for the text page (diagram areas, handwritten links): applied without an undo step. */
@@ -279,7 +331,7 @@ export class InkView extends TextFileView {
   }
 
   get inkFile(): InkFile | null {
-    return this.ready && this.broken === null ? this.surface.file : null;
+    return this.ready && this.broken === null && !this.notInk ? this.surface.file : null;
   }
 
   // ------------------------------------------------------------------ keyboard

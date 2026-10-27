@@ -15,7 +15,10 @@ side-button eraser, the lasso and its action bar, undo, the pen options card,
 adding pages, changing the paper, the page overview, swiping with a finger,
 typed notes, PDF annotation (incl. a rotated page) and export (annotated PDF
 and the notebook as PDF), plugin reload, "Open as Markdown", embedded ink
-pages, converting pages made with the earlier Excalidraw-based versions, and
+pages, ink pages for notes that exist (and notes opened in a tab that shows an
+ink page), daily notes with an ink page, matching up the names of ink and text
+pages, choosing the folder of a new page, converting pages made with the
+earlier Excalidraw-based versions, and
 the e-ink look on a Boox-sized window (toolbar fits).
 
 Linux only (uses Xvfb). Requirements: Node 20+, `xvfb`, the GTK/NSS libraries Electron needs.

@@ -103,7 +103,9 @@ Each ink page is two normal files:
 
 - `Week 1.ink.md` is a Markdown file, so it syncs with Obsidian Sync and every other sync, has properties, and its links (notes linked on the pages, pictures, PDFs) show up as backlinks. Ink Notebook opens it in the ink view; *More → Open as Markdown* shows the file itself. Embedding it in a note (`![[Week 1.ink]]`) shows its pages.
 - The text page links to it (`ink-drawing`) and back (`ink-text`). Renaming or moving one renames/moves the other.
-- New pages go into the folder of the note you're in (or a fixed folder); the ink file goes into a subfolder (`Attachments` by default), so your folders only show your notes.
+- Both files have the same name: `Week 1.md` and `Week 1.ink.md`. A note that is an ink page itself (`Week 1.md` with the `ink-notebook` property) moves into the ink subfolder as `Week 1.ink.md` when its text page is made, so the text page gets its name; **Match up the names of ink and text pages** does the same for pages made before.
+- New pages go into the folder of the note you're in, a fixed folder, or the one you choose each time; the ink file goes into a subfolder (`Attachments` by default), so your folders only show your notes.
+- Any note can get an ink page later (**Add an ink page to this note**): `Note.md` stays as it is, `Attachments/Note.ink.md` is added.
 
 ## Installation
 
@@ -158,7 +160,10 @@ Privacy: only your handwriting strokes are rendered and sent (black on white –
 
 | What | How |
 | --- | --- |
-| New page | Ribbon pencil icon, command **New ink page**, or right-click a folder → *New ink page*. Choose the paper (and name, if enabled) |
+| New page | Ribbon pencil icon, command **New ink page**, or right-click a folder → *New ink page*. Choose the paper (and name, if enabled); the dialog shows the folder – *Change…* puts the page elsewhere (or type the name of a new folder) |
+| Draw on a note you already have | Command **Add an ink page to this note**, or right-click the note (in the file list or the editor) → *Add an ink page*. The note keeps its text and becomes the text page; the transcript goes below its text |
+| Daily notes | *Settings → Pages → Daily notes*: new daily notes come with an ink page (optionally opened to write on). Command **Open today's daily note on the ink page** works with any setting |
+| Names that don't match | Command **Match up the names of ink and text pages** (e.g. `2026-10-27 (text).md` → `2026-10-27.md` with `Attachments/2026-10-27.ink.md`); it lists the renames first |
 | Flip ink ⇄ text | **Text** in the toolbar, the **Ink** bookmark on the text page, or command **Flip between ink and text page** |
 | Transcribe again | *More → Transcribe handwriting now* (normally this happens when you open the text page or leave the ink page) |
 | Start over | *More → Re-transcribe from scratch* discards edits made inside the transcript |
@@ -191,7 +196,7 @@ The two `%% … %%` lines mark the transcript; in Live Preview they are shown as
 ## Settings
 
 - **Writing** – pen side button (erase, lasso, nothing), draw with a finger, pressure sensitivity, scribble to erase, snap shapes, swipe to turn pages, two/three-finger taps, whole page or page width, toolbar position, low-latency drawing.
-- **Pages** – where new pages go (folder of the current note, or a fixed folder), the subfolder for ink files (`Attachments` by default; empty = next to the text page), paper for new pages and whether to choose it every time, ask for a name, open the text page in reading or editing view, keep names in sync on rename/move.
+- **Pages** – where new pages go (folder of the current note, a fixed folder, or ask every time), the subfolder for ink files (`Attachments` by default; empty = next to the text page), paper for new pages and whether to choose it every time, ask for a name, open the text page in reading or editing view, daily notes with an ink page (off / with an ink page / with an ink page opened to write on), match up the names of ink and text pages, keep names in sync on rename/move.
 - **Handwriting recognition** – service (Ink Notebook Cloud or your own Azure key), license key or endpoint and key, API version, language hint, highlight uncertain words, transcribe while writing, how long to wait when flipping, requests per minute, clickable handwritten links, diagram detection sensitivity, offline queue and cache.
 - **Display & e‑ink** – e‑ink mode (automatic / on / off), large touch targets, position of the bookmarks on the text page.
 - **PDF annotation** – how many pages to import without asking, the folder for papers from arXiv (`Papers` by default).
@@ -207,6 +212,8 @@ The two `%% … %%` lines mark the transcript; in Live Preview they are shown as
 - **A table is shown as a picture** – the lines of a table have to be long and fairly straight and cross each other (or nearly touch), and the writing in at least two cells has to be readable.
 - **A box in front of a line did not become a task** – the box has to be closed, about as high as the writing (up to about twice), right in front of the first word and empty or ticked.
 - **Text on the text page is wrong** – just correct it there; your correction stays.
+- **"This note has text in it"** – the note has the `ink-notebook` property (which makes a note open as an ink page) but text instead of handwriting. Nothing is changed until you choose: *Keep the text and add an ink page* removes the property and gives the note its own ink page.
+- **A text page is called "Name (text)"** – its ink page had the name (earlier versions turned a note into an ink page when it was opened in a tab that showed an ink page). Run **Match up the names of ink and text pages**.
 - **"This ink page could not be opened"** – the file was changed in a way Ink Notebook does not understand. It is not touched; *Open as Markdown* to look at it (e.g. a sync conflict).
 - Developer console: `app.plugins.plugins["ink-notebook"].internals` exposes the recognition pipeline and the file reader for debugging.
 

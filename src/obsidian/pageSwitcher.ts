@@ -1,11 +1,11 @@
 import { MarkdownView, Notice, normalizePath, TAbstractFile, TFile, TFolder, type WorkspaceLeaf } from "obsidian";
 import type InkNotebookPlugin from "../main";
 import { normalizePaperSpec, type PaperSpec } from "../core/paper";
-import { cleanSubfolder, homeFolder, joinPath } from "../core/folders";
+import { cleanSubfolder, homeFolder, inkFolderOf, isInkSubfolder, joinPath } from "../core/folders";
 import { newDoc, EMPTY_META, type InkDoc } from "../core/ink/model";
-import { serializeInkFile, withInkFrontmatter } from "../core/ink/codec";
+import { INK_FRONTMATTER_KEY, serializeInkFile, withInkFrontmatter } from "../core/ink/codec";
 import { FM_DRAWING_TO_TEXT, INK_SUFFIX } from "./pairs";
-import { TextPromptModal } from "./modals";
+import { FolderPickModal, TextPromptModal } from "./modals";
 import { PaperPickerModal } from "./paperPicker";
 import { findInkView, INK_VIEW_TYPE, InkView } from "./inkView";
 
@@ -147,11 +147,18 @@ export class PageSwitcher {
     let home: string;
     if (typeof context === "string") home = joinPath(context);
     else if (context instanceof TFolder) home = joinPath(context.path);
-    else if (s.pageLocation === "current") {
+    else if (s.pageLocation !== "fixed") {
+      // "current", and the suggestion when asking
       const file = context instanceof TFile ? context : this.app.workspace.getActiveFile();
       home = file ? this.homeFolderOf(file) : fixed;
     } else home = fixed;
-    return { textFolder: home, inkFolder: sub ? joinPath(home, sub) : home };
+    return { textFolder: home, inkFolder: inkFolderOf(home, sub) };
+  }
+
+  /** Ink subfolders are not offered as places for new pages. */
+  private hideInkFolders(): (path: string) => boolean {
+    const sub = cleanSubfolder(this.plugin.settings.inkSubfolder);
+    return (path) => isInkSubfolder(path, sub);
   }
 
   /** The folder a file "lives in" for new pages (never an ink subfolder). */
@@ -195,7 +202,7 @@ export class PageSwitcher {
   } = {}): Promise<{ drawing: TFile; text: TFile } | null> {
     const settings = this.plugin.settings;
     // decide the folder first: the picker modal changes the active leaf on some platforms
-    const { textFolder, inkFolder } = this.pageFolders(opts.folder ?? opts.context ?? null);
+    let { textFolder } = this.pageFolders(opts.folder ?? opts.context ?? null);
     let name0: string | null = opts.name ?? null;
     let paper = opts.paper ? normalizePaperSpec(opts.paper) : null;
     if (!opts.doc && !paper && settings.askForPaper) {
@@ -203,15 +210,23 @@ export class PageSwitcher {
         mode: "new",
         initial: settings.paper,
         name: !opts.name && settings.askForPageName ? this.defaultPageName() : undefined,
+        folder: textFolder,
+        hideFolder: this.hideInkFolders(),
       });
       if (!choice) return null;
       paper = choice.spec;
       if (choice.name) name0 = choice.name;
+      if (choice.folder !== undefined) textFolder = choice.folder;
       if (choice.makeDefault) {
         settings.paper = { ...choice.spec };
         await this.plugin.saveSettings();
       }
+    } else if (!opts.doc && opts.folder === undefined && settings.pageLocation === "ask") {
+      const picked = await FolderPickModal.pick(this.app, { initial: textFolder, hide: this.hideInkFolders() });
+      if (picked === null) return null;
+      textFolder = picked;
     }
+    const inkFolder = inkFolderOf(textFolder, cleanSubfolder(settings.inkSubfolder));
     name0 ??= await this.choosePageName();
     if (!name0) return null;
     await this.plugin.pairs.ensureFolder(textFolder);
@@ -229,5 +244,66 @@ export class PageSwitcher {
       this.plugin.bookmarks.refresh(leaf);
     }
     return { drawing, text };
+  }
+
+  // ------------------------------------------------------------------ drawing on a note that exists
+
+  private attaching = new Map<string, Promise<TFile | null>>();
+
+  /**
+   * Turn on drawing for a normal note: it gets an ink page next to it (see
+   * PairManager.attachDrawing), which opens in `leaf` unless `open` is false.
+   * `askPaper`: show the paper picker (if it is on in the settings).
+   */
+  addInkToNote(note: TFile, opts: { open?: boolean; leaf?: WorkspaceLeaf; askPaper?: boolean } = {}): Promise<TFile | null> {
+    const running = this.attaching.get(note.path);
+    if (running) return running;
+    const job = this.doAddInk(note, opts).finally(() => this.attaching.delete(note.path));
+    this.attaching.set(note.path, job);
+    return job;
+  }
+
+  private async doAddInk(note: TFile, opts: { open?: boolean; leaf?: WorkspaceLeaf; askPaper?: boolean }): Promise<TFile | null> {
+    const settings = this.plugin.settings;
+    let paper = settings.paper;
+    if (opts.askPaper && settings.askForPaper) {
+      const choice = await PaperPickerModal.pick(this.app, { mode: "attach", initial: paper });
+      if (!choice) return null;
+      paper = choice.spec;
+      if (choice.makeDefault) {
+        settings.paper = { ...choice.spec };
+        await this.plugin.saveSettings();
+      }
+    }
+    // what is typed in the open note is written first: the note gets new properties
+    const editing = this.app.workspace.getActiveViewOfType(MarkdownView);
+    if (editing?.file?.path === note.path) {
+      try {
+        await editing.save();
+      } catch {
+        /* ignore */
+      }
+    }
+    const drawing = await this.plugin.pairs.attachDrawing(note, newDoc(paper));
+    this.plugin.bookmarks.refreshAll();
+    if (opts.open !== false) {
+      const leaf = opts.leaf ?? this.app.workspace.getLeaf(false);
+      await leaf.setViewState({ type: INK_VIEW_TYPE, state: { file: drawing.path }, active: true });
+      this.plugin.bookmarks.refresh(leaf);
+    }
+    return drawing;
+  }
+
+  /**
+   * A note that got the ink-notebook property but has text in it: it stays a
+   * normal note with its text (the property goes) and gets an ink page.
+   */
+  async keepTextAndAddInk(note: TFile, leaf: WorkspaceLeaf): Promise<void> {
+    const settled = this.plugin.pairs.metadataSettled(note);
+    await this.app.fileManager.processFrontMatter(note, (fm: Record<string, unknown>) => {
+      delete fm[INK_FRONTMATTER_KEY];
+    });
+    await settled;
+    await this.addInkToNote(note, { leaf });
   }
 }

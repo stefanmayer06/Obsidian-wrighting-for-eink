@@ -445,6 +445,22 @@ export function serializeInkFile(frontmatter: string, file: InkFile): string {
   );
 }
 
+/**
+ * Text written in a note that has the ink-notebook property but no ink data
+ * yet (the property was added to a normal note): saving it as an ink page
+ * would replace that text. "" when there is none.
+ */
+export function typedTextOf(text: string): string {
+  const { body } = splitFrontmatter(text.replace(/\r\n/g, "\n"));
+  try {
+    if (dataLines(body) !== null) return "";
+  } catch {
+    return "";
+  }
+  const preview = new RegExp("^```" + INK_PREVIEW_LANG + "\\n[\\s\\S]*?\\n```\\s*$", "m");
+  return body.replace(preview, "").trim();
+}
+
 /** The ink data part of a file (to tell real changes from frontmatter edits). */
 export function inkDataOf(text: string): string {
   const { body } = splitFrontmatter(text.replace(/\r\n/g, "\n"));
