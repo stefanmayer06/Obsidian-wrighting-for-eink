@@ -1,7 +1,8 @@
 import { App, normalizePath, TAbstractFile, TFile, TFolder } from "obsidian";
-import { renderRegion } from "../core/transcript";
-import { INK_FRONTMATTER_KEY } from "../core/ink/codec";
-import { cleanSubfolder, homeFolder, joinPath, parentPath, partnerTarget } from "../core/folders";
+import { parseNote, renderRegion } from "../core/transcript";
+import { INK_FRONTMATTER_KEY, serializeInkFile, withInkFrontmatter } from "../core/ink/codec";
+import { EMPTY_META, type InkDoc } from "../core/ink/model";
+import { cleanSubfolder, homeFolder, inkFolderOf, joinPath, pairPaths, parentPath, partnerTarget } from "../core/folders";
 
 /**
  * An "ink page" is a pair of files:
@@ -187,23 +188,153 @@ export class PairManager {
     return `---\n${FM_TEXT_TO_DRAWING}: ${JSON.stringify(`[[${link}]]`)}\n${extra}---\n${top}${renderRegion([], [])}\n\n`;
   }
 
-  /** Create the text page for an existing drawing (and link the drawing back). */
+  /** A normal note: neither an ink page nor the text page of one. */
+  isPlainNote(file: TFile | null | undefined): boolean {
+    return !!file && file.extension === "md" && !this.isDrawing(file) && !this.isTextPage(file);
+  }
+
+  /** A note that can get an ink page: a normal note, or a text page whose ink page is gone. */
+  canAddInk(file: TFile | null | undefined): boolean {
+    return !!file && file.extension === "md" && !this.pairOf(file);
+  }
+
+  /**
+   * Create the text page for an existing drawing (and link the drawing back).
+   * The two files get the same name: `Name.md` in the home folder and
+   * `Name.ink.md` in its ink subfolder.
+   */
   async createTextPage(drawing: TFile, extraFrontmatter: Record<string, string> = {}): Promise<TFile> {
     const existing = this.textFor(drawing);
     if (existing) return existing;
+    const name = drawingBaseName(drawing);
     // a drawing in an ink subfolder gets its text page in the folder above
     const folder = homeFolder(folderOf(drawing), this.sub);
-    let base = drawingBaseName(drawing);
-    let path = normalizePath(joinPath(folder, `${base}.md`));
+    // a note that is the drawing itself ("Week 1.md" with the ink-notebook property)
+    // moves into the ink subfolder as "Week 1.ink.md", so the text page can have its name
+    // (and the links to "Week 1" lead to it)
+    if (!isInkPath(drawing.path)) await this.moveTo(drawing, joinPath(inkFolderOf(folder, this.sub), `${name}${INK_SUFFIX}`), false);
+    let path = normalizePath(joinPath(folder, `${name}.md`));
+    const there = this.fileAt(path);
+    if (there && there.path !== drawing.path && this.isPlainNote(there)) {
+      // a normal note of that name becomes the text page: what is written in it stays
+      await this.makeTextPage(there, drawing);
+      await this.linkDrawingToText(drawing, there);
+      return there;
+    }
     let n = 2;
     while (this.app.vault.getAbstractFileByPath(path)) {
-      base = `${drawingBaseName(drawing)} (text${n > 2 ? " " + n : ""})`;
-      path = normalizePath(joinPath(folder, `${base}.md`));
+      path = normalizePath(joinPath(folder, `${name} (text${n > 2 ? " " + n : ""}).md`));
       n++;
     }
     const text = await this.app.vault.create(path, this.textPageContent(drawing, path, extraFrontmatter));
     await this.linkDrawingToText(drawing, text);
     return text;
+  }
+
+  /**
+   * Turn on drawing for a normal note: it gets an ink page `Name.ink.md` in its
+   * ink subfolder, linked both ways (an ink file of that name that belongs to no
+   * other page is used). The note keeps what is written in it; the transcript of
+   * the handwriting goes below.
+   */
+  async attachDrawing(note: TFile, doc: InkDoc): Promise<TFile> {
+    if (this.pairOf(note)?.role === "ink") throw new Error(`"${note.basename}" is an ink page itself`);
+    const linked = this.isTextPage(note) ? this.drawingFor(note) : null;
+    if (linked) return linked;
+    const inkFolder = inkFolderOf(folderOf(note), this.sub);
+    await this.ensureFolder(inkFolder);
+    let drawing: TFile | null = null;
+    let path = "";
+    for (let n = 1; ; n++) {
+      path = normalizePath(joinPath(inkFolder, `${note.basename}${n > 1 ? ` ${n}` : ""}${INK_SUFFIX}`));
+      const f = this.app.vault.getAbstractFileByPath(path);
+      if (!f) break;
+      if (f instanceof TFile && this.isDrawing(f) && [null, note.path].includes(this.textFor(f)?.path ?? null)) {
+        drawing = f;
+        break;
+      }
+    }
+    if (drawing) await this.linkDrawingToText(drawing, note);
+    else {
+      const fm = withInkFrontmatter("", { [FM_DRAWING_TO_TEXT]: JSON.stringify(`[[${pairLink(note)}]]`) });
+      drawing = await this.app.vault.create(path, serializeInkFile(fm, { doc, meta: EMPTY_META }));
+    }
+    await this.makeTextPage(note, drawing);
+    return drawing;
+  }
+
+  /** Link a note to its drawing and give it the (empty) transcript region below what is written in it. */
+  private async makeTextPage(note: TFile, drawing: TFile): Promise<void> {
+    const settled = this.metadataSettled(note);
+    await this.linkTextToDrawing(note, drawing);
+    await this.app.vault.process(note, (md) => (parseNote(md).hasRegion ? md : `${md.replace(/\s+$/, "")}${md.trim() ? "\n\n" : ""}${renderRegion([], [])}\n`));
+    await settled;
+  }
+
+  /** Resolves when the metadata cache has read `file` again (or after a moment). */
+  metadataSettled(file: TFile, timeoutMs = 2000): Promise<void> {
+    return new Promise((resolve) => {
+      const cache = this.app.metadataCache;
+      const done = () => {
+        window.clearTimeout(timer);
+        cache.offref(ref);
+        resolve();
+      };
+      const ref = cache.on("changed", (f) => {
+        if (f.path === file.path) done();
+      });
+      const timer = window.setTimeout(done, timeoutMs);
+    });
+  }
+
+  /**
+   * The renames that make an ink page's files match (see pairPaths): the drawing
+   * first, as it may have the name the text page should get. Empty when they match.
+   */
+  tidyPlan(drawing: TFile): Array<{ file: TFile; to: string }> {
+    const text = this.textFor(drawing);
+    if (!text) return [];
+    const want = pairPaths({ textPath: text.path, drawingPath: drawing.path, sub: this.sub });
+    const plan: Array<{ file: TFile; to: string }> = [];
+    if (normalizePath(want.drawing) !== drawing.path) plan.push({ file: drawing, to: normalizePath(want.drawing) });
+    if (normalizePath(want.text) !== text.path) plan.push({ file: text, to: normalizePath(want.text) });
+    return plan;
+  }
+
+  /** Rename/move an ink page's files so that they match. Returns how many files moved. */
+  async tidy(drawing: TFile): Promise<number> {
+    const text = this.textFor(drawing);
+    // links to a drawing named like a note ("2026-10-27") mean that note: they stay, and lead to the text page
+    const keepLinks = !isInkPath(drawing.path);
+    let moved = 0;
+    for (const { file, to } of this.tidyPlan(drawing)) {
+      if (file.path !== to && (await this.moveTo(file, to, !(keepLinks && file === drawing)))) moved++;
+    }
+    if (text && moved > 0) {
+      await this.linkTextToDrawing(text, drawing);
+      await this.linkDrawingToText(drawing, text);
+    }
+    return moved;
+  }
+
+  /**
+   * Rename/move one file of a pair without the rename handler moving its
+   * partner. `updateLinks` false: links to the old name are left as they are.
+   * False if the place is taken.
+   */
+  private async moveTo(file: TFile, target: string, updateLinks = true): Promise<boolean> {
+    const to = normalizePath(target);
+    if (file.path === to) return true;
+    if (this.app.vault.getAbstractFileByPath(to)) return false;
+    await this.ensureFolder(parentPath(to));
+    this.renaming.add(to);
+    try {
+      if (updateLinks) await this.app.fileManager.renameFile(file, to);
+      else await this.app.vault.rename(file, to);
+    } finally {
+      window.setTimeout(() => this.renaming.delete(to), 2000);
+    }
+    return true;
   }
 
   private async setLink(file: TFile, key: string, target: TFile): Promise<void> {

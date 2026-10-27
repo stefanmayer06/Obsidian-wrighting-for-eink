@@ -4,6 +4,7 @@ import { paperLabel } from "../core/paper";
 import { PaperPickerModal } from "./paperPicker";
 import { currentDevice } from "./einkMode";
 import { renderRecognitionSettings } from "./recognitionSettings";
+import { DAILY_INK_OPTIONS, type DailyInk } from "../settings";
 
 /**
  * First-run setup: device and pen (e-ink, finger drawing, side button), optional
@@ -95,10 +96,22 @@ export class SetupWizard extends Modal {
       )
       .addDropdown((d) =>
         d
-          .addOptions({ current: "Folder of the current note", fixed: `Always "${s.folder || "Ink"}"` })
+          .addOptions({ current: "Folder of the current note", fixed: `Always "${s.folder || "Ink"}"`, ask: "Ask every time" })
           .setValue(s.pageLocation)
           .onChange(async (v) => {
-            s.pageLocation = v === "fixed" ? "fixed" : "current";
+            s.pageLocation = v === "fixed" || v === "ask" ? v : "current";
+            await this.plugin.saveSettings();
+          }),
+      );
+    new Setting(step3)
+      .setName("Daily notes")
+      .setDesc("New daily notes (Daily notes core plugin or Periodic Notes) can come with an ink page.")
+      .addDropdown((d) =>
+        d
+          .addOptions(DAILY_INK_OPTIONS)
+          .setValue(s.dailyInk)
+          .onChange(async (v) => {
+            s.dailyInk = v as DailyInk;
             await this.plugin.saveSettings();
           }),
       );

@@ -755,6 +755,149 @@ steps.asMarkdown = async () => {
   check("an embedded ink page shows its pages", emb === 2, emb);
 };
 
+steps.notes = async () => {
+  console.log("\n▶ ink pages for notes that exist, daily notes, matching names, choosing the folder");
+  await closeModals();
+  await setSettings({ askForPaper: false, pageLocation: "fixed" });
+
+  // a daily note that is its own ink page (earlier versions made one when a note opened in a tab showing an ink page)
+  const flipped = await ev(async () => {
+    const p = __t.plugin();
+    const fence = "\u0060\u0060\u0060";
+    const ink = [
+      "---", "ink-notebook: 1", "---", `${fence}ink-notebook`, "Handwritten pages", fence, "", "%%", `${fence}ink-data`,
+      'H {"v":1,"regions":[],"handLinks":{}}',
+      'P {"id":"pg0","w":1000,"h":1414,"bg":{"kind":"paper","paper":{"style":"lined","spacing":"normal","color":"white","orientation":"portrait"}}}',
+      "S st1 b 000000 2 0 rA6mCQ4NDxgJGCQLYDQBwAEgEfABEguAAQIKC1McN10",
+      fence, "%%", "",
+    ].join("\n");
+    if (!app.vault.getAbstractFileByPath("Days")) await app.vault.createFolder("Days");
+    const f = await app.vault.create("Days/2026-01-02.md", ink);
+    await app.vault.create("Days/Diary.md", "Yesterday: [[2026-01-02]]\n");
+    await __t.sleep(800);
+    const leaf = app.workspace.getLeaf(false);
+    await leaf.openFile(f);
+    await __t.waitFor(() => leaf.view.inkFile, 8000, "ink view");
+    await p.switcher.toText(leaf, f);
+    await __t.waitFor(() => app.vault.getAbstractFileByPath("Days/Attachments/2026-01-02.ink.md"), 8000, "moved");
+    const t = app.vault.getAbstractFileByPath("Days/2026-01-02.md");
+    const link = app.metadataCache.getFirstLinkpathDest("2026-01-02", "Days/Diary.md")?.path;
+    return { leaf: `${leaf.view.getViewType()} ${leaf.view.file?.path}`, drawing: p.pairs.drawingFor(t)?.path, strokes: (await __t.read("Days/Attachments/2026-01-02.ink.md")).split("\n").filter((l) => l.startsWith("S ")).length, diary: await __t.read("Days/Diary.md"), link };
+  });
+  check("flipping a note that is its own ink page gives Name.md and Attachments/Name.ink.md", flipped.leaf === "markdown Days/2026-01-02.md" && flipped.drawing === "Days/Attachments/2026-01-02.ink.md" && flipped.strokes > 0, JSON.stringify(flipped));
+  check("links to its name stay and lead to the text page", flipped.diary === "Yesterday: [[2026-01-02]]\n" && flipped.link === "Days/2026-01-02.md", JSON.stringify(flipped));
+
+  // ink pages whose names do not match are matched up (after asking)
+  const matched = await ev(async () => {
+    const p = __t.plugin();
+    const ink = p.internals.serializeInkFile('---\nink-notebook: 1\nink-text: "[[Days/2026-01-03 (text)]]"\n---\n', { doc: { pages: [{ id: "pg1", w: 1000, h: 1414, bg: { kind: "paper", paper: { style: "lined", spacing: "normal", color: "white", orientation: "portrait" } }, strokes: [], texts: [], images: [], links: [], figures: [] }] }, meta: { regions: [], handLinks: {} } });
+    await app.vault.create("Days/2026-01-03.md", ink);
+    await app.vault.create("Days/2026-01-03 (text).md", '---\nink-drawing: "[[Days/2026-01-03]]"\n---\nTyped.\n\n%% ink-notebook:start %%\n%% ink-notebook:end v1 %%\n');
+    await app.vault.create("Days/Links.md", "See [[2026-01-03 (text)]] and [[2026-01-03]].\n");
+    await __t.sleep(1000);
+    const job = p.matchUpPages();
+    const dialog = await __t.waitFor(() => document.querySelector(".ink-confirm")?.innerText, 5000, "dialog");
+    [...document.querySelectorAll(".ink-confirm button")].find((b) => b.textContent === "Rename").click();
+    await job;
+    await __t.sleep(800);
+    const t = app.vault.getAbstractFileByPath("Days/2026-01-03.md");
+    return { dialog: dialog.includes("Days/2026-01-03 (text).md → Days/2026-01-03.md"), drawing: t && p.pairs.drawingFor(t)?.path, text: t && (await app.vault.read(t)).includes("Typed."), links: await __t.read("Days/Links.md") };
+  });
+  check("matching up renames the pair and links lead to the text page", matched.dialog && matched.drawing === "Days/Attachments/2026-01-03.ink.md" && matched.text && matched.links === "See [[2026-01-03]] and [[2026-01-03]].\n", JSON.stringify(matched));
+
+  // drawing on a note that exists
+  const added = await ev(async () => {
+    const p = __t.plugin();
+    const f = await app.vault.create("Days/Meeting.md", "---\ntags: [meeting]\n---\n# Meeting\n\n- budget\n");
+    const leaf = app.workspace.getLeaf(false);
+    await leaf.openFile(f);
+    await __t.sleep(500);
+    app.commands.executeCommandById("ink-notebook:add-ink-to-note");
+    await __t.waitFor(() => leaf.view.getViewType() === "ink-notebook" && leaf.view.inkFile, 8000, "ink page");
+    return { leaf: leaf.view.file?.path, text: await app.vault.read(f), drawing: p.pairs.drawingFor(f)?.path };
+  });
+  check(
+    "a note gets an ink page next to it and keeps its text",
+    added.leaf === "Days/Attachments/Meeting.ink.md" && added.drawing === added.leaf && /# Meeting\n\n- budget\n\n%% ink-notebook:start %%/.test(added.text) && added.text.includes("tags:"),
+    JSON.stringify(added),
+  );
+
+  // a normal note opened in a tab that shows an ink page is shown as Markdown and left alone
+  const foreign = await ev(async () => {
+    const f = await app.vault.create("Days/Plain.md", "# Plain\n\nimportant text\n");
+    const leaf = app.workspace.getMostRecentLeaf();
+    await leaf.openFile(f);
+    await __t.waitFor(() => leaf.view.getViewType() === "markdown", 5000, "markdown");
+    await leaf.openFile(app.vault.getAbstractFileByPath("Welcome.md"));
+    await __t.sleep(800);
+    return { text: await app.vault.read(f) };
+  });
+  check("a note opened in a tab showing an ink page opens as Markdown and is not changed", foreign.text === "# Plain\n\nimportant text\n", JSON.stringify(foreign));
+
+  // a note with the ink-notebook property and text in it
+  const typed = await ev(async () => {
+    const p = __t.plugin();
+    const f = await app.vault.create("Days/Shopping.md", "---\nink-notebook: 1\n---\n# Shopping\n\n- milk\n");
+    await __t.waitFor(() => app.metadataCache.getFileCache(f)?.frontmatter, 5000, "properties read");
+    const leaf = app.workspace.getLeaf(false);
+    await leaf.openFile(f);
+    const panel = await __t.waitFor(() => document.querySelector(".workspace-leaf.mod-active .ink-typed-note"), 5000, "panel");
+    await leaf.view.save();
+    const kept = (await app.vault.read(f)).includes("- milk");
+    [...panel.querySelectorAll("button")].find((b) => b.textContent.startsWith("Keep the text")).click();
+    await __t.waitFor(() => leaf.view.file?.path === "Days/Attachments/Shopping.ink.md" && leaf.view.inkFile, 8000, "ink page");
+    const text = await app.vault.read(f);
+    const fm = app.metadataCache.getFileCache(f)?.frontmatter ?? {};
+    return { kept, text: text.includes("- milk"), fm: !("ink-notebook" in fm) && "ink-drawing" in fm, drawing: p.pairs.drawingFor(f)?.path };
+  });
+  check("a note with the ink-notebook property and text keeps its text and gets an ink page", typed.kept && typed.text && typed.fm && typed.drawing === "Days/Attachments/Shopping.ink.md", JSON.stringify(typed));
+
+  // daily notes come with an ink page that opens to write on
+  await setSettings({ dailyInk: "open" });
+  const daily = await ev(async () => {
+    const p = __t.plugin();
+    const dn = app.internalPlugins.plugins["daily-notes"];
+    if (!dn.enabled) await dn.enable();
+    dn.instance.options = { folder: "Journal", format: "YYYY-MM-DD" };
+    if (!app.vault.getAbstractFileByPath("Journal")) await app.vault.createFolder("Journal");
+    const today = `Journal/${window.moment().format("YYYY-MM-DD")}.md`;
+    app.commands.executeCommandById("daily-notes");
+    const leaf = await __t.waitFor(() => app.workspace.getLeavesOfType("ink-notebook").find((l) => l.view.file?.path.startsWith("Journal/Attachments/") && l.view.inkFile), 10000, "daily ink page");
+    const note = app.vault.getAbstractFileByPath(today);
+    // opening it again makes no second ink page
+    app.commands.executeCommandById("daily-notes");
+    await __t.sleep(2500);
+    const inkFiles = app.vault.getMarkdownFiles().filter((f) => f.path.startsWith("Journal/Attachments/")).length;
+    // the command opens it on the ink page too
+    await app.workspace.getLeaf(false).openFile(app.vault.getAbstractFileByPath("Welcome.md"));
+    await __t.sleep(300);
+    app.commands.executeCommandById("ink-notebook:open-today-ink");
+    await __t.waitFor(() => __t.view()?.getViewType() === "ink-notebook" && __t.view().file?.path.startsWith("Journal/Attachments/"), 8000, "today");
+    await dn.disable();
+    return { leaf: leaf.view.file.path, drawing: note && p.pairs.drawingFor(note)?.path, inkFiles };
+  });
+  await setSettings({ dailyInk: "off" });
+  check("a new daily note gets an ink page, which opens to write on", daily.leaf === daily.drawing && daily.inkFiles === 1, JSON.stringify(daily));
+
+  // choosing the folder of a new page
+  await setSettings({ pageLocation: "ask" });
+  const asked = await ev(async () => {
+    const p = __t.plugin();
+    const job = p.switcher.createPage({ name: "Asked" });
+    const input = await __t.waitFor(() => document.querySelector(".prompt-input"), 5000, "folder picker");
+    input.value = "Projects/New one";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    await __t.sleep(300);
+    const offered = document.querySelector(".suggestion-item.is-selected")?.innerText;
+    document.querySelector(".suggestion-item.is-selected").click();
+    const r = await job;
+    return { offered, text: r?.text.path, drawing: r?.drawing.path };
+  });
+  await setSettings({ pageLocation: "fixed" });
+  check("asking for the folder offers a new one and puts the page there", asked.offered === "New folder: Projects/New one" && asked.text === "Projects/New one/Asked.md" && asked.drawing === "Projects/New one/Attachments/Asked.ink.md", JSON.stringify(asked));
+  await closeModals();
+};
+
 steps.migrate = async () => {
   console.log("\n▶ convert an ink page made with Excalidraw");
   const elements = [
@@ -817,7 +960,7 @@ steps.eink = async () => {
   await setWindow(820, 1180);
 };
 
-const order = ["setup", "createPage", "write", "speed", "flipToText", "flipToInk", "tools", "pages", "typedNotes", "pdf", "papers", "reload", "asMarkdown", "migrate", "eink"];
+const order = ["setup", "createPage", "write", "speed", "flipToText", "flipToInk", "tools", "pages", "typedNotes", "pdf", "papers", "reload", "asMarkdown", "notes", "migrate", "eink"];
 const run = only ? ["setup", only] : order;
 for (const name of run) {
   try {

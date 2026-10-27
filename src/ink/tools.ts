@@ -2,10 +2,10 @@ import { containsPoint, distanceToSegment, inflate, type Pt, type Rect } from ".
 import { eraseFromStroke, isScribble, scribbleTargets, strokeErase, strokesInLasso } from "../core/ink/erase";
 import { figureBounds, imageBounds, linkBounds, rectInside, strokeBounds, strokeDistance, textBounds, unionRect } from "../core/ink/geom";
 import { addItems, EMPTY_SELECTION, makeStroke, q, qp, replaceItems, type Items, type Page, type PenType, type Selection, type Stroke } from "../core/ink/model";
-import { StrokeBuilder } from "../core/ink/pens";
+import { StrokeBuilder, type Segment } from "../core/ink/pens";
 import { recognizeShape, shapeFromDrag } from "../core/ink/shapes";
 import { apply, canRotate, IDENTITY, isIdentity, itemsBounds, rotation, scaling, transformItems, translation, type Matrix } from "../core/ink/transform";
-import { drawFigure, drawImageItem, drawLink, drawStroke, drawText } from "./render";
+import { drawFigure, drawImageItem, drawLink, drawStroke, drawText, segmentPath } from "./render";
 import type { InkSurface } from "./surface";
 import type { ToolId } from "./types";
 
@@ -57,8 +57,14 @@ class PenSession implements ToolSession {
   private pts: number[] = [];
   private lastX = NaN;
   private lastY = NaN;
+  /** Pieces of pen ink not drawn yet (drawn together, once per pen move). */
+  private pending: Segment[] = [];
+  /** The highlighter so far (it is one width and colour, so one path). */
+  private markerPath: Path2D | null = null;
   private holdTimer: number | null = null;
   private holdAnchor: { cx: number; cy: number } | null = null;
+  /** When the pen last moved away from the hold anchor. */
+  private holdSince = 0;
   private snapped: Stroke | null = null;
   private readonly penType: PenType;
   private readonly color: string;
@@ -89,34 +95,77 @@ class PenSession implements ToolSession {
     this.pts.push(x, y, pr);
     this.lastX = x;
     this.lastY = y;
-    if (this.marker) return;
     const seg = this.builder.add(x, y, pr);
-    if (seg) this.s.drawLive(seg);
+    if (!seg) return;
+    if (!this.marker) {
+      this.pending.push(seg);
+      return;
+    }
+    if (!this.markerPath) {
+      this.markerPath = new Path2D();
+      this.markerPath.moveTo(seg.a.x, seg.a.y);
+    }
+    segmentPath(this.markerPath, seg);
+  }
+
+  /** Draw the pen ink that arrived since the last call. */
+  private flush(): void {
+    if (this.pending.length === 0) return;
+    this.s.drawLive(this.pending);
+    this.pending = [];
   }
 
   private stroke(): Stroke {
     return makeStroke({ pen: this.penType, color: this.color, width: this.width, pts: Float32Array.from(this.pts) });
   }
 
-  /** The highlighter is shown on the preview canvas (multiply-blended) until it is finished. */
+  /**
+   * The highlighter is shown on the preview canvas (multiply-blended) until it
+   * is finished. Its path grows piece by piece; it is drawn exactly like the
+   * finished stroke will be.
+   */
   private redrawMarker(): void {
     if (!this.marker || this.pts.length === 0) return;
     const ctx = this.s.wetContext();
-    drawStroke(ctx, this.stroke());
+    const end = this.builder.end();
+    const path = this.markerPath ? new Path2D(this.markerPath) : new Path2D();
+    if (end) {
+      if (!this.markerPath) path.moveTo(end.a.x, end.a.y);
+      segmentPath(path, end);
+    }
+    ctx.globalCompositeOperation = "multiply";
+    ctx.strokeStyle = end?.color ?? this.color;
+    ctx.lineWidth = end?.w ?? this.width;
+    ctx.stroke(path);
+    ctx.globalCompositeOperation = "source-over";
   }
 
-  /** "Hold to snap": when the pen rests at the end of a stroke, it becomes a clean shape. */
+  /**
+   * "Hold to snap": when the pen rests at the end of a stroke, it becomes a
+   * clean shape. One timer per stroke: it looks again when it fires, instead of
+   * being restarted on every pen move.
+   */
   private armHold(p: InputPt): void {
     if (!this.s.settings.holdToShape || this.snapped) return;
     if (this.holdAnchor && Math.hypot(p.cx - this.holdAnchor.cx, p.cy - this.holdAnchor.cy) < HOLD_SLOP_PX) return;
     this.holdAnchor = { cx: p.cx, cy: p.cy };
-    if (this.holdTimer !== null) window.clearTimeout(this.holdTimer);
-    this.holdTimer = window.setTimeout(() => this.snap(), HOLD_MS);
+    this.holdSince = performance.now();
+    if (this.holdTimer === null) this.holdTimer = window.setTimeout(() => this.holdCheck(), HOLD_MS);
+  }
+
+  private holdCheck(): void {
+    const left = HOLD_MS - (performance.now() - this.holdSince);
+    if (left > 5) {
+      this.holdTimer = window.setTimeout(() => this.holdCheck(), left);
+      return;
+    }
+    this.holdTimer = null;
+    this.snap();
   }
 
   private snap(): void {
-    this.holdTimer = null;
     if (this.pts.length < 12) return;
+    this.flush();
     const live = this.stroke();
     const shape = recognizeShape(live);
     if (!shape) return;
@@ -134,6 +183,7 @@ class PenSession implements ToolSession {
   move(points: InputPt[]): void {
     if (this.snapped) return;
     for (const p of points) this.add(p);
+    this.flush();
     this.redrawMarker();
     const last = points[points.length - 1];
     if (last) this.armHold(last);
@@ -145,7 +195,8 @@ class PenSession implements ToolSession {
     if (last && !this.snapped) this.add(last);
     if (!this.marker && !this.snapped) {
       const seg = this.builder.end();
-      if (seg) this.s.drawLive(seg);
+      if (seg) this.pending.push(seg);
+      this.flush();
     }
     if (this.pts.length === 0) return;
     const stroke = this.snapped ?? this.stroke();

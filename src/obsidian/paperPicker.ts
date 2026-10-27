@@ -9,6 +9,8 @@ import {
   type PaperSpec,
   type PaperStyle,
 } from "../core/paper";
+import { FolderPickModal } from "./modals";
+
 export type PagePosition = "after" | "before" | "end";
 
 /**
@@ -16,13 +18,18 @@ export type PagePosition = "after" | "before" | "end";
  * page previews plus line spacing, colour and orientation.
  */
 
-export type PaperPickerMode = "new" | "add" | "change" | "default";
+/** new: a new ink page; attach: an ink page for a note that exists. */
+export type PaperPickerMode = "new" | "attach" | "add" | "change" | "default";
 
 export interface PaperPickerOptions {
   mode: PaperPickerMode;
   initial: PaperSpec;
   /** Also ask for the page name (new pages), pre-filled with this. */
   name?: string;
+  /** Show where the page goes (vault path, "" = root), with a button to choose another folder. */
+  folder?: string;
+  /** Folders not to offer (ink subfolders). */
+  hideFolder?: (path: string) => boolean;
   /** Offer "after / before this page" (adding to a page that already has pages). */
   canInsert?: boolean;
 }
@@ -30,6 +37,8 @@ export interface PaperPickerOptions {
 export interface PaperChoice {
   spec: PaperSpec;
   name?: string;
+  /** The folder chosen for the page (when `folder` was given). */
+  folder?: string;
   position: PagePosition;
   /** Remember the paper for new pages. */
   makeDefault: boolean;
@@ -37,6 +46,7 @@ export interface PaperChoice {
 
 const TITLES: Record<PaperPickerMode, string> = {
   new: "New ink page",
+  attach: "Add an ink page to this note",
   add: "Add a page",
   change: "Change the paper of this page",
   default: "Paper for new pages",
@@ -44,6 +54,7 @@ const TITLES: Record<PaperPickerMode, string> = {
 
 const CONFIRM: Record<PaperPickerMode, string> = {
   new: "Create page",
+  attach: "Add ink page",
   add: "Add page",
   change: "Change paper",
   default: "Use this paper",
@@ -67,6 +78,7 @@ interface Segment {
 export class PaperPickerModal extends Modal {
   private spec: PaperSpec;
   private name: string | undefined;
+  private folder: string | undefined;
   private position: PagePosition;
   private makeDefault = false;
   private done = false;
@@ -82,6 +94,7 @@ export class PaperPickerModal extends Modal {
     super(app);
     this.spec = normalizePaperSpec(opts.initial);
     this.name = opts.name;
+    this.folder = opts.folder;
     this.position = opts.mode === "add" && opts.canInsert ? "after" : "end";
   }
 
@@ -107,6 +120,22 @@ export class PaperPickerModal extends Modal {
         window.setTimeout(() => t.inputEl.select(), 50);
       });
       s.settingEl.addClass("ink-paper-name-row");
+    }
+
+    if (this.folder !== undefined) {
+      const label = (f: string) => f || "/ (vault root)";
+      const row = new Setting(contentEl)
+        .setName("Folder")
+        .setDesc(label(this.folder))
+        .addButton((b) =>
+          b.setButtonText("Change…").onClick(async () => {
+            const picked = await FolderPickModal.pick(this.app, { initial: this.folder ?? "", hide: this.opts.hideFolder });
+            if (picked === null) return;
+            this.folder = picked;
+            row.setDesc(label(picked));
+          }),
+        );
+      row.settingEl.addClass("ink-paper-folder-row");
     }
 
     this.grid = contentEl.createDiv({ cls: "ink-paper-grid", attr: { role: "listbox", "aria-label": "Paper" } });
@@ -203,7 +232,7 @@ export class PaperPickerModal extends Modal {
       this.done = false;
       return;
     }
-    this.resolve(ok ? { spec: this.spec, name: name || undefined, position: this.position, makeDefault: this.makeDefault } : null);
+    this.resolve(ok ? { spec: this.spec, name: name || undefined, folder: this.folder, position: this.position, makeDefault: this.makeDefault } : null);
     this.close();
   }
 

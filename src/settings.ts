@@ -14,8 +14,16 @@ export type EinkMode = "auto" | "on" | "off";
 export type BookmarkPosition = "top" | "middle" | "bottom";
 export type TextViewMode = "reading" | "editing" | "keep";
 export type DiagramSensitivity = "low" | "normal" | "high";
-/** current: the folder of the note you are in; fixed: always `folder`. */
-export type PageLocation = "current" | "fixed";
+/** current: the folder of the note you are in; fixed: always `folder`; ask: choose for every page. */
+export type PageLocation = "current" | "fixed" | "ask";
+/** What new daily notes get: nothing, an ink page, or an ink page that opens right away. */
+export type DailyInk = "off" | "attach" | "open";
+
+export const DAILY_INK_OPTIONS: Record<DailyInk, string> = {
+  off: "Without an ink page",
+  attach: "With an ink page",
+  open: "With an ink page, opened to write on",
+};
 
 export interface InkSettings {
   /** Setup wizard completed (or dismissed). */
@@ -34,6 +42,7 @@ export interface InkSettings {
   textViewMode: TextViewMode;
   askForPageName: boolean;
   keepNamesInSync: boolean;
+  dailyInk: DailyInk;
 
   // ---- handwriting recognition ----
   ocrProvider: OcrProvider;
@@ -103,6 +112,7 @@ export const DEFAULT_SETTINGS: InkSettings = {
   textViewMode: "reading",
   askForPageName: false,
   keepNamesInSync: true,
+  dailyInk: "off",
 
   ocrProvider: "azure",
   cloudLicenseKey: "",
@@ -168,7 +178,7 @@ export function loadSettings(raw: unknown): InkSettings {
   const version = numberIn(r.settingsVersion, 1, SETTINGS_VERSION, 1);
   return {
     setupDone: bool(r.setupDone, d.setupDone),
-    pageLocation: oneOf(r.pageLocation, ["current", "fixed"] as const, d.pageLocation),
+    pageLocation: oneOf(r.pageLocation, ["current", "fixed", "ask"] as const, d.pageLocation),
     folder: str(r.folder, d.folder).replace(/^\/+|\/+$/g, ""),
     inkSubfolder: cleanSubfolder(str(r.inkSubfolder, d.inkSubfolder)),
     // older versions stored only the style
@@ -177,6 +187,7 @@ export function loadSettings(raw: unknown): InkSettings {
     textViewMode: oneOf(r.textViewMode, ["reading", "editing", "keep"] as const, d.textViewMode),
     askForPageName: bool(r.askForPageName, d.askForPageName),
     keepNamesInSync: bool(r.keepNamesInSync, d.keepNamesInSync),
+    dailyInk: oneOf(r.dailyInk, ["off", "attach", "open"] as const, d.dailyInk),
 
     ocrProvider: oneOf(r.ocrProvider, ["cloud", "azure"] as const, d.ocrProvider),
     cloudLicenseKey: str(r.cloudLicenseKey, d.cloudLicenseKey).trim(),

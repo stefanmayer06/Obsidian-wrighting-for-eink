@@ -1,4 +1,4 @@
-import { debounce, Menu, Notice, Plugin, TAbstractFile, TFile, TFolder, type WorkspaceLeaf } from "obsidian";
+import { debounce, MarkdownView, Menu, Notice, Plugin, TAbstractFile, TFile, TFolder, type WorkspaceLeaf } from "obsidian";
 import { isOcrConfigured, loadSettings, type InkSettings } from "./settings";
 import { isInkPath, PairManager } from "./obsidian/pairs";
 import { OcrService } from "./obsidian/ocrService";
@@ -19,6 +19,8 @@ import { migrateExcalidrawPages } from "./obsidian/migrate";
 import { transcriptEditorExtension } from "./obsidian/editorExtension";
 import { PaperService } from "./obsidian/papers";
 import { PaperSearchModal } from "./obsidian/paperSearch";
+import { DailyInk } from "./obsidian/dailyNotes";
+import { ConfirmModal } from "./obsidian/modals";
 import { classifyScene } from "./core/classify";
 import { planOcrUnits } from "./core/rasterPlan";
 import { layoutTranscript } from "./core/layout";
@@ -37,6 +39,8 @@ export default class InkNotebookPlugin extends Plugin {
   images!: VaultImages;
   /** Papers from arXiv. */
   papers!: PaperService;
+  /** Daily notes that come with an ink page. */
+  daily!: DailyInk;
   /** The page each notebook was last open at. */
   readonly lastPage = new Map<string, number>();
 
@@ -51,6 +55,7 @@ export default class InkNotebookPlugin extends Plugin {
     this.settings = loadSettings(await this.loadData());
     this.images = new VaultImages(this.app);
     this.papers = new PaperService(this);
+    this.daily = new DailyInk(this);
     this.pairs = new PairManager(this.app, () => this.settings.inkSubfolder);
     this.ocr = new OcrService(
       this.app.vault.adapter,
@@ -104,6 +109,7 @@ export default class InkNotebookPlugin extends Plugin {
     this.registerEvent(this.app.workspace.on("active-leaf-change", onLayout));
     this.registerEvent(this.app.workspace.on("file-open", onLayout));
     this.registerEvent(this.app.workspace.on("file-open", (file) => this.refreshStaleTextPage(file)));
+    this.registerEvent(this.app.workspace.on("file-open", (file) => this.daily.onOpen(file)));
     this.registerEvent(this.app.workspace.on("css-change", () => this.applyInkSettings()));
     this.registerEvent(
       this.app.metadataCache.on("changed", (file) => {
@@ -416,6 +422,48 @@ export default class InkNotebookPlugin extends Plugin {
     }
   }
 
+  // ------------------------------------------------------------------ matching up pages
+
+  /**
+   * Rename ink pages whose two files do not match – e.g. a daily note that was
+   * the drawing itself ("2026-10-27.md") with its text page "2026-10-27 (text).md":
+   * afterwards the text page is "2026-10-27.md" and the drawing
+   * "Attachments/2026-10-27.ink.md".
+   */
+  async matchUpPages(): Promise<void> {
+    const plans = this.app.vault
+      .getMarkdownFiles()
+      .filter((f) => this.pairs.isDrawing(f))
+      .map((drawing) => ({ drawing, moves: this.pairs.tidyPlan(drawing) }))
+      .filter((p) => p.moves.length > 0);
+    if (plans.length === 0) {
+      new Notice("Every ink page already has the name of its text page.");
+      return;
+    }
+    const moves = plans.flatMap((p) => p.moves);
+    const examples = moves
+      .slice(0, 4)
+      .map((m) => `${m.file.path} → ${m.to}`)
+      .join("\n");
+    const ok = await ConfirmModal.ask(this.app, {
+      title: `Match up ${plans.length} ink page${plans.length === 1 ? "" : "s"}?`,
+      text: `${moves.length} file${moves.length === 1 ? " is" : "s are"} renamed or moved, so that each text page "Name.md" has its ink page "Name.ink.md" in the ink subfolder next to it. Links to a page keep working.\n\n${examples}${moves.length > 4 ? "\n…" : ""}`,
+      confirm: "Rename",
+    });
+    if (!ok) return;
+    let moved = 0;
+    for (const p of plans) {
+      try {
+        moved += await this.pairs.tidy(p.drawing);
+      } catch (e) {
+        console.warn("Ink Notebook: could not match up", p.drawing.path, e);
+      }
+    }
+    const skipped = moves.length - moved;
+    new Notice(`Ink Notebook: renamed ${moved} file${moved === 1 ? "" : "s"}.${skipped > 0 ? ` ${skipped} could not be renamed: a file of that name exists.` : ""}`, 8000);
+    this.bookmarks.refreshAll();
+  }
+
   // ------------------------------------------------------------------ commands
 
   private activeLeafFile(): { leaf: WorkspaceLeaf; file: TFile } | null {
@@ -498,6 +546,29 @@ export default class InkNotebookPlugin extends Plugin {
         if (!checking) run(this.switcher.openSideBySide(a.leaf), "Could not open the pages");
         return true;
       },
+    });
+    this.addCommand({
+      id: "add-ink-to-note",
+      name: "Add an ink page to this note",
+      icon: "pencil-line",
+      checkCallback: (checking) => {
+        const a = this.activeLeafFile();
+        if (!a || a.leaf.view instanceof InkView || !this.pairs.canAddInk(a.file)) return false;
+        if (!checking) run(this.switcher.addInkToNote(a.file, { leaf: a.leaf, askPaper: true }), "Could not add the ink page");
+        return true;
+      },
+    });
+    this.addCommand({
+      id: "open-today-ink",
+      name: "Open today's daily note on the ink page",
+      icon: "calendar-days",
+      callback: () => run(this.daily.openToday(), "Could not open today's ink page"),
+    });
+    this.addCommand({
+      id: "match-up-pages",
+      name: "Match up the names of ink and text pages",
+      icon: "link-2",
+      callback: () => run(this.matchUpPages(), "Could not rename the pages"),
     });
     onInk("add-paper-page", "Add a page… (choose paper and position)", "file-plus-2", (v) => v.addPageInteractive());
     onInk("add-page-after", "Add a page after this one (same paper)", "file-plus-2", (v) => v.surface.addPage("after"));
@@ -582,6 +653,19 @@ export default class InkNotebookPlugin extends Plugin {
 
   private registerFileMenus(): void {
     this.registerEvent(
+      this.app.workspace.on("editor-menu", (menu, _editor, info) => {
+        const file = info.file;
+        if (!file || !this.pairs.canAddInk(file)) return;
+        const leaf = info instanceof MarkdownView ? info.leaf : undefined;
+        menu.addItem((i) =>
+          i
+            .setTitle("Add an ink page")
+            .setIcon("pencil-line")
+            .onClick(() => void this.switcher.addInkToNote(file, { leaf, askPaper: true }).catch((e) => this.switcher.reportError("Could not add the ink page", e))),
+        );
+      }),
+    );
+    this.registerEvent(
       this.app.workspace.on("file-menu", (menu: Menu, file: TAbstractFile) => {
         if (file instanceof TFolder) {
           menu.addItem((i) =>
@@ -607,6 +691,13 @@ export default class InkNotebookPlugin extends Plugin {
               .setTitle("Annotate with Ink Notebook")
               .setIcon("pencil-line")
               .onClick(() => void annotateImage(this, file)),
+          );
+        } else if (this.pairs.canAddInk(file)) {
+          menu.addItem((i) =>
+            i
+              .setTitle("Add an ink page")
+              .setIcon("pencil-line")
+              .onClick(() => void this.switcher.addInkToNote(file, { askPaper: true }).catch((e) => this.switcher.reportError("Could not add the ink page", e))),
           );
         } else if (this.pairs.isDrawing(file) && !this.pairs.textFor(file)) {
           menu.addItem((i) =>

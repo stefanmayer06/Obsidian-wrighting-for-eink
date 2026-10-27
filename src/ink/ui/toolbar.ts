@@ -227,17 +227,22 @@ export class Toolbar {
     });
   }
 
+  /**
+   * These run after every stroke: only touch the toolbar when something it
+   * shows changed (on e-ink, every change of the page is a screen refresh).
+   */
   refreshPage(index: number, count: number): void {
     const label = this.pageLabel.querySelector(".ink-btn-label");
-    if (label) label.textContent = `${index + 1} / ${count}`;
-    this.pageLabel.title = "All pages";
-    this.prevBtn.disabled = index <= 0;
-    this.nextBtn.disabled = index >= count - 1;
+    const text = `${index + 1} / ${count}`;
+    if (label && label.textContent !== text) label.textContent = text;
+    if (this.pageLabel.title !== "All pages") this.pageLabel.title = "All pages";
+    setDisabled(this.prevBtn, index <= 0);
+    setDisabled(this.nextBtn, index >= count - 1);
   }
 
   refreshHistory(canUndo: boolean, canRedo: boolean): void {
-    this.undoBtn.disabled = !canUndo;
-    this.redoBtn.disabled = !canRedo;
+    setDisabled(this.undoBtn, !canUndo);
+    setDisabled(this.redoBtn, !canRedo);
   }
 
   private setTools(patch: Partial<ToolState>): void {
@@ -414,4 +419,8 @@ export class Toolbar {
     });
     pop.place(this.side());
   }
+}
+
+function setDisabled(b: HTMLButtonElement, disabled: boolean): void {
+  if (b.disabled !== disabled) b.disabled = disabled;
 }

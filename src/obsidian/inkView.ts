@@ -1,9 +1,10 @@
 import { Menu, moment, Notice, normalizePath, Scope, setIcon, TextFileView, TFile, type WorkspaceLeaf } from "obsidian";
 import type InkNotebookPlugin from "../main";
-import { inkDataOf, InkParseError, parseInkFile, serializeInkFile } from "../core/ink/codec";
+import { inkDataOf, InkParseError, parseInkFile, serializeInkFile, typedTextOf } from "../core/ink/codec";
 import type { InkFile, InkMeta, PageBackground } from "../core/ink/model";
 import { paperLabel, paperSize } from "../core/paper";
 import { joinPath } from "../core/folders";
+import { splitFrontmatter } from "../core/transcript";
 import { InkSurface } from "../ink/surface";
 import { Toolbar, type ToolbarPosition } from "../ink/ui/toolbar";
 import { Popover, type MenuSection } from "../ink/ui/popover";
@@ -18,6 +19,13 @@ import { drawingBaseName } from "./pairs";
 export const INK_VIEW_TYPE = "ink-notebook";
 
 export const IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "webp", "gif", "bmp", "svg"];
+
+/** Save this long after the first unsaved change… */
+const SAVE_DELAY_MS = 2000;
+/** …once the pen has rested this long… */
+const PEN_IDLE_MS = 400;
+/** …but after this long, at the next lift of the pen, even while writing on. */
+const SAVE_MAX_WAIT_MS = 10000;
 
 /**
  * The ink page: a notebook of handwritten pages in the style of the Boox
@@ -37,6 +45,11 @@ export class InkView extends TextFileView {
   private ready = false;
   /** File data that arrived before the view was ready. */
   private pending: { data: string; clear: boolean } | null = null;
+  private saveTimer: number | null = null;
+  /** The file is a normal note, not an ink page (see onLoadFile). */
+  private notInk = false;
+  /** When the oldest unsaved change was made. */
+  private unsavedSince = 0;
 
   constructor(
     leaf: WorkspaceLeaf,
@@ -112,6 +125,7 @@ export class InkView extends TextFileView {
   }
 
   async onClose(): Promise<void> {
+    this.cancelSave();
     Popover.closeAll();
     this.surface?.textEditor.commit();
     // FileView.onClose saves the file (onUnloadFile): do it while the notebook is still here
@@ -174,6 +188,11 @@ export class InkView extends TextFileView {
       this.showBroken(data, e);
       return;
     }
+    if (typedTextOf(data)) {
+      // a normal note that got the ink-notebook property: saving would replace its text
+      this.showTypedNote(data);
+      return;
+    }
     this.broken = null;
     this.errorEl?.remove();
     this.errorEl = null;
@@ -196,6 +215,7 @@ export class InkView extends TextFileView {
 
   /** Another file is about to be shown (setViewData follows): stop what is running. */
   clear(): void {
+    this.cancelSave();
     if (!this.ready) return;
     this.surface.input.cancel();
     this.surface.textEditor.commit();
@@ -213,27 +233,105 @@ export class InkView extends TextFileView {
     this.errorEl = box;
   }
 
+  /** A note with text in it and the ink-notebook property: it is left as it is until the user decides. */
+  private showTypedNote(data: string): void {
+    this.broken = data;
+    this.errorEl?.remove();
+    const box = this.contentEl.createDiv({ cls: "ink-broken ink-typed-note ink-ui" });
+    box.createEl("h3", { text: "This note has text in it" });
+    box.createEl("p", {
+      text: "It has the ink-notebook property, so it opens as an ink page – but writing here would replace its text. Keep the note as it is and give it an ink page of its own instead: the transcript of your handwriting goes below the text.",
+    });
+    const row = box.createDiv({ cls: "ink-broken-buttons" });
+    const add = row.createEl("button", { text: "Keep the text and add an ink page", cls: "mod-cta" });
+    add.addEventListener("click", () => {
+      const file = this.file;
+      if (!file) return;
+      void this.plugin.switcher.keepTextAndAddInk(file, this.leaf).catch((e) => this.plugin.switcher.reportError("Could not add the ink page", e));
+    });
+    const md = row.createEl("button", { text: "Open as Markdown" });
+    md.addEventListener("click", () => void this.plugin.openAsMarkdown(this.leaf));
+    this.errorEl = box;
+  }
+
   private onChanged(): void {
-    this.requestSave();
+    this.saveSoon();
     if (this.file) this.plugin.inkChanged(this.file);
+  }
+
+  /**
+   * Save a moment after a change – but not while the pen is writing: writing a
+   * big notebook to its file takes a moment, and the pen should never wait.
+   */
+  private saveSoon(): void {
+    if (this.saveTimer !== null) return;
+    this.unsavedSince = performance.now();
+    this.saveTimer = window.setTimeout(() => this.saveWhenIdle(), SAVE_DELAY_MS);
+  }
+
+  private saveWhenIdle(): void {
+    this.saveTimer = null;
+    if (!this.ready) return;
+    const input = this.surface.input;
+    const now = performance.now();
+    const resting = now - input.lastActivity >= PEN_IDLE_MS || now - this.unsavedSince >= SAVE_MAX_WAIT_MS;
+    if (input.busy || !resting) {
+      this.saveTimer = window.setTimeout(() => this.saveWhenIdle(), input.busy ? 100 : PEN_IDLE_MS);
+      return;
+    }
+    void this.save();
+  }
+
+  private cancelSave(): void {
+    if (this.saveTimer !== null) window.clearTimeout(this.saveTimer);
+    this.saveTimer = null;
+  }
+
+  async save(clear?: boolean): Promise<void> {
+    // saved now (flipping to the text page, closing): no need to save again later
+    this.cancelSave();
+    if (this.notInk) return;
+    await super.save(clear);
+  }
+
+  /**
+   * Obsidian opens a note in the tab's current view when that view takes ".md"
+   * files – so a normal note opened in a tab that shows an ink page (a link,
+   * the daily notes plugin) lands here. It is shown as Markdown instead, and
+   * never written by this view.
+   */
+  async onLoadFile(file: TFile): Promise<void> {
+    this.notInk = !(await this.isInkFile(file));
+    if (!this.notInk) return super.onLoadFile(file);
+    const active = this.app.workspace.getMostRecentLeaf() === this.leaf;
+    window.setTimeout(() => {
+      if (this.file === file) void this.leaf.setViewState({ type: "markdown", state: { file: file.path }, active });
+    }, 0);
+  }
+
+  private async isInkFile(file: TFile): Promise<boolean> {
+    if (this.plugin.isInkPath(file.path)) return true;
+    // just written (the property is not in the metadata cache yet)
+    const { frontmatter } = splitFrontmatter(await this.app.vault.cachedRead(file));
+    return /^ink-notebook\s*:/m.test(frontmatter);
   }
 
   /** Metadata for the text page (diagram areas, handwritten links): applied without an undo step. */
   setMeta(meta: InkMeta): void {
     if (!this.ready || this.broken !== null) return;
     this.surface.setMeta(meta);
-    this.requestSave();
+    this.saveSoon();
   }
 
   /** Replace the notebook without an undo step (e.g. a picture it uses was renamed). */
   replaceQuietly(file: InkFile): void {
     if (!this.ready || this.broken !== null) return;
     this.surface.load(file, { page: this.surface.pageIndex, keepHistory: true });
-    this.requestSave();
+    this.saveSoon();
   }
 
   get inkFile(): InkFile | null {
-    return this.ready && this.broken === null ? this.surface.file : null;
+    return this.ready && this.broken === null && !this.notInk ? this.surface.file : null;
   }
 
   // ------------------------------------------------------------------ keyboard

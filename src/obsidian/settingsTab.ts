@@ -5,7 +5,8 @@ import { cleanSubfolder } from "../core/folders";
 import { PaperPickerModal } from "./paperPicker";
 import { SetupWizard } from "./setupWizard";
 import { renderRecognitionSettings } from "./recognitionSettings";
-import type { BookmarkPosition, DiagramSensitivity, InkSettings, PageLocation, TextViewMode } from "../settings";
+import { DAILY_INK_OPTIONS, type BookmarkPosition, type DailyInk, type DiagramSensitivity, type InkSettings, type PageLocation, type TextViewMode } from "../settings";
+import { dailyNoteSettings } from "./dailyNotes";
 
 export class InkSettingTab extends PluginSettingTab {
   constructor(
@@ -91,10 +92,10 @@ export class InkSettingTab extends PluginSettingTab {
     new Setting(containerEl).setName("Pages").setHeading();
     new Setting(containerEl)
       .setName("Where new pages go")
-      .setDesc("The folder of the note you are in, or always the same folder.")
+      .setDesc("The folder of the note you are in, always the same folder, or choose the folder for each page. (When the paper picker is on, it shows the folder too, with a button to choose another.)")
       .addDropdown((d) =>
         d
-          .addOptions({ current: "Folder of the current note", fixed: "Fixed folder" })
+          .addOptions({ current: "Folder of the current note", fixed: "Fixed folder", ask: "Ask every time" })
           .setValue(s.pageLocation)
           .onChange(async (v) => {
             s.pageLocation = v as PageLocation;
@@ -163,6 +164,27 @@ export class InkSettingTab extends PluginSettingTab {
             await save();
           }),
       );
+    const dailyAvailable = !!dailyNoteSettings(this.app);
+    new Setting(containerEl)
+      .setName("Daily notes")
+      .setDesc(
+        dailyAvailable
+          ? "A new daily note gets an ink page (in its ink subfolder) when it opens. \"Opened to write on\" shows the ink page in its place. The command \"Open today's daily note on the ink page\" works with every option."
+          : "Turn on the Daily notes core plugin (or Periodic Notes) – then new daily notes can come with an ink page.",
+      )
+      .addDropdown((d) =>
+        d
+          .addOptions(DAILY_INK_OPTIONS)
+          .setValue(s.dailyInk)
+          .onChange(async (v) => {
+            s.dailyInk = v as DailyInk;
+            await save();
+          }),
+      );
+    new Setting(containerEl)
+      .setName("Match up ink and text pages")
+      .setDesc("Rename ink pages so that each text page Name.md has its ink page Name.ink.md in the ink subfolder next to it (e.g. a \"2026-10-27 (text)\" text page becomes \"2026-10-27\"). You see the list before anything is renamed.")
+      .addButton((b) => b.setButtonText("Match up…").onClick(() => void this.plugin.matchUpPages()));
     new Setting(containerEl)
       .setName("Keep names in sync")
       .setDesc("Renaming or moving the ink or text page renames/moves the other one too.")
