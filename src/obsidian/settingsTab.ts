@@ -146,7 +146,7 @@ export class InkSettingTab extends PluginSettingTab {
       );
     new Setting(containerEl)
       .setName("Ask for a name when creating a page")
-      .setDesc("Otherwise pages are named with the date and time; rename them any time.")
+      .setDesc("Type the name of a new page (the date and time is filled in – keep it or type over it). Off: pages are named with the date and time; rename them any time.")
       .addToggle((t) =>
         t.setValue(s.askForPageName).onChange(async (v) => {
           s.askForPageName = v;

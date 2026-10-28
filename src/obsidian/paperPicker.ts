@@ -83,6 +83,7 @@ export class PaperPickerModal extends Modal {
   private makeDefault = false;
   private done = false;
   private grid!: HTMLElement;
+  private nameInput: HTMLInputElement | null = null;
   private cards = new Map<PaperStyle, { card: HTMLButtonElement; img: HTMLImageElement }>();
   private segments: Record<string, Segment> = {};
 
@@ -109,8 +110,11 @@ export class PaperPickerModal extends Modal {
 
     if (this.name !== undefined) {
       const s = new Setting(contentEl).setName("Name").addText((t) => {
-        t.setValue(this.name ?? "").onChange((v) => (this.name = v));
+        t.setValue(this.name ?? "")
+          .setPlaceholder("Name of the page")
+          .onChange((v) => (this.name = v));
         t.inputEl.addClass("ink-wide-input");
+        this.nameInput = t.inputEl;
         t.inputEl.addEventListener("keydown", (e) => {
           if (e.key === "Enter") {
             e.preventDefault();
@@ -230,6 +234,7 @@ export class PaperPickerModal extends Modal {
     if (ok && this.opts.name !== undefined && !name) {
       // a page needs a name
       this.done = false;
+      this.nameInput?.focus();
       return;
     }
     this.resolve(ok ? { spec: this.spec, name: name || undefined, folder: this.folder, position: this.position, makeDefault: this.makeDefault } : null);

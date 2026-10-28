@@ -81,7 +81,7 @@ export async function annotatePdf(plugin: InkNotebookPlugin, file?: TFile | null
     if (!picked) return;
     const doc: InkDoc = { pages: pdfPages(pdf, picked.pages, picked.sizes) };
     const created = await plugin.switcher.createPage({
-      name: `${pdf.basename} (annotated)`,
+      suggestedName: `${pdf.basename} (annotated)`,
       leaf,
       // the annotated notebook goes next to the PDF (when new pages go into the current folder)
       context: pdf,
@@ -127,7 +127,7 @@ export async function annotateImage(plugin: InkNotebookPlugin, file?: TFile | nu
     const size = (await plugin.images.imageSize(img.path)) ?? { w: 1000, h: 1414 };
     const h = Math.round((PAGE_W * size.h) / Math.max(1, size.w));
     await plugin.switcher.createPage({
-      name: `${img.basename} (annotated)`,
+      suggestedName: `${img.basename} (annotated)`,
       leaf,
       context: img,
       doc: { pages: [emptyPage({ kind: "image", path: img.path }, PAGE_W, h)] },
