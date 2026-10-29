@@ -254,6 +254,140 @@ function check(name, cond, detail = "") {
   await page.mouse.click(5, 990);
   check("tapping outside closes the card", (await page.$(".ink-popover")) === null);
 
+  console.log("fills");
+  await page.mouse.click(5, 990);
+  await page.evaluate(() => window.surface.addPage("end"));
+  await page.waitForTimeout(400);
+  const lastStroke = () =>
+    page.evaluate(() => {
+      const s = window.surface.page.strokes.at(-1);
+      return s ? { id: s.id, fill: s.fill ?? null, fillStyle: s.fillStyle ?? null, area: !!s.area, closed: !!s.closed, from: s.from ?? null, to: s.to ?? null, n: s.pts.length / 3, pts: Array.from(s.pts) } : null;
+    });
+  await page.evaluate(() => window.surface.setTools({ tool: "shape", shape: "rect", shapeFill: "#fff3bf", fillStyle: "solid" }));
+  await pen(along([[560, 650], [880, 850]], 10));
+  let ls = await lastStroke();
+  check("a rectangle drawn with a fill chosen is filled", ls?.fill === "#fff3bf" && ls.closed, JSON.stringify(ls));
+  // a box of four separate lines, filled with the fill tool
+  await page.evaluate(() => window.surface.setTools({ tool: "shape", shape: "line", shapeFill: "" }));
+  for (const [a, b] of [[[100, 650], [400, 650]], [[400, 650], [400, 850]], [[400, 850], [100, 850]], [[100, 850], [100, 650]]]) await pen(along([a, b], 10));
+  st = await state();
+  const linesOnly = st.strokes;
+  await page.evaluate(() => window.surface.setTools({ tool: "fill", fillColor: "#c4dfff", fillStyle: "solid" }));
+  await pen([[250, 750], [250, 750]]);
+  st = await state();
+  ls = await lastStroke();
+  check("tapping between four lines with the fill tool fills the box they make", st.strokes === linesOnly + 1 && ls?.area && ls.fill === "#c4dfff", JSON.stringify(ls && { area: ls.area, fill: ls.fill }));
+  const filledPixel = await page.evaluate(() => {
+    const s = window.surface;
+    const p = s.toScreen({ x: 250, y: 760 });
+    const d = s.bctx.getImageData(Math.round(p.x * s.dpr), Math.round(p.y * s.dpr), 1, 1).data;
+    return [d[0], d[1], d[2]];
+  });
+  check("the fill is on the page", Math.abs(filledPixel[0] - 0xc4) < 6 && Math.abs(filledPixel[2] - 0xff) < 6, JSON.stringify(filledPixel));
+  await page.evaluate(() => window.surface.setTools({ fillStyle: "hatch" }));
+  await pen([[700, 750], [700, 750]]);
+  const hatched = await page.evaluate(() => window.surface.page.strokes.find((s) => s.fill && !s.area && s.closed));
+  check("tapping the rectangle hatches it instead", hatched?.fill === "#c4dfff" && hatched.fillStyle === "hatch", JSON.stringify(hatched && { fill: hatched.fill, style: hatched.fillStyle }));
+  await page.evaluate(() => window.surface.setTools({ fillColor: "" }));
+  await pen([[250, 750], [250, 750]]);
+  st = await state();
+  check("with “Remove fills”, tapping a fill removes it", st.strokes === linesOnly, JSON.stringify(st));
+  await page.screenshot({ path: path.join(SHOTS, "06-fills.png") });
+
+  console.log("object library, flowchart");
+  await page.evaluate(() => window.surface.setTools({ tool: "pen", fillColor: "#c4dfff", fillStyle: "solid" }));
+  await page.click(".ink-tb-library");
+  await page.waitForSelector(".ink-library-tile");
+  check("the library button opens the flowchart shapes", (await page.$$(".ink-library-tile")).length >= 15);
+  await page.screenshot({ path: path.join(SHOTS, "07-library.png") });
+  await page.click(".ink-library-tile[aria-label='Process']");
+  st = await state();
+  check("tapping a shape in the library starts placing it", st.tool === "stamp", JSON.stringify(st));
+  const folded = await page.evaluate(() => ({ folded: document.querySelector(".ink-library-panel").classList.contains("is-folded"), title: document.querySelector(".ink-library-title").textContent }));
+  check("on a narrow screen the library folds away while placing", folded.folded && folded.title === "Placing “Process”", JSON.stringify(folded));
+  const beforePlace = st.strokes;
+  // (the library panel covers the right of the page in this window)
+  await pen([[150, 200], [150, 200]]);
+  await pen([[150, 450], [150, 450]]);
+  st = await state();
+  check("each tap on the page places one", st.strokes === beforePlace + 2 && st.tool === "stamp", JSON.stringify(st));
+  await page.click(".ink-library-fold");
+  await page.click(".ink-library-tile[aria-label='Decision']");
+  await pen([[420, 450], [420, 450]]);
+  const shapes = await page.evaluate(() => window.surface.page.strokes.slice(-3).map((s) => ({ id: s.id, closed: !!s.closed, n: s.pts.length / 3 })));
+  check("placed shapes are closed outlines", shapes.every((s) => s.closed), JSON.stringify(shapes));
+  // connect them: an arrow from the first process to the second, an elbow arrow from the second to the decision
+  await page.evaluate(() => window.surface.setTools({ tool: "shape", shape: "arrow" }));
+  await pen(along([[150, 200], [150, 450]], 8));
+  ls = await lastStroke();
+  check("an arrow drawn from one shape to another is attached to both", ls?.from === shapes[0].id && ls?.to === shapes[1].id, JSON.stringify(ls && { from: ls.from, to: ls.to }));
+  check("it starts and ends at their outlines", ls && ls.pts[1] > 245 + 2 && ls.pts[ls.pts.length - 2] < 405 - 2, JSON.stringify(ls && [ls.pts[1], ls.pts[ls.pts.length - 2]]));
+  const arrowId = ls?.id;
+  await page.evaluate(() => window.surface.setTools({ tool: "shape", shape: "elbow" }));
+  await pen(along([[150, 450], [420, 450]], 8));
+  ls = await lastStroke();
+  check("an elbow arrow attaches too", ls?.from === shapes[1].id && ls?.to === shapes[2].id, JSON.stringify(ls && { from: ls.from, to: ls.to }));
+  // move the second process: both arrows follow
+  await page.evaluate(() => window.surface.setTools({ tool: "lasso" }));
+  // its left edge (where the arrow meets it, the arrow is on top)
+  await pen([[60, 450], [60, 450]]);
+  st = await state();
+  const selected = await page.evaluate(() => [...window.surface.selection.strokes][0]);
+  check("tapping the shape's outline selects it", st.sel === 1 && selected === shapes[1].id, JSON.stringify(st));
+  await pen(along([[100, 450], [100, 600]], 6));
+  const followed = await page.evaluate((id) => {
+    const s = window.surface.page.strokes.find((x) => x.id === id);
+    const n = s.pts.length / 3;
+    return { x: s.pts[(n - 1) * 3], y: s.pts[(n - 1) * 3 + 1], to: s.to };
+  }, arrowId);
+  check("an arrow follows the shape it points at", followed.y > 540 && Math.abs(followed.x - 150) < 2 && followed.to === shapes[1].id, JSON.stringify(followed));
+  // a label: tap into the first shape with the text tool
+  await page.evaluate(() => window.surface.setTools({ tool: "text" }));
+  await pen([[150, 200], [150, 200]]);
+  await page.waitForTimeout(50);
+  const align = await page.evaluate(() => document.querySelector(".ink-text-editor")?.style.textAlign);
+  await page.keyboard.type("Start");
+  await page.keyboard.press("Escape");
+  const label = await page.evaluate(() => window.surface.page.texts.at(-1));
+  check("the text tool labels a shape, centred in it", label?.container === shapes[0].id && label.align === "center" && align === "center" && Math.abs(label.y + label.h / 2 - 200) < 1, JSON.stringify(label));
+  await page.evaluate(() => window.surface.setTools({ tool: "lasso" }));
+  await pen([[150, 155], [150, 155]]);
+  const selTexts = await page.evaluate(() => window.surface.selection.texts.size);
+  check("selecting a shape selects its label", selTexts === 1, String(selTexts));
+  await pen(along([[170, 200], [420, 200]], 6));
+  const moved = await page.evaluate(() => window.surface.page.texts.at(-1).x);
+  check("the label moves with its shape", Math.abs(moved - label.x - 250) < 1, `${label.x} -> ${moved}`);
+  // fill the selected shape from the lasso bar
+  await page.waitForSelector(".ink-sel-fill");
+  await page.click(".ink-sel-fill");
+  await page.click(".ink-selection-palette .ink-swatch-btn[aria-label='Mint']");
+  const minted = await page.evaluate((id) => window.surface.page.strokes.find((x) => x.id === id).fill, shapes[0].id);
+  check("“Fill” in the lasso bar fills the selected shape", minted === "#c8f0cc", String(minted));
+  await page.evaluate(() => window.surface.setSelection({ strokes: new Set(), texts: new Set(), images: new Set(), links: new Set(), figures: new Set() }));
+  // an Excalidraw library item
+  await page.click(".ink-library-fold");
+  await page.click(".ink-library-source[aria-label='Sample']");
+  await page.waitForSelector(".ink-library-tile[aria-label='Labelled box']");
+  await page.click(".ink-library-tile[aria-label='Labelled box']");
+  await pen([[300, 1100], [300, 1100]]);
+  const placed = await page.evaluate(() => {
+    const p = window.surface.page;
+    const s = p.strokes.at(-1);
+    const t = p.texts.at(-1);
+    return { fill: s.fill, style: s.fillStyle, color: s.color, text: t.text, container: t.container === s.id };
+  });
+  check("an Excalidraw library item keeps its colours, hatching and label", placed.fill === "#a5d8ff" && placed.style === "hatch" && placed.color === "#1971c2" && placed.text === "Server" && placed.container, JSON.stringify(placed));
+  await page.screenshot({ path: path.join(SHOTS, "08-flowchart.png") });
+  const saved = await page.evaluate(() => {
+    const s = window.surface;
+    const back = window.parseInkFile(window.serializeInkFile("", s.file)).doc.pages.at(-1);
+    const a = back.strokes.filter((x) => x.from || x.to).length;
+    return { connectors: a, labels: back.texts.filter((t) => t.container).length, fills: back.strokes.filter((x) => x.fill).length };
+  });
+  check("fills, connectors and labels survive saving", saved.connectors === 2 && saved.labels === 2 && saved.fills >= 2, JSON.stringify(saved));
+  await page.click(".ink-library-close");
+  check("the library closes", (await page.$(".ink-library-panel")) === null);
+
   check("no errors in the page", errors.length === 0, errors.join("\n"));
   await browser.close();
   console.log(failures === 0 ? "\nall passed" : `\n${failures} failed`);

@@ -1,6 +1,7 @@
 import { distanceToSegment, type Pt } from "../geometry";
 import { strokeHit, strokeInside, strokePointBounds } from "./geom";
 import { makeStroke, newId, type Stroke } from "./model";
+import { areaStroke, fillOutline } from "./fill";
 
 /**
  * The erasers of the Boox Notes app:
@@ -8,6 +9,10 @@ import { makeStroke, newId, type Stroke } from "./model";
  *  - stroke eraser: removes every stroke it touches
  *  - lasso eraser: removes the strokes inside a drawn loop
  * and "scribble to erase": scratching over writing erases it.
+ *
+ * Fills are not rubbed away with the writing on them: the partial and the
+ * stroke eraser leave areas alone, and cutting the line of a filled shape
+ * keeps its fill (as an area). The lasso eraser and the fill tool remove fills.
  */
 
 /** Points of a straight-segment stroke, filled in so that erasing can cut an edge in the middle. */
@@ -40,7 +45,7 @@ function densify(s: Stroke, step: number): Float32Array {
  * (possibly none).
  */
 export function eraseFromStroke(s: Stroke, a: Pt, b: Pt, radius: number): Stroke[] | null {
-  if (!strokeHit(s, a, b, radius)) return null;
+  if (s.area || !strokeHit(s, a, b, radius)) return null;
   const reach = radius + s.width / 2;
   const pts = s.poly ? densify(s, Math.max(1.5, radius / 3)) : s.pts;
   const n = Math.floor(pts.length / 3);
@@ -93,6 +98,9 @@ export function eraseFromStroke(s: Stroke, a: Pt, b: Pt, radius: number): Stroke
     joined.set(first.pts, last.pts.length - 3);
     pieces.push({ ...last, pts: joined });
   }
+  // the fill stays where it was
+  const poly = fillOutline(s);
+  if (poly && s.fill) pieces.unshift(areaStroke(poly, s.fill, s.fillStyle ?? "solid"));
   return pieces;
 }
 
@@ -119,7 +127,7 @@ export function partialErase(candidates: Iterable<Stroke>, a: Pt, b: Pt, radius:
 /** Stroke eraser: ids of the strokes the eraser touches. */
 export function strokeErase(candidates: Iterable<Stroke>, a: Pt, b: Pt, radius: number): Set<string> {
   const out = new Set<string>();
-  for (const s of candidates) if (strokeHit(s, a, b, radius)) out.add(s.id);
+  for (const s of candidates) if (!s.area && strokeHit(s, a, b, radius)) out.add(s.id);
   return out;
 }
 
@@ -197,7 +205,7 @@ export function scribbleTargets(scribble: Stroke, candidates: Iterable<Stroke>):
   const out = new Set<string>();
   const radius = Math.max(2, scribble.width);
   for (const s of candidates) {
-    if (s.id === scribble.id) continue;
+    if (s.id === scribble.id || s.area) continue;
     const r = strokePointBounds(s);
     const ix = Math.max(0, Math.min(r.x + r.w, area.x + area.w) - Math.max(r.x, area.x));
     const iy = Math.max(0, Math.min(r.y + r.h, area.y + area.h) - Math.max(r.y, area.y));

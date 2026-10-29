@@ -2,7 +2,8 @@ import { intersects, type Rect } from "../core/geometry";
 import { paperDrawing } from "../core/paper";
 import { figureBounds, imageBounds, LINK_CHIP_HEIGHT, linkBounds, linkChipWidth, linkLabel, strokeBounds, strokePointBounds, textBounds } from "../core/ink/geom";
 import { dashPattern, isMarker, strokeRuns, type Segment } from "../core/ink/pens";
-import type { Figure, ImageItem, LinkItem, Page, Stroke, TextBox } from "../core/ink/model";
+import { fillGeometry } from "../core/ink/fill";
+import type { Figure, ImageItem, Items, LinkItem, Page, Stroke, TextBox } from "../core/ink/model";
 
 /**
  * Drawing pages on a canvas. Used by the ink view, page thumbnails, figures on
@@ -43,8 +44,49 @@ function cachedRuns(s: Stroke): CachedRun[] {
   return runs;
 }
 
-/** Draw one stroke (the transform maps page units to pixels). */
+interface CachedFill {
+  color: string;
+  area: Path2D | null;
+  lines: Path2D | null;
+  lineWidth: number;
+}
+
+const fillCache = new WeakMap<Stroke, CachedFill | null>();
+
+/** Draw the fill of a stroke (nothing for strokes without one). */
+export function drawStrokeFill(ctx: Ctx, s: Stroke): void {
+  if (!s.fill) return;
+  let c = fillCache.get(s);
+  if (c === undefined) {
+    const g = fillGeometry(s);
+    c = g ? { color: g.color, area: g.area ? new Path2D(g.area) : null, lines: g.lines ? new Path2D(g.lines) : null, lineWidth: g.lineWidth } : null;
+    fillCache.set(s, c);
+  }
+  if (!c) return;
+  ctx.save();
+  if (c.area) {
+    ctx.fillStyle = c.color;
+    ctx.fill(c.area);
+  }
+  if (c.lines) {
+    ctx.strokeStyle = c.color;
+    ctx.lineWidth = c.lineWidth;
+    ctx.lineCap = "round";
+    ctx.setLineDash([]);
+    ctx.stroke(c.lines);
+  }
+  ctx.restore();
+}
+
+/** Draw one stroke with its fill (the transform maps page units to pixels). */
 export function drawStroke(ctx: Ctx, s: Stroke): void {
+  drawStrokeFill(ctx, s);
+  drawStrokeLine(ctx, s);
+}
+
+/** Draw the line of a stroke (not its fill; nothing for areas, which are only a fill). */
+export function drawStrokeLine(ctx: Ctx, s: Stroke): void {
+  if (s.area) return;
   const marker = isMarker(s);
   ctx.save();
   ctx.lineCap = "round";
@@ -216,7 +258,10 @@ export function drawText(ctx: Ctx, t: TextBox): void {
   const lines = wrapText(ctx, t.text, t.w, t.size);
   const lh = t.size * TEXT_LINE_HEIGHT;
   const pad = (lh - t.size) / 2;
-  lines.forEach((l, i) => ctx.fillText(l, t.x, t.y + i * lh + pad));
+  const align = t.align ?? "left";
+  ctx.textAlign = align;
+  const x = align === "center" ? t.x + t.w / 2 : align === "right" ? t.x + t.w : t.x;
+  lines.forEach((l, i) => ctx.fillText(l, x, t.y + i * lh + pad));
   ctx.restore();
 }
 
@@ -333,12 +378,13 @@ export function drawPage(ctx: Ctx, page: Page, opts: PageRenderOptions): void {
   const visible = (r: Rect) => !clip || intersects(r, clip);
   if (opts.background !== false) drawBackground(ctx, page, { pixelScale: opts.pixelScale, images: opts.images, lines: opts.lines });
   for (const it of page.images) if (!hide?.has(it.id) && visible(imageBounds(it))) drawImageItem(ctx, it, opts.images);
-  // highlighters underneath the ink
-  for (const s of page.strokes) if (isMarker(s) && !hide?.has(s.id) && visible(strokeBounds(s))) drawStroke(ctx, s);
+  // fills underneath everything written, then highlighters, then the ink
+  for (const s of page.strokes) if (s.fill && !hide?.has(s.id) && visible(strokeBounds(s))) drawStrokeFill(ctx, s);
+  for (const s of page.strokes) if (isMarker(s) && !hide?.has(s.id) && visible(strokeBounds(s))) drawStrokeLine(ctx, s);
   ctx.save();
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
-  for (const s of page.strokes) if (!isMarker(s) && !hide?.has(s.id) && visible(strokeBounds(s))) drawStroke(ctx, s);
+  for (const s of page.strokes) if (!isMarker(s) && !s.area && !hide?.has(s.id) && visible(strokeBounds(s))) drawStrokeLine(ctx, s);
   ctx.restore();
   for (const t of page.texts) if (!hide?.has(t.id) && visible(textBounds(t))) drawText(ctx, t);
   if (opts.chrome !== false) {
@@ -353,6 +399,14 @@ export function drawPage(ctx: Ctx, page: Page, opts: PageRenderOptions): void {
       }
     }
   }
+}
+
+/** Draw loose items (a library item, items being placed) in the order of a page: fills, highlighters, ink, text. */
+export function drawItems(ctx: Ctx, items: Pick<Items, "strokes" | "texts">): void {
+  for (const s of items.strokes) drawStrokeFill(ctx, s);
+  for (const s of items.strokes) if (isMarker(s)) drawStrokeLine(ctx, s);
+  for (const s of items.strokes) if (!isMarker(s)) drawStrokeLine(ctx, s);
+  for (const t of items.texts) drawText(ctx, t);
 }
 
 /** Render a page into a new canvas `pixelWidth` wide (thumbnails, exports). */

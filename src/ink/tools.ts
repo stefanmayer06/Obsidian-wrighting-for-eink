@@ -1,11 +1,13 @@
 import { containsPoint, distanceToSegment, inflate, type Pt, type Rect } from "../core/geometry";
 import { eraseFromStroke, isScribble, scribbleTargets, strokeErase, strokesInLasso } from "../core/ink/erase";
-import { figureBounds, imageBounds, linkBounds, rectInside, strokeBounds, strokeDistance, textBounds, unionRect } from "../core/ink/geom";
+import { figureBounds, imageBounds, linkBounds, pointInPolygon, rectInside, strokeBounds, strokeDistance, strokePointBounds, textBounds, unionRect } from "../core/ink/geom";
 import { addItems, EMPTY_SELECTION, makeStroke, q, qp, replaceItems, type Items, type Page, type PenType, type Selection, type Stroke } from "../core/ink/model";
 import { StrokeBuilder, type Segment } from "../core/ink/pens";
-import { recognizeShape, shapeFromDrag } from "../core/ink/shapes";
+import { isConnectorKind, recognizeShape, shapeFromDrag } from "../core/ink/shapes";
+import { connectorsOf, followMoves, makeConnector, rerouted, shapeAt } from "../core/ink/connectors";
+import { closedOutline, fillOutline } from "../core/ink/fill";
 import { apply, canRotate, IDENTITY, isIdentity, itemsBounds, rotation, scaling, transformItems, translation, type Matrix } from "../core/ink/transform";
-import { drawFigure, drawImageItem, drawLink, drawStroke, drawText, segmentPath } from "./render";
+import { drawFigure, drawImageItem, drawItems, drawLink, drawStroke, drawText, segmentPath } from "./render";
 import type { InkSurface } from "./surface";
 import type { ToolId } from "./types";
 
@@ -41,6 +43,11 @@ export function createSession(s: InkSurface, tool: ToolId, pt: InputPt, opts: { 
       return new ShapeSession(s, pt, opts.isPen);
     case "text":
       return new TextSession(s, pt, opts.isPen);
+    case "fill":
+      return new TapSession(pt, opts.isPen, (p) => s.fillAt(p));
+    case "stamp":
+      if (s.stamp) return new StampSession(s, pt, opts.isPen);
+      return new PenSession(s, pt, opts.isPen, false);
     case "pen":
     default:
       return new PenSession(s, pt, opts.isPen, false);
@@ -305,9 +312,19 @@ class EraserSession implements ToolSession {
 
 type DragKind = "move" | "scale" | "rotate";
 
+interface Drag {
+  kind: DragKind;
+  start: Pt;
+  box: Rect;
+  items: Items;
+  matrix: Matrix;
+  /** Connectors attached to the selected shapes (not selected themselves): they follow. */
+  followers: Stroke[];
+}
+
 class LassoSession implements ToolSession {
   private poly: Pt[] = [];
-  private drag: { kind: DragKind; start: Pt; box: Rect; items: Items; matrix: Matrix } | null = null;
+  private drag: Drag | null = null;
 
   constructor(
     private s: InkSurface,
@@ -330,18 +347,31 @@ class LassoSession implements ToolSession {
 
   private startDrag(kind: DragKind, start: Pt, box: Rect): void {
     const items = this.s.selectedItems();
-    this.drag = { kind, start, box, items, matrix: IDENTITY };
-    // take the selection off the page while it moves
-    const ids = [...items.strokes, ...items.texts, ...items.images, ...items.links, ...items.figures].map((i) => i.id);
+    const followers = connectorsOf(this.s.page, new Set(items.strokes.map((st) => st.id)));
+    this.drag = { kind, start, box, items, matrix: IDENTITY, followers };
+    // take the selection (and the connectors that follow it) off the page while it moves
+    const ids = [...items.strokes, ...items.texts, ...items.images, ...items.links, ...items.figures, ...followers].map((i) => i.id);
     for (const id of ids) this.s.hidden.add(id);
-    this.s.renderRect(inflate(box, 30));
+    let dirty: Rect = inflate(box, 30);
+    for (const c of followers) dirty = unionRect(dirty, strokeBounds(c)) as Rect;
+    this.s.renderRect(dirty);
     this.preview();
+  }
+
+  /** The connectors that follow the selection, routed to where its shapes are now. */
+  private followersNow(d: Drag): Stroke[] {
+    if (d.followers.length === 0) return [];
+    const moved = new Map(transformItems({ ...d.items, texts: [], images: [], links: [], figures: [] }, d.matrix).strokes.map((st) => [st.id, st] as const));
+    const page = this.s.page;
+    const shape = (id: string) => moved.get(id) ?? page.strokes.find((st) => st.id === id);
+    return d.followers.map((c) => rerouted(c, shape));
   }
 
   private preview(): void {
     const d = this.drag;
     if (!d) return;
     const ctx = this.s.wetContext();
+    for (const c of this.followersNow(d)) drawStroke(ctx, c);
     const m = d.matrix;
     ctx.transform(m[0], m[1], m[2], m[3], m[4], m[5]);
     for (const it of d.items.images) drawImageItem(ctx, it, this.s.images);
@@ -404,14 +434,25 @@ class LassoSession implements ToolSession {
       this.s.hidden.clear();
       this.s.clearWet();
       if (isIdentity(d.matrix)) {
-        this.s.renderRect(inflate(d.box, 30));
+        let dirty: Rect = inflate(d.box, 30);
+        for (const c of d.followers) dirty = unionRect(dirty, strokeBounds(c)) as Rect;
+        this.s.renderRect(dirty);
         this.s.selectionOverlay.update();
         return;
       }
       const moved = transformItems(d.items, d.matrix);
-      const page = replaceItems(this.s.page, moved);
+      const ids = new Set([...moved.strokes, ...moved.texts, ...moved.images, ...moved.links, ...moved.figures].map((i) => i.id));
+      const page = followMoves(replaceItems(this.s.page, moved), ids);
       const after = itemsBounds(moved);
-      this.s.commitPage(page, unionRect(inflate(d.box, 30), after ? inflate(after, 30) : null), { keepSelection: true });
+      let dirty = unionRect(inflate(d.box, 30), after ? inflate(after, 30) : null);
+      // connectors that followed (or let go): their old and new place
+      const byId = new Map(page.strokes.map((st) => [st.id, st] as const));
+      for (const c of [...d.followers, ...moved.strokes.filter((st) => st.from || st.to)]) {
+        dirty = unionRect(dirty, strokeBounds(c));
+        const now = byId.get(c.id);
+        if (now) dirty = unionRect(dirty, strokeBounds(now));
+      }
+      this.s.commitPage(page, dirty, { keepSelection: true });
       this.s.selectionOverlay.update();
       return;
     }
@@ -450,7 +491,9 @@ class LassoSession implements ToolSession {
   cancel(): void {
     if (this.drag) {
       this.s.hidden.clear();
-      this.s.renderRect(inflate(this.drag.box, 30));
+      let dirty: Rect = inflate(this.drag.box, 30);
+      for (const c of this.drag.followers) dirty = unionRect(dirty, strokeBounds(c)) as Rect;
+      this.s.renderRect(dirty);
       this.drag = null;
       this.s.selectionOverlay.update();
     }
@@ -466,7 +509,14 @@ export function itemAt(page: Page, p: Pt, slack: number): Selection | null {
   for (let i = page.strokes.length - 1; i >= 0; i--) {
     const st = page.strokes[i];
     if (!containsPoint(inflate(strokeBounds(st), slack), p)) continue;
-    if (strokeDistance(st, p, p) <= slack + st.width / 2) return one("strokes", st.id);
+    if (!st.area && strokeDistance(st, p, p) <= slack + st.width / 2) return one("strokes", st.id);
+  }
+  // inside a fill
+  for (let i = page.strokes.length - 1; i >= 0; i--) {
+    const st = page.strokes[i];
+    if (!st.fill || !containsPoint(strokePointBounds(st), p)) continue;
+    const poly = fillOutline(st);
+    if (poly && pointInPolygon(p.x, p.y, poly)) return one("strokes", st.id);
   }
   for (let i = page.images.length - 1; i >= 0; i--) if (containsPoint(imageBounds(page.images[i]), p)) return one("images", page.images[i].id);
   for (const f of page.figures) {
@@ -487,6 +537,10 @@ export function itemAt(page: Page, p: Pt, slack: number): Selection | null {
 class ShapeSession implements ToolSession {
   private a: Pt;
   private b: Pt;
+  /** Arrows: the shapes they start and end on (they stay attached to them). */
+  private from: Stroke | null = null;
+  private to: Stroke | null = null;
+  private readonly connector: boolean;
 
   constructor(
     private s: InkSurface,
@@ -495,21 +549,51 @@ class ShapeSession implements ToolSession {
   ) {
     this.a = { x: first.x, y: first.y };
     this.b = this.a;
+    this.connector = isConnectorKind(s.tools.shape);
+    if (this.connector) this.from = shapeAt(s.page, this.a, this.slack);
+  }
+
+  private get slack(): number {
+    return 10 / this.s.view.scale;
   }
 
   private shape(): Stroke {
     const t = this.s.tools;
-    return shapeFromDrag(t.shape, this.a, this.b, { pen: t.pen, color: t.color, width: Math.max(1, t.widths[t.pen]) });
+    const width = Math.max(1, t.widths[t.pen]);
+    if (this.connector) {
+      // an arrow within one shape (say, in a big box) is not attached to it
+      const outline = this.from ? closedOutline(this.from) : null;
+      const from = outline && !this.to && pointInPolygon(this.b.x, this.b.y, outline) ? null : this.from;
+      return makeConnector(this.a, this.b, from, this.to, { color: t.color, width, elbow: t.shape === "elbow" });
+    }
+    return shapeFromDrag(t.shape, this.a, this.b, { pen: t.pen, color: t.color, width, fill: t.shapeFill || undefined, fillStyle: t.fillStyle });
   }
 
   move(points: InputPt[]): void {
     const p = points[points.length - 1];
     this.b = { x: p.x, y: p.y };
-    drawStroke(this.s.wetContext(), this.shape());
+    if (this.connector) this.to = shapeAt(this.s.page, this.b, this.slack, this.from?.id);
+    const ctx = this.s.wetContext();
+    // show which shapes the arrow attaches to
+    for (const sh of [this.from, this.to]) {
+      if (!sh) continue;
+      const poly = closedOutline(sh);
+      if (!poly) continue;
+      ctx.save();
+      ctx.setLineDash([5 / this.s.view.scale, 4 / this.s.view.scale]);
+      ctx.lineWidth = sh.width + 5 / this.s.view.scale;
+      ctx.strokeStyle = "#7a7a7a";
+      ctx.beginPath();
+      poly.forEach((v, i) => (i === 0 ? ctx.moveTo(v.x, v.y) : ctx.lineTo(v.x, v.y)));
+      ctx.closePath();
+      ctx.stroke();
+      ctx.restore();
+    }
+    drawStroke(ctx, this.shape());
   }
 
   up(last: InputPt | null): void {
-    if (last) this.b = { x: last.x, y: last.y };
+    if (last) this.move([last]);
     this.s.clearWet();
     if (Math.hypot(this.b.x - this.a.x, this.b.y - this.a.y) * this.s.view.scale < 6) return;
     const st = this.shape();
@@ -541,10 +625,92 @@ class TextSession implements ToolSession {
     if (Math.hypot(p.cx - this.start.cx, p.cy - this.start.cy) > 16) return;
     const page = this.s.page;
     const hit = [...page.texts].reverse().find((t) => containsPoint(inflate(textBounds(t), 6 / this.s.view.scale), p));
-    if (hit) this.s.textEditor.edit(hit);
-    else if (containsPoint({ x: 0, y: 0, w: page.w, h: page.h }, p)) this.s.textEditor.create({ x: p.x, y: p.y - this.s.tools.textSize * 0.65 });
+    if (hit) {
+      this.s.textEditor.edit(hit);
+      return;
+    }
+    // inside a shape: its label, centred in it
+    const shape = labelShapeAt(page, p);
+    if (shape) {
+      const label = page.texts.find((t) => t.container === shape.id);
+      if (label) this.s.textEditor.edit(label);
+      else this.s.textEditor.createLabel(shape);
+      return;
+    }
+    if (containsPoint({ x: 0, y: 0, w: page.w, h: page.h }, p)) this.s.textEditor.create({ x: p.x, y: p.y - this.s.tools.textSize * 0.65 });
   }
 
   cancel(): void {}
 }
 
+/** The shape a tap with the text tool labels: a drawn shape (not a pen loop) of a size a label fits. */
+export function labelShapeAt(page: Page, p: Pt): Stroke | null {
+  const shape = shapeAt(page, p, 0);
+  if (!shape || !shape.poly) return null;
+  const b = strokePointBounds(shape);
+  return b.w >= 30 && b.h >= 20 && b.w <= page.w * 0.7 && b.h <= page.h * 0.5 ? shape : null;
+}
+
+// ------------------------------------------------------------------ taps (fill)
+
+/** A tool that acts on a tap (the fill tool): a press that hardly moves. */
+class TapSession implements ToolSession {
+  constructor(
+    private start: InputPt,
+    readonly pen: boolean,
+    private onTap: (p: Pt) => void,
+  ) {}
+
+  move(): void {}
+
+  up(last: InputPt | null): void {
+    const p = last ?? this.start;
+    if (Math.hypot(p.cx - this.start.cx, p.cy - this.start.cy) > 16) return;
+    this.onTap({ x: this.start.x, y: this.start.y });
+  }
+
+  cancel(): void {}
+}
+
+// ------------------------------------------------------------------ placing library items
+
+/** Places the item of an object library: it follows the pen and is put down where the pen lifts. */
+class StampSession implements ToolSession {
+  private at: Pt;
+  private look: Items | null;
+
+  constructor(
+    private s: InkSurface,
+    first: InputPt,
+    readonly pen: boolean,
+  ) {
+    this.at = { x: first.x, y: first.y };
+    this.look = s.stampItems();
+    this.preview();
+  }
+
+  private preview(): void {
+    if (!this.look) return;
+    const box = itemsBounds(this.look);
+    if (!box) return;
+    const ctx = this.s.wetContext();
+    ctx.translate(this.at.x - (box.x + box.w / 2), this.at.y - (box.y + box.h / 2));
+    drawItems(ctx, this.look);
+  }
+
+  move(points: InputPt[]): void {
+    const p = points[points.length - 1];
+    this.at = { x: p.x, y: p.y };
+    this.preview();
+  }
+
+  up(last: InputPt | null): void {
+    if (last) this.at = { x: last.x, y: last.y };
+    this.s.clearWet();
+    this.s.placeStamp(this.at);
+  }
+
+  cancel(): void {
+    this.s.clearWet();
+  }
+}

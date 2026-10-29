@@ -15,6 +15,11 @@ export type PenType = "fountain" | "ballpoint" | "pencil" | "brush" | "calligrap
 
 export const PEN_TYPES: readonly PenType[] = ["fountain", "ballpoint", "pencil", "brush", "calligraphy", "marker"];
 
+/** How a fill is drawn: a solid colour, lines ("hatch") or crossed lines. */
+export type FillStyle = "solid" | "hatch" | "cross";
+
+export const FILL_STYLES: readonly FillStyle[] = ["solid", "hatch", "cross"];
+
 export interface Stroke {
   readonly id: string;
   readonly pen: PenType;
@@ -30,8 +35,26 @@ export interface Stroke {
   readonly closed?: boolean;
   /** An arrow head at the last point. */
   readonly arrow?: boolean;
+  /** An arrow head at the first point too. */
+  readonly arrowStart?: boolean;
   readonly dash?: boolean;
+  /**
+   * Fill colour (#rrggbb) of the area the stroke encloses. Fills are drawn
+   * underneath all ink, like the highlighter, so they never hide writing.
+   */
+  readonly fill?: string;
+  /** How the fill is drawn (solid when not set). */
+  readonly fillStyle?: FillStyle;
+  /** Only the fill is drawn, not the line (an area filled with the fill tool). */
+  readonly area?: boolean;
+  /** A connector: the shapes (stroke ids) its first and its last point are attached to. */
+  readonly from?: string;
+  readonly to?: string;
+  /** A connector with right angles (it is routed that way when its shapes move). */
+  readonly elbow?: boolean;
 }
+
+export type TextAlign = "left" | "center" | "right";
 
 export interface TextBox {
   readonly id: string;
@@ -45,6 +68,10 @@ export interface TextBox {
   /** Font size in page units. */
   readonly size: number;
   readonly color: string;
+  /** Left when not set. */
+  readonly align?: TextAlign;
+  /** The label of a shape (stroke id): centred in it, moves with it. */
+  readonly container?: string;
 }
 
 export interface ImageItem {
@@ -166,11 +193,27 @@ export function qp(p: number): number {
   return Math.round(Math.min(1, Math.max(0, p)) * 255) / 255;
 }
 
+const OPTIONAL_STROKE_FIELDS = ["poly", "closed", "arrow", "arrowStart", "dash", "fill", "fillStyle", "area", "from", "to", "elbow"] as const;
+
 export function makeStroke(fields: Omit<Stroke, "id"> & { id?: string }): Stroke {
   const s: Stroke = { ...fields, id: fields.id ?? newId() };
-  // drop false/undefined flags so equal strokes serialise equally
-  for (const k of ["poly", "closed", "arrow", "dash"] as const) if (!s[k]) delete (s as unknown as Record<string, unknown>)[k];
+  // drop false/undefined fields so equal strokes serialise equally
+  const r = s as unknown as Record<string, unknown>;
+  for (const k of OPTIONAL_STROKE_FIELDS) if (!r[k]) delete r[k];
+  if (r.fillStyle === "solid" || !r.fill) delete r.fillStyle;
   return s;
+}
+
+/** A stroke with some fields changed (fields set to undefined/false are removed). */
+export function withStroke(s: Stroke, patch: Partial<Omit<Stroke, "id">>): Stroke {
+  return makeStroke({ ...s, ...patch });
+}
+
+/** A text box with some fields changed (fields set to undefined are removed). */
+export function withText(t: TextBox, patch: Partial<Omit<TextBox, "id">>): TextBox {
+  const out = { ...t, ...patch } as Record<string, unknown>;
+  for (const k of ["align", "container"]) if (!out[k] || (k === "align" && out[k] === "left")) delete out[k];
+  return out as unknown as TextBox;
 }
 
 export function pointCount(s: Stroke): number {
@@ -224,15 +267,7 @@ export function movePage(doc: InkDoc, pageId: string, to: number): InkDoc {
 
 /** A copy of a page with new ids for the page and everything on it. */
 export function duplicatePage(page: Page): Page {
-  return {
-    ...page,
-    id: newId(),
-    strokes: page.strokes.map((s) => ({ ...s, id: newId() })),
-    texts: page.texts.map((t) => ({ ...t, id: newId() })),
-    images: page.images.map((i) => ({ ...i, id: newId() })),
-    links: page.links.map((l) => ({ ...l, id: newId() })),
-    figures: page.figures.map((f) => ({ ...f, id: newId() })),
-  };
+  return { ...page, id: newId(), ...cloneItems(page) };
 }
 
 /** Ids of every item on a page. */
@@ -324,11 +359,23 @@ export function replaceItems(page: Page, items: Partial<Items>): Page {
   };
 }
 
-/** Copies of items with new ids (paste, duplicate). */
-export function cloneItems(items: Items): Items {
+export type ItemLists = { readonly [K in keyof Items]: readonly Items[K][number][] };
+
+/**
+ * Copies of items with new ids (paste, duplicate, library items). Connectors
+ * and labels stay attached to the copies of their shapes; attachments to
+ * shapes that are not copied are dropped.
+ */
+export function cloneItems(items: ItemLists): Items {
+  const ids = new Map<string, string>();
+  for (const s of items.strokes) ids.set(s.id, newId());
+  const relink = (id: string | undefined) => (id ? ids.get(id) : undefined);
   return {
-    strokes: items.strokes.map((s) => ({ ...s, id: newId() })),
-    texts: items.texts.map((t) => ({ ...t, id: newId() })),
+    strokes: items.strokes.map((s) => {
+      const c: Stroke = { ...s, id: ids.get(s.id) as string };
+      return s.from || s.to ? withStroke(c, { from: relink(s.from), to: relink(s.to) }) : c;
+    }),
+    texts: items.texts.map((t) => (t.container ? withText({ ...t, id: newId() }, { container: relink(t.container) }) : { ...t, id: newId() })),
     images: items.images.map((i) => ({ ...i, id: newId() })),
     links: items.links.map((l) => ({ ...l, id: newId() })),
     figures: items.figures.map((f) => ({ ...f, id: newId() })),

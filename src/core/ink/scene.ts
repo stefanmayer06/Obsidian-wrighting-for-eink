@@ -9,7 +9,7 @@ import type { InkDoc, InkMeta, Page, Region, Stroke } from "./model";
  * flat scene. This turns a notebook into one: pages are stacked top to bottom
  * with a gap, and every item becomes an element in those scene coordinates.
  *
- *  - handwriting → "freedraw" (highlighter strokes are left out: they mark, they don't write)
+ *  - handwriting → "freedraw" (highlighter strokes and filled areas are left out: they mark, they don't write)
  *  - straight shapes → "line"/"arrow", closed shapes → "rectangle"
  *  - text boxes and link chips → "text" ([[links]] stay links)
  *  - images → "image"; figures → frames named "Diagram"; diagram areas → regions
@@ -41,7 +41,7 @@ function pageRole(p: Page): InkCustomData {
 
 function strokeElement(s: Stroke, dy: number): SceneElement | null {
   const n = Math.floor(s.pts.length / 3);
-  if (n === 0 || isMarker(s)) return null;
+  if (n === 0 || isMarker(s) || s.area) return null;
   const box = strokePointBounds(s);
   const x0 = s.pts[0];
   const y0 = s.pts[1];

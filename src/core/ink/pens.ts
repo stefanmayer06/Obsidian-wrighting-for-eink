@@ -204,22 +204,28 @@ export class StrokeBuilder {
   }
 }
 
-/** Arrow head lines for an arrow ending at the last point. */
-export function arrowHead(s: Stroke): Segment[] {
+/** Size of an arrow head (page units). */
+export function arrowHeadSize(width: number): number {
+  return Math.max(14, width * 5);
+}
+
+/** Arrow head lines for an arrow ending at the last point (or starting at the first). */
+export function arrowHead(s: Stroke, atStart = false): Segment[] {
   const n = Math.floor(s.pts.length / 3);
   if (n < 2) return [];
-  const tx = s.pts[(n - 1) * 3];
-  const ty = s.pts[(n - 1) * 3 + 1];
+  const at = (i: number) => (atStart ? i : n - 1 - i);
+  const tx = s.pts[at(0) * 3];
+  const ty = s.pts[at(0) * 3 + 1];
   // direction from a point a little before the tip (robust to a short last segment)
-  let i = n - 2;
-  while (i > 0 && Math.hypot(tx - s.pts[i * 3], ty - s.pts[i * 3 + 1]) < 8) i--;
-  const dx = tx - s.pts[i * 3];
-  const dy = ty - s.pts[i * 3 + 1];
+  let i = 1;
+  while (i < n - 1 && Math.hypot(tx - s.pts[at(i) * 3], ty - s.pts[at(i) * 3 + 1]) < 8) i++;
+  const dx = tx - s.pts[at(i) * 3];
+  const dy = ty - s.pts[at(i) * 3 + 1];
   const len = Math.hypot(dx, dy);
   if (len < 1e-6) return [];
   const ux = dx / len;
   const uy = dy / len;
-  const size = Math.max(14, s.width * 5);
+  const size = arrowHeadSize(s.width);
   const back = { x: tx - ux * size, y: ty - uy * size };
   const nx = -uy * size * 0.5;
   const ny = ux * size * 0.5;
@@ -242,6 +248,7 @@ export function strokeSegments(s: Stroke): Segment[] {
   const last = b.end(!!s.closed);
   if (last) out.push(last);
   if (s.arrow) out.push(...arrowHead(s));
+  if (s.arrowStart) out.push(...arrowHead(s, true));
   return out;
 }
 

@@ -18,7 +18,9 @@ and the notebook as PDF), plugin reload, "Open as Markdown", embedded ink
 pages, ink pages for notes that exist (and notes opened in a tab that shows an
 ink page), daily notes with an ink page, matching up the names of ink and text
 pages, choosing the folder of a new page, converting pages made with the
-earlier Excalidraw-based versions, and
+earlier Excalidraw-based versions, fills, flowcharts and object libraries
+(placing library shapes, arrows attached to shapes, labels, an Excalidraw
+library in the vault, "To library"), and
 the e-ink look on a Boox-sized window (toolbar fits).
 
 Linux only (uses Xvfb). Requirements: Node 20+, `xvfb`, the GTK/NSS libraries Electron needs.

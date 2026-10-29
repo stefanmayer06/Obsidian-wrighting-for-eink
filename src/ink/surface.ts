@@ -26,9 +26,14 @@ import {
   type PageBackground,
   type Selection,
   type Stroke,
+  replaceItems,
+  withStroke,
+  type FillStyle,
 } from "../core/ink/model";
+import { areaStroke, closedOutline, fillTargetAt } from "../core/ink/fill";
+import { withLabels } from "../core/ink/connectors";
 import { DEFAULT_PAPER, type PaperSpec } from "../core/paper";
-import { itemsBounds } from "../core/ink/transform";
+import { itemsBounds, scaling, transformItems } from "../core/ink/transform";
 import { drawPage, drawSegments, measureTextHeight, type ImageSource } from "./render";
 import type { Segment } from "../core/ink/pens";
 import { InputRouter } from "./input";
@@ -69,6 +74,15 @@ interface CachedPage {
 
 const PAGE_MARGIN = 12;
 
+/** An item of an object library, ready to be placed with the "stamp" tool. */
+export interface Stamp {
+  id: string;
+  name: string;
+  items: Items;
+  /** Drawn in the current pen colour, thickness and shape fill (the built-in flowchart shapes). */
+  restyle: boolean;
+}
+
 export class InkSurface {
   readonly el: HTMLElement;
   /** Holds the canvases and overlays; transformed with CSS while pinching/panning. */
@@ -94,6 +108,8 @@ export class InkSurface {
   settings: SurfaceSettings = { ...DEFAULT_SURFACE_SETTINGS };
 
   selection: Selection = EMPTY_SELECTION;
+  /** The library item the "stamp" tool places (see setStamp). */
+  stamp: Stamp | null = null;
   /** Page being changed by a running gesture (eraser), not yet in the document. */
   private work: Page | null = null;
   private indexCache: { page: Page; index: StrokeIndex } | null = null;
@@ -721,8 +737,116 @@ export class InkSurface {
     this.textEditor.commit();
     const changedTool = patch.tool !== undefined && patch.tool !== this.tools.tool;
     this.tools = { ...this.tools, ...patch, widths: { ...this.tools.widths, ...(patch.widths ?? {}) } };
+    // nothing to place: back to the pen
+    if (this.tools.tool === "stamp" && !this.stamp) this.tools = { ...this.tools, tool: "pen" };
+    if (changedTool && this.tools.tool !== "stamp") this.stamp = null;
     if (changedTool && this.tools.tool !== "lasso") this.setSelection(EMPTY_SELECTION);
     this.host.toolChanged?.(this.tools);
+  }
+
+  // ------------------------------------------------------------------ fills
+
+  /** The fill tool: fill what encloses `p` with the fill colour (or remove its fill). */
+  fillAt(p: Pt): void {
+    const page = this.page;
+    const { fillColor: color, fillStyle } = this.tools;
+    const target = fillTargetAt(page, p, (r) => this.strokeIndex(page).query(r));
+    if (!target) {
+      this.host.notice?.("Tap inside a shape or a closed area to fill it.");
+      return;
+    }
+    if (target.kind === "stroke") {
+      const st = target.stroke;
+      if ((st.fill ?? "") === color && (!color || (st.fillStyle ?? "solid") === fillStyle)) return;
+      const next = withStroke(st, color ? { fill: color, fillStyle } : { fill: undefined, fillStyle: undefined });
+      this.commitPage(replaceItems(page, { strokes: [next] }), strokeBounds(st));
+      return;
+    }
+    const old = target.existing;
+    if (old) {
+      if (!color) this.commitPage({ ...page, strokes: page.strokes.filter((st) => st.id !== old.id) }, strokeBounds(old));
+      else if (old.fill !== color || (old.fillStyle ?? "solid") !== fillStyle) this.commitPage(replaceItems(page, { strokes: [withStroke(old, { fill: color, color, fillStyle })] }), strokeBounds(old));
+      return;
+    }
+    if (!color) {
+      this.host.notice?.("There is no fill here.");
+      return;
+    }
+    const area = areaStroke(target.pts, color, fillStyle);
+    this.commitPage(addItems(page, { strokes: [area] }), strokeBounds(area));
+  }
+
+  /** Fill the selected shapes ("" removes their fill; selected areas are removed then). */
+  fillSelection(color: string, fillStyle: FillStyle): void {
+    const sel = this.selection;
+    const page = this.page;
+    const strokes: Stroke[] = [];
+    for (const st of page.strokes) {
+      if (!sel.strokes.has(st.id) || st.pen === "marker" || !closedOutline(st)) strokes.push(st);
+      else if (st.area) {
+        if (color) strokes.push(withStroke(st, { fill: color, color, fillStyle }));
+      } else strokes.push(withStroke(st, color ? { fill: color, fillStyle } : { fill: undefined, fillStyle: undefined }));
+    }
+    this.commitPage({ ...page, strokes }, this.selectionBounds(), { keepSelection: true });
+  }
+
+  /** Can the selection be filled (does it hold shapes or closed strokes)? */
+  get selectionFillable(): boolean {
+    return this.page.strokes.some((st) => this.selection.strokes.has(st.id) && st.pen !== "marker" && closedOutline(st) !== null);
+  }
+
+  // ------------------------------------------------------------------ object libraries
+
+  /** Choose a library item to place: every tap on the page puts one there (until another tool is chosen). */
+  setStamp(stamp: Stamp | null): void {
+    if (!stamp) {
+      this.stamp = null;
+      if (this.tools.tool === "stamp") this.setTools({ tool: "pen" });
+      return;
+    }
+    // items bigger than most of the page are made smaller
+    const box = itemsBounds(stamp.items);
+    const page = this.page;
+    let items = stamp.items;
+    if (box) {
+      const k = Math.min(1, (page.w * 0.8) / Math.max(1, box.w), (page.h * 0.6) / Math.max(1, box.h));
+      if (k < 0.999) items = transformItems(items, scaling(k, { x: box.x, y: box.y }));
+    }
+    this.textEditor.commit();
+    this.setSelection(EMPTY_SELECTION);
+    this.stamp = { ...stamp, items };
+    this.tools = { ...this.tools, tool: "stamp" };
+    this.host.toolChanged?.(this.tools);
+  }
+
+  /** The items being placed, as they will look (in the pen colour and thickness, for the built-in shapes). */
+  stampItems(): Items | null {
+    const st = this.stamp;
+    if (!st) return null;
+    if (!st.restyle) return st.items;
+    const t = this.tools;
+    const width = Math.max(1, t.widths[t.pen]);
+    return {
+      ...st.items,
+      strokes: st.items.strokes.map((it) =>
+        withStroke(it, { color: t.color, width, ...(closedOutline(it) && !it.area ? { fill: t.shapeFill || undefined, fillStyle: t.fillStyle } : {}) }),
+      ),
+      texts: st.items.texts.map((it) => ({ ...it, color: t.color })),
+    };
+  }
+
+  /** Put the library item being placed on the page, centred at `at`. */
+  placeStamp(at: Pt): void {
+    const look = this.stampItems();
+    if (!look) return;
+    const items = cloneItems(look);
+    const box = itemsBounds(items);
+    if (!box) return;
+    const page = this.page;
+    const cx = Math.max(box.w / 2, Math.min(page.w - box.w / 2, at.x));
+    const cy = Math.max(box.h / 2, Math.min(page.h - box.h / 2, at.y));
+    const moved = shiftItems(items, cx - (box.x + box.w / 2), cy - (box.y + box.h / 2));
+    this.commitPage(addItems(page, moved), itemsBounds(moved));
   }
 
   setSettings(patch: Partial<SurfaceSettings>): void {
@@ -748,6 +872,8 @@ export class InkSurface {
 
   setSelection(sel: Selection): void {
     const wasEmpty = selectionSize(this.selection) === 0;
+    // labels go with their shapes
+    sel = withLabels(this.page, sel);
     this.selection = sel;
     // nothing was selected and nothing is: leave the page alone (this runs after every stroke)
     if (wasEmpty && selectionSize(sel) === 0) return;
@@ -830,7 +956,7 @@ export class InkSurface {
     const page = this.page;
     const next: Page = {
       ...page,
-      strokes: page.strokes.map((s) => (sel.strokes.has(s.id) && s.pen !== "marker" ? { ...s, color } : s)),
+      strokes: page.strokes.map((s) => (sel.strokes.has(s.id) && s.pen !== "marker" && !s.area ? { ...s, color } : s)),
       texts: page.texts.map((t) => (sel.texts.has(t.id) ? { ...t, color } : t)),
     };
     this.commitPage(next, this.selectionBounds(), { keepSelection: true });

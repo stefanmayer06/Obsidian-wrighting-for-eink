@@ -24,8 +24,8 @@ Taken by the automated end-to-end tests in real Obsidian (the "handwriting" is g
 | ![Ink page with handwriting, a diagram and a text box](docs/ink-page.png) | ![Text page with the transcript and a live figure](docs/text-page-eink.png) |
 | **Pen options** | **All pages** |
 | ![The pen card: pens, thickness, colours](docs/pen-options.png) | ![Page overview](docs/pages.png) |
-| **Papers from arXiv** | |
-| ![Search arXiv; the most popular papers with an Import button](docs/arxiv.png) | |
+| **Papers from arXiv** | **Flowcharts, fills, object libraries** |
+| ![Search arXiv; the most popular papers with an Import button](docs/arxiv.png) | ![A flowchart from the object library: shapes with labels, attached arrows, a filled decision and a hatched box from an Excalidraw library](docs/flowchart.png) |
 
 ## Writing – like in the Boox Notes app
 
@@ -36,10 +36,12 @@ The toolbar sits at the top (or bottom, left, right – see *More → View*). Ta
 | **Pen** | Fountain pen, ballpoint, pencil, brush and calligraphy pen. Five thicknesses (plus fine steps), ten colours (they show as greys on black-and-white screens), pressure sensitivity on/off. Two **favourite pens** sit next to the tools for quick switching |
 | **Highlighter** | Transparent, stays underneath your writing, six colours |
 | **Eraser** | **Partial** (erases only where you rub), **whole stroke**, or **lasso** (erases everything inside a loop); four sizes; *Clear this page*. The **eraser end of the pen** always erases, and holding the **side button** erases too (configurable) |
-| **Lasso** | Draw a loop around writing (or tap one item) to select it. Drag to move, the corner to resize, the top handle to rotate. The bar above the selection: delete, cut, copy, duplicate, colour, *Figure* (always show it as a picture on the text page) and **To text** (turns the handwriting into a typed text box) |
-| **Shapes** | Line, arrow, dashed line, rectangle, ellipse, circle, triangle, diamond – drag to draw |
-| **Text** | Tap the page and type; tap a text to change it. Four sizes |
-| **Insert** | Images (from the vault or the device), a link to a note (a tappable chip on the page), pages from a PDF |
+| **Lasso** | Draw a loop around writing (or tap one item) to select it. Drag to move, the corner to resize, the top handle to rotate. The bar above the selection: delete, cut, copy, duplicate, colour, **Fill**, *Figure* (always show it as a picture on the text page), **To text** (turns the handwriting into a typed text box) and **To library** (keeps it in your object library) |
+| **Shapes** | Line, arrow, elbow arrow, dashed line, rectangle, ellipse, circle, triangle, diamond – drag to draw. New shapes can be filled. An arrow drawn from one shape to another **stays attached** to both |
+| **Fill** | Tap inside a shape – or inside any area closed by lines, like a box drawn with four strokes or a circle drawn with the pen – to fill it. Twelve colours, solid, hatched or cross-hatched; *Remove fills* takes a fill away. Fills stay underneath your writing |
+| **Text** | Tap the page and type; tap a text to change it. Tap inside a shape to give it a **label**, centred in the shape, that moves with it. Four sizes |
+| **Object library** | Flowchart shapes and the objects of **Excalidraw libraries**: tap one, then tap the page to put it there (see *Flowcharts and object libraries*) |
+| **Insert** | Images (from the vault or the device), a link to a note (a tappable chip on the page), objects from the library, pages from a PDF |
 | **Undo / Redo** | Unlimited while the page is open |
 
 Smart pen features (each can be turned off):
@@ -53,13 +55,25 @@ Fingers never draw (unless you turn on *Draw with a finger*), so your palm can r
 - **two-finger tap** = undo, **three-finger tap** = redo,
 - touches while the pen is near the screen are ignored (palm rejection).
 
-With a keyboard: `Ctrl/Cmd+Z` / `Ctrl/Cmd+Shift+Z`, `Delete`, `Ctrl/Cmd+C/X/V/D/A`, `PageUp`/`PageDown` or arrow keys to turn pages, `P` pen, `H` highlighter, `E` eraser, `L` lasso, `S` shapes, `T` text, `Ctrl/Cmd` + `=` / `-` / `0` to zoom. All tools and page actions are also commands, so you can give them hotkeys.
+With a keyboard: `Ctrl/Cmd+Z` / `Ctrl/Cmd+Shift+Z`, `Delete`, `Ctrl/Cmd+C/X/V/D/A`, `PageUp`/`PageDown` or arrow keys to turn pages, `P` pen, `H` highlighter, `E` eraser, `L` lasso, `S` shapes, `F` fill, `T` text, `Ctrl/Cmd` + `=` / `-` / `0` to zoom. All tools and page actions are also commands, so you can give them hotkeys.
 
 ### Pages and paper
 
 A notebook has pages, like in Boox Notes. `‹ 3 / 12 ›` in the toolbar turns pages; tap the number for **all pages** (move, duplicate, delete, add). `+` adds a page after the current one; *More → Add a page…* lets you choose the paper and put it before, after or at the end.
 
 Paper templates like in GoodNotes and Boox Notes: blank, ruled, dotted, squared, graph paper, isometric, Cornell notes, checklist and music staff, each with narrow/normal/wide spacing, white/ivory/yellow/blue paper and portrait or landscape (A4). Change the paper of a page any time – your writing stays.
+
+### Flowcharts and object libraries
+
+The **library** button in the toolbar (or *Insert → From the object library…*, or the command *Open the object library*) opens the object library next to the page:
+
+- **Flowchart** – the usual flowchart symbols: process, decision, start/end, input/output, document, predefined process, database, manual input, preparation, manual operation, delay, display, connector, off-page connector, merge, extract and comment. They are drawn in the pen colour and thickness you have chosen, and with the fill chosen for shapes.
+- **Excalidraw libraries** – every `.excalidrawlib` file in your vault, and the library of the [Excalidraw plugin](https://github.com/zsviczian/obsidian-excalidraw-plugin) if you use it. Get more at [libraries.excalidraw.com](https://libraries.excalidraw.com): *Import from a link…* takes the link of a library's *Download* button (or its *Add to Excalidraw* link), *Import a library file…* a file you downloaded. Rectangles, ellipses, diamonds, lines, curves, arrows, pen drawings and text come over with their colours, fills, hatching, rounded corners and rotation; labels stay in their shapes and arrows stay attached. (Pictures in libraries are left out.)
+- **My library** – lasso something on the page and tap **To library** to keep it. My library is an Excalidraw library too, so Excalidraw can use what you keep in it (and the trash button removes an item).
+
+Tap an object, then tap the page where it should go – as often as you like; choosing a tool stops. On a narrow screen the library folds away to its title while you place objects (tap it to open it again).
+
+To draw a flowchart: place the shapes, then connect them with **Arrow** or **Elbow arrow** (in the library, or in the shape tool) – draw from one shape to the next. The arrow starts and ends at the shapes' outlines and stays attached: move a shape with the lasso and its arrows follow (an elbow arrow keeps its right angles). Tap inside a shape with the **Text** tool to type its label, or write into it by hand. **Fill** colours the shapes.
 
 ## The text page
 
@@ -172,6 +186,9 @@ Privacy: only your handwriting strokes are rendered and sent (black on white –
 | Tasks | Draw a small box in front of the line (`- [ ]`); tick or cross it when done (`- [x]`) |
 | Tables | Draw a line under the headings and lines between the columns, write in the cells |
 | Drawings | Draw anything – it is detected. To force: lasso → *Figure* |
+| Flowcharts | Library button → *Flowchart* → tap a shape, tap the page; draw arrows from shape to shape; text tool → tap a shape for its label |
+| Fill | Fill tool → tap inside a shape or an area enclosed by lines; or lasso → *Fill* |
+| Excalidraw libraries | Library button → *Import from a link…* / *Import a library file…*; lasso → *To library* keeps your own |
 | Pages | `+` adds a page after this one, `‹ ›` or a swipe turns pages, the page number opens all pages, *More → Add a page…* chooses paper and position, *More → Paper of this page…* changes the paper |
 | Handwriting → typed text | Lasso the handwriting → **To text** |
 | Annotate a PDF | Right-click a PDF → *Annotate with Ink Notebook*; *More → Export* for the annotated PDF |
@@ -200,6 +217,7 @@ The two `%% … %%` lines mark the transcript; in Live Preview they are shown as
 - **Handwriting recognition** – service (Ink Notebook Cloud or your own Azure key), license key or endpoint and key, API version, language hint, highlight uncertain words, transcribe while writing, how long to wait when flipping, requests per minute, clickable handwritten links, diagram detection sensitivity, offline queue and cache.
 - **Display & e‑ink** – e‑ink mode (automatic / on / off), large touch targets, position of the bookmarks on the text page.
 - **PDF annotation** – how many pages to import without asking, the folder for papers from arXiv (`Papers` by default).
+- **Object libraries** – the folder for imported libraries and *My library* (`Ink libraries` by default).
 
 ## Troubleshooting
 
@@ -213,6 +231,8 @@ The two `%% … %%` lines mark the transcript; in Live Preview they are shown as
 - **A table is shown as a picture** – the lines of a table have to be long and fairly straight and cross each other (or nearly touch), and the writing in at least two cells has to be readable.
 - **A box in front of a line did not become a task** – the box has to be closed, about as high as the writing (up to about twice), right in front of the first word and empty or ticked.
 - **Text on the text page is wrong** – just correct it there; your correction stays.
+- **"Tap inside a shape or a closed area to fill it"** – the lines around the spot do not meet: close the gap (small gaps are bridged) or tap a smaller area. A fill that went too far is undone with *Undo*.
+- **An object from an Excalidraw library looks a little different** – Ink Notebook draws clean lines (not Excalidraw's sketchy ones) in its own font, and leaves out pictures, which libraries do not contain.
 - **"This note has text in it"** – the note has the `ink-notebook` property (which makes a note open as an ink page) but text instead of handwriting. Nothing is changed until you choose: *Keep the text and add an ink page* removes the property and gives the note its own ink page.
 - **A text page is called "Name (text)"** – its ink page had the name (earlier versions turned a note into an ink page when it was opened in a tab that showed an ink page). Run **Match up the names of ink and text pages**.
 - **"This ink page could not be opened"** – the file was changed in a way Ink Notebook does not understand. It is not touched; *Open as Markdown* to look at it (e.g. a sync conflict).
@@ -221,7 +241,9 @@ The two `%% … %%` lines mark the transcript; in Live Preview they are shown as
 ## How it works
 
 - **The pen engine** (`src/ink`) draws on one opaque canvas that always shows the page as it looks now. Each pen movement adds one curve piece, drawn straight onto it (with every coalesced/raw pointer event, and the low-latency `desynchronized` canvas except on e-ink screens, where Boox shows that canvas with the dither pattern of its fast refresh), so the cost per movement does not grow with the page. Erasing and moving redraw only the area that changed; neighbouring pages are rendered in the background so that turning pages is instant. A second canvas shows previews (highlighter, lasso, shapes, moved selections). Strokes keep their pressure and are drawn with the same code live, on redraw, in figures and in exports (as SVG paths – the PDF export uses them too), so they look the same everywhere.
-- **The file** (`core/ink/codec.ts`): a Markdown file whose ink data sits in a hidden `%% ```ink-data … ``` %%` block, one line per page and per stroke; points are delta-encoded integers (0.1 units, pressure in 1/255) in base64. Edits are immutable updates (undo keeps old versions; they share everything that did not change).
+- **The file** (`core/ink/codec.ts`): a Markdown file whose ink data sits in a hidden `%% ```ink-data … ``` %%` block, one line per page and per stroke; points are delta-encoded integers (0.1 units, pressure in 1/255) in base64. Fills, connectors and the like follow a stroke's points as `key:value` words, which earlier versions skip (they show the stroke without its fill). Edits are immutable updates (undo keeps old versions; they share everything that did not change).
+- **Fills** (`core/ink/fill.ts`) are drawn in a pass of their own underneath the highlighter and the ink. The fill tool fills the smallest shape around the tap; when other lines divide it, or several strokes enclose the spot, the strokes are drawn into a grid, flood-filled from the tap and the outline is traced – that becomes an *area*, a stroke that is only a fill. Hatching is cut to the shape as plain lines, so it looks the same on the page, in figures and in the PDF.
+- **Flowcharts** (`core/ink/connectors.ts`): an arrow remembers the shapes it was drawn between and is routed again, outline to outline, when they move. **Object libraries** (`core/ink/excalidrawLib.ts`) are read and written in Excalidraw's `.excalidrawlib` format.
 - **Recognition**: strokes are grouped into writing areas, rendered black on white (without long straight lines such as table lines and underlines, which only confuse OCR) and sent to Azure; the returned word boxes are mapped back onto the strokes to separate handwriting from drawings. Drawings are clustered into diagrams, each with a diagram area stored in the ink page; the text page shows that area with an `ink-figure` block.
 - The transcript region stores a compact fingerprint of what was generated, which is how your corrections, deletions and additions are recognised and kept.
 
@@ -246,7 +268,7 @@ The pure logic (the ink model, file format, pens, erasers, shapes, OCR parsing, 
 
 - **Payment:** Ink Notebook Cloud is an optional paid subscription. Everything else – including handwriting recognition with your own Azure key – is free.
 - **Account:** Ink Notebook Cloud needs a license key from a purchase (sold through Polar). Nothing else needs an account.
-- **Network use:** Ink Notebook works offline. It connects to the internet only for handwriting recognition and, when you use *Papers from arXiv*, to find and download papers: with your own key it sends handwriting images to *your* Azure AI Vision resource; with Ink Notebook Cloud it sends handwriting images and your license key to the Ink Notebook server (Supabase, Frankfurt), which checks the key with Polar and passes the images to Azure AI Vision. When you open the handwriting recognition settings or the setup assistant, the plugin asks the Ink Notebook server whether the subscription is offered (no personal data is sent). *Papers from arXiv* sends your search words to the arXiv API (export.arxiv.org), loads the list of popular papers from Hugging Face (huggingface.co) and downloads the PDF of a paper you import from arxiv.org – only when you open it or search. There is no telemetry and no ads.
+- **Network use:** Ink Notebook works offline. It connects to the internet only for handwriting recognition and, when you use *Papers from arXiv*, to find and download papers: with your own key it sends handwriting images to *your* Azure AI Vision resource; with Ink Notebook Cloud it sends handwriting images and your license key to the Ink Notebook server (Supabase, Frankfurt), which checks the key with Polar and passes the images to Azure AI Vision. When you open the handwriting recognition settings or the setup assistant, the plugin asks the Ink Notebook server whether the subscription is offered (no personal data is sent). *Papers from arXiv* sends your search words to the arXiv API (export.arxiv.org), loads the list of popular papers from Hugging Face (huggingface.co) and downloads the PDF of a paper you import from arxiv.org – only when you open it or search. *Import from a link…* in the object library downloads the library from the link you paste (usually libraries.excalidraw.com); *Find libraries* opens libraries.excalidraw.com in your browser. There is no telemetry and no ads.
 
 ## License
 

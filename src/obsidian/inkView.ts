@@ -8,9 +8,10 @@ import { splitFrontmatter } from "../core/transcript";
 import { InkSurface } from "../ink/surface";
 import { Toolbar, type ToolbarPosition } from "../ink/ui/toolbar";
 import { Popover, type MenuSection } from "../ink/ui/popover";
-import type { SelectionAction, SurfaceSettings } from "../ink/types";
+import type { SelectionAction, SurfaceSettings, ToolState } from "../ink/types";
+import { LibraryPanel } from "../ink/ui/libraryPanel";
 import { einkActive, lowLatencyActive } from "./einkMode";
-import { ConfirmModal, FilePickModal, NotePickModal } from "./modals";
+import { ConfirmModal, FilePickModal, NotePickModal, TextPromptModal } from "./modals";
 import { PaperPickerModal } from "./paperPicker";
 import { PageOverviewModal } from "./pageOverview";
 import { NotesPanel } from "./notesPanel";
@@ -41,6 +42,7 @@ export class InkView extends TextFileView {
   private savedInk = "";
   private errorEl: HTMLElement | null = null;
   private notes: NotesPanel | null = null;
+  private library: LibraryPanel | null = null;
   private unsubscribe: (() => void) | null = null;
   private ready = false;
   /** File data that arrived before the view was ready. */
@@ -90,27 +92,29 @@ export class InkView extends TextFileView {
         this.toolbar?.refreshPage(i, n);
         if (this.file) plugin.lastPage.set(this.file.path, i);
       },
-      toolChanged: () => this.toolbar?.refreshTools(),
+      toolChanged: () => {
+        this.toolbar?.refreshTools();
+        this.library?.markActive();
+      },
       historyChanged: (u, r) => this.toolbar?.refreshHistory(u, r),
       selectionActions: () => this.selectionActions(),
       notice: (m) => new Notice(m, 2500),
     });
     this.surface.tools = structuredClone(plugin.settings.tools);
+    if (this.surface.tools.tool === "stamp") this.surface.tools.tool = "pen";
     this.toolbar = new Toolbar(content, this.surface, {
       icon: (el, name) => setIcon(el, name),
       openPages: () => new PageOverviewModal(this.app, this).open(),
       insertMenu: () => this.insertMenu(),
       moreMenu: () => this.moreMenu(),
-      toolsChanged: (state) => {
-        plugin.settings.tools = structuredClone(state);
-        plugin.saveSettingsSoon();
-      },
+      toolsChanged: (state) => this.rememberTools(state),
       settingsChanged: (patch) => {
         Object.assign(plugin.settings, patch);
         plugin.saveSettingsSoon();
         plugin.applyInkSettings();
       },
       endButtons: () => this.endButtons(),
+      openLibrary: () => this.openLibrary(),
     });
     content.prepend(this.toolbar.el);
     this.applySettings();
@@ -133,6 +137,7 @@ export class InkView extends TextFileView {
     this.ready = false;
     this.unsubscribe?.();
     this.notes?.close();
+    this.library?.close();
     this.toolbar?.destroy();
     this.surface?.destroy();
   }
@@ -372,11 +377,10 @@ export class InkView extends TextFileView {
     key(["Mod"], "=", () => s.zoomAt(1.25, s.width / 2, s.height / 2));
     key(["Mod"], "-", () => s.zoomAt(0.8, s.width / 2, s.height / 2));
     key(["Mod"], "0", () => s.resetZoom());
-    const tool = (k: string, t: "pen" | "marker" | "eraser" | "lasso" | "shape" | "text") =>
+    const tool = (k: string, t: "pen" | "marker" | "eraser" | "lasso" | "shape" | "text" | "fill") =>
       key([], k, () => {
         s.setTools({ tool: t });
-        this.plugin.settings.tools = structuredClone(s.tools);
-        this.plugin.saveSettingsSoon();
+        this.rememberTools(s.tools);
       });
     tool("p", "pen");
     tool("h", "marker");
@@ -384,6 +388,13 @@ export class InkView extends TextFileView {
     tool("l", "lasso");
     tool("s", "shape");
     tool("t", "text");
+    tool("f", "fill");
+  }
+
+  /** Keep the tools for next time (placing a library item is not kept: it needs the item). */
+  private rememberTools(state: ToolState): void {
+    this.plugin.settings.tools = structuredClone({ ...state, tool: state.tool === "stamp" ? "pen" : state.tool });
+    this.plugin.saveSettingsSoon();
   }
 
   // ------------------------------------------------------------------ toolbar content
@@ -408,7 +419,82 @@ export class InkView extends TextFileView {
       this.notes = null;
       return;
     }
+    // one panel at a time
+    this.library?.close();
     this.notes = new NotesPanel(this.plugin, this.surface.el, this.file, () => (this.notes = null));
+  }
+
+  /** The object library next to the page (open or close it). */
+  openLibrary(): void {
+    if (this.library) {
+      this.library.close();
+      return;
+    }
+    if (this.notes) {
+      this.notes.close();
+      this.notes = null;
+    }
+    const plugin = this.plugin;
+    const lib = plugin.library;
+    const reportError = (what: string) => (e: unknown) => plugin.switcher.reportError(what, e);
+    this.library = new LibraryPanel(
+      this.surface.el,
+      this.surface,
+      {
+        icon: (el, name) => setIcon(el, name),
+        sources: () => lib.sources(),
+        items: (id) => lib.items(id),
+        setTools: (patch) => {
+          this.surface.setTools(patch);
+          this.toolbar.refreshTools();
+          this.rememberTools(this.surface.tools);
+        },
+        actions: () => [
+          {
+            icon: "upload",
+            label: "Import a library file…",
+            run: () =>
+              void lib.importFile().then((id) => {
+                if (id) void this.library?.reload(id);
+              }, reportError("Could not import the library")),
+          },
+          {
+            icon: "link",
+            label: "Import from a link…",
+            run: () =>
+              void TextPromptModal.ask(this.app, "Link of an Excalidraw library (libraries.excalidraw.com: “Download” or “Add to Excalidraw”)").then((url) => {
+                if (url) void lib.importUrl(url).then((id) => this.library?.reload(id), reportError("Could not import the library"));
+              }),
+          },
+          { icon: "globe", label: "Find libraries (libraries.excalidraw.com)", run: () => window.open("https://libraries.excalidraw.com", "_blank") },
+        ],
+        removeItem: (source, item) => lib.removeItem(source, item).catch(reportError("Could not remove the item")),
+        lastSource: plugin.settings.lastLibrary,
+        sourceChanged: (id) => {
+          if (plugin.settings.lastLibrary === id) return;
+          plugin.settings.lastLibrary = id;
+          plugin.saveSettingsSoon();
+        },
+      },
+      () => (this.library = null),
+    );
+  }
+
+  /** "To library" in the lasso menu: keep the selection in My library. */
+  private async selectionToLibrary(): Promise<void> {
+    const items = this.surface.selectedItems();
+    if (items.strokes.length + items.texts.length === 0) {
+      new Notice("Only drawings and text can be kept in a library.");
+      return;
+    }
+    const name = await TextPromptModal.ask(this.app, "Name of the library item", items.texts[0]?.text.split("\n")[0].slice(0, 40) ?? "");
+    if (!name) return;
+    try {
+      await this.plugin.library.addToMyLibrary(items, name);
+      void this.library?.reload();
+    } catch (e) {
+      this.plugin.switcher.reportError("Could not add it to the library", e);
+    }
   }
 
   /** Called when the text page changed (typed notes). */
@@ -417,7 +503,7 @@ export class InkView extends TextFileView {
   }
 
   private selectionActions(): SelectionAction[] {
-    const actions: SelectionAction[] = [];
+    const actions: SelectionAction[] = [{ id: "library", icon: "library", label: "To library", run: () => void this.selectionToLibrary() }];
     if (this.plugin.ocrConfigured()) {
       actions.push({ id: "totext", icon: "type", label: "To text", run: () => void this.plugin.selectionToText(this) });
     }
@@ -432,6 +518,7 @@ export class InkView extends TextFileView {
           { icon: "image", label: "Image from the vault…", run: () => void this.insertVaultImage() },
           { icon: "camera", label: "Image from this device…", run: () => this.insertDeviceImage() },
           { icon: "link", label: "Link to a note…", run: () => void this.insertLink() },
+          { icon: "library", label: "From the object library…", hint: "Flowchart shapes and Excalidraw libraries", run: () => (this.library ? undefined : this.openLibrary()) },
           {
             icon: "type",
             label: "Text box",

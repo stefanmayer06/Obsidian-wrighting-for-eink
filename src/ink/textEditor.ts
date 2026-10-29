@@ -1,6 +1,7 @@
 import type { Pt } from "../core/geometry";
-import { addItems, newId, replaceItems, type TextBox } from "../core/ink/model";
+import { addItems, newId, replaceItems, withText, type Stroke, type TextBox } from "../core/ink/model";
 import { unionRect } from "../core/ink/geom";
+import { labelBox } from "../core/ink/connectors";
 import { measureTextHeight, TEXT_FONT, TEXT_LINE_HEIGHT } from "./render";
 import type { InkSurface } from "./surface";
 
@@ -33,6 +34,13 @@ export class TextEditor {
     this.open({ box: { id: newId(), x, y, w, h: size * TEXT_LINE_HEIGHT, text: "", size, color: this.s.tools.color }, isNew: true });
   }
 
+  /** Type the label of a shape: centred in it, it moves with the shape. */
+  createLabel(shape: Stroke): void {
+    const size = this.s.tools.textSize;
+    const h = size * TEXT_LINE_HEIGHT;
+    this.open({ box: { id: newId(), ...labelBox(shape, h), h, text: "", size, color: this.s.tools.color, align: "center", container: shape.id }, isNew: true });
+  }
+
   edit(t: TextBox): void {
     this.open({ box: t, isNew: false });
     this.s.hidden.add(t.id);
@@ -48,6 +56,7 @@ export class TextEditor {
     ta.spellcheck = true;
     ta.style.fontFamily = TEXT_FONT;
     ta.style.color = e.box.color;
+    ta.style.textAlign = e.box.align ?? "left";
     ta.addEventListener("input", () => this.autosize());
     ta.addEventListener("keydown", (ev) => {
       ev.stopPropagation();
@@ -111,7 +120,10 @@ export class TextEditor {
       this.s.renderRect(oldRect);
       return;
     }
-    const box: TextBox = { ...old, text, h: Math.round(measureTextHeight(text, old.w, old.size) * 10) / 10 };
+    const h = Math.round(measureTextHeight(text, old.w, old.size) * 10) / 10;
+    // a label stays centred in its shape
+    const shape = old.container ? page.strokes.find((st) => st.id === old.container) : undefined;
+    const box: TextBox = withText({ ...old, text, h }, shape ? labelBox(shape, h) : {});
     const next = e.isNew ? addItems(page, { texts: [box] }) : replaceItems(page, { texts: [box] });
     this.s.commitPage(next, unionRect(oldRect, { x: box.x, y: box.y, w: box.w, h: box.h }));
   }

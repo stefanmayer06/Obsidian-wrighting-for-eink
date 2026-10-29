@@ -1,6 +1,6 @@
 import { convexHull, polygonArea, polygonPerimeter, simplifyIndices, type Pt } from "../geometry";
 import { strokePointBounds } from "./geom";
-import { makeStroke, q, type PenType, type Stroke } from "./model";
+import { makeStroke, q, type FillStyle, type PenType, type Stroke } from "./model";
 
 /**
  * Shapes: the shape tool draws them from a drag, and "hold to snap" turns a
@@ -8,11 +8,12 @@ import { makeStroke, q, type PenType, type Stroke } from "./model";
  * rests at the end of the stroke (like Boox Notes' shape recognition).
  */
 
-export type ShapeKind = "line" | "arrow" | "dashed" | "rect" | "ellipse" | "circle" | "triangle" | "diamond";
+export type ShapeKind = "line" | "arrow" | "elbow" | "dashed" | "rect" | "ellipse" | "circle" | "triangle" | "diamond";
 
 export const SHAPES: Record<ShapeKind, { label: string; icon: string }> = {
   line: { label: "Line", icon: "minus" },
   arrow: { label: "Arrow", icon: "move-up-right" },
+  elbow: { label: "Elbow arrow", icon: "corner-down-right" },
   dashed: { label: "Dashed line", icon: "ellipsis" },
   rect: { label: "Rectangle", icon: "square" },
   ellipse: { label: "Ellipse", icon: "circle" },
@@ -25,11 +26,19 @@ export interface ShapeStyle {
   pen: PenType;
   color: string;
   width: number;
+  /** Fill of closed shapes (none when not set). */
+  fill?: string;
+  fillStyle?: FillStyle;
+}
+
+/** Arrows and elbow arrows connect shapes (see connectors.ts). */
+export function isConnectorKind(kind: ShapeKind): boolean {
+  return kind === "arrow" || kind === "elbow";
 }
 
 const P = 0.5;
 
-function fromPoints(points: ReadonlyArray<Pt>, style: ShapeStyle, extra: Partial<Pick<Stroke, "closed" | "arrow" | "dash">> = {}): Stroke {
+function fromPoints(points: ReadonlyArray<Pt>, style: ShapeStyle, extra: Partial<Pick<Stroke, "closed" | "arrow" | "dash" | "elbow">> = {}): Stroke {
   const pts = new Float32Array(points.length * 3);
   points.forEach((p, i) => {
     pts[i * 3] = q(p.x);
@@ -38,10 +47,12 @@ function fromPoints(points: ReadonlyArray<Pt>, style: ShapeStyle, extra: Partial
   });
   // shapes are drawn with an even line whatever pen is selected (a highlighter stays a highlighter)
   const pen: PenType = style.pen === "marker" ? "marker" : "ballpoint";
-  return makeStroke({ pen, color: style.color, width: style.width, pts, poly: true, ...extra });
+  const fill = extra.closed && pen !== "marker" && style.fill ? { fill: style.fill, fillStyle: style.fillStyle } : {};
+  return makeStroke({ pen, color: style.color, width: style.width, pts, poly: true, ...extra, ...fill });
 }
 
-function ellipsePoints(cx: number, cy: number, rx: number, ry: number, angle = 0): Pt[] {
+/** Points around an ellipse (enough for a smooth outline at its size). */
+export function ellipsePoints(cx: number, cy: number, rx: number, ry: number, angle = 0): Pt[] {
   const n = Math.max(24, Math.min(96, Math.round((Math.abs(rx) + Math.abs(ry)) / 4)));
   const cos = Math.cos(angle);
   const sin = Math.sin(angle);
@@ -68,6 +79,11 @@ export function shapeFromDrag(kind: ShapeKind, a: Pt, b: Pt, style: ShapeStyle):
       return fromPoints([a, b], style, { dash: true });
     case "arrow":
       return fromPoints([a, b], style, { arrow: true });
+    case "elbow": {
+      // one right angle, horizontal first when the drag is wider than high
+      const corner = Math.abs(b.x - a.x) >= Math.abs(b.y - a.y) ? { x: b.x, y: a.y } : { x: a.x, y: b.y };
+      return fromPoints([a, corner, b], style, { arrow: true, elbow: true });
+    }
     case "rect":
       return fromPoints(
         [
