@@ -187,7 +187,10 @@ export class PageSwitcher {
    * paper (the paper picker opens if enabled in the settings).
    */
   async createPage(opts: {
+    /** The name of the page (not asked for). */
     name?: string;
+    /** The name filled in when asking for one (instead of the date and time). */
+    suggestedName?: string;
     /** Folder for the text page (the ink file goes into its ink subfolder). */
     folder?: string;
     /** A file or folder that counts as "current" for choosing the folder. */
@@ -209,7 +212,7 @@ export class PageSwitcher {
       const choice = await PaperPickerModal.pick(this.app, {
         mode: "new",
         initial: settings.paper,
-        name: !opts.name && settings.askForPageName ? this.defaultPageName() : undefined,
+        name: !opts.name && settings.askForPageName ? (opts.suggestedName ?? this.defaultPageName()) : undefined,
         folder: textFolder,
         hideFolder: this.hideInkFolders(),
       });
@@ -227,7 +230,7 @@ export class PageSwitcher {
       textFolder = picked;
     }
     const inkFolder = inkFolderOf(textFolder, cleanSubfolder(settings.inkSubfolder));
-    name0 ??= await this.choosePageName();
+    name0 ??= await this.choosePageName(opts.suggestedName);
     if (!name0) return null;
     await this.plugin.pairs.ensureFolder(textFolder);
     await this.plugin.pairs.ensureFolder(inkFolder);

@@ -229,7 +229,7 @@ steps.setup = async () => {
   await setWindow(820, 1180);
   const info = await ev(() => ({ loaded: !!__t.plugin(), view: !!app.viewRegistry.viewByType["ink-notebook"], excalidraw: !!app.plugins.plugins["obsidian-excalidraw-plugin"] }));
   check("Ink Notebook is loaded with its own ink view, no Excalidraw", info.loaded && info.view && !info.excalidraw, JSON.stringify(info));
-  await setSettings({ setupDone: true, azureEndpoint: MOCK, azureKey: "test-key", azureApi: "auto", azureDetectedApi: "", einkMode: "off", queue: [], pageLocation: "fixed", folder: "Ink", inkSubfolder: "Attachments", askForPaper: false, holdToShape: true, scribbleErase: true });
+  await setSettings({ setupDone: true, azureEndpoint: MOCK, azureKey: "test-key", azureApi: "auto", azureDetectedApi: "", einkMode: "off", queue: [], pageLocation: "fixed", folder: "Ink", inkSubfolder: "Attachments", askForPaper: false, askForPageName: false, holdToShape: true, scribbleErase: true });
   await ev(() => {
     app.vault.setConfig("alwaysUpdateLinks", true);
     // like on a tablet: the sidebars are closed
@@ -242,9 +242,21 @@ steps.setup = async () => {
 
 steps.createPage = async () => {
   console.log("\n▶ create an ink page");
+  await setSettings({ askForPageName: true });
   await ev(() => app.commands.executeCommandById("ink-notebook:new-page"));
+  // you name the page: the date and time is filled in, type over it
+  const suggested = await ev(async () => {
+    const input = await __t.waitFor(() => document.querySelector(".modal.ink-modal input.ink-wide-input"), 5000, "name prompt");
+    const was = input.value;
+    input.value = "Lecture notes";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    return was;
+  });
+  await setSettings({ askForPageName: false });
   state.drawing = await waitView("ink-notebook");
   check("the new page opens in the ink view", /^Ink\/Attachments\/.+\.ink\.md$/.test(state.drawing), state.drawing);
+  check("a new page gets the name you type (the date and time is suggested)", /^Ink \d{4}-\d\d-\d\d \d{4}$/.test(suggested) && state.drawing === "Ink/Attachments/Lecture notes.ink.md", `${suggested} → ${state.drawing}`);
   state.text = state.drawing.replace(/^Ink\/Attachments\//, "Ink/").replace(/\.ink\.md$/, ".md");
   const info = await ev(async ({ drawing, text }) => {
     const d = app.vault.getAbstractFileByPath(drawing);

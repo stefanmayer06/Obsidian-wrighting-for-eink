@@ -40,6 +40,7 @@ export interface InkSettings {
   /** Show the paper picker when creating a page. */
   askForPaper: boolean;
   textViewMode: TextViewMode;
+  /** Ask for the name of a new page (the date and time is suggested); otherwise it is named with the date and time. */
   askForPageName: boolean;
   keepNamesInSync: boolean;
   dailyInk: DailyInk;
@@ -100,7 +101,7 @@ export interface InkSettings {
   settingsVersion: number;
 }
 
-export const SETTINGS_VERSION = 3;
+export const SETTINGS_VERSION = 4;
 
 export const DEFAULT_SETTINGS: InkSettings = {
   setupDone: false,
@@ -110,7 +111,7 @@ export const DEFAULT_SETTINGS: InkSettings = {
   paper: DEFAULT_PAPER,
   askForPaper: true,
   textViewMode: "reading",
-  askForPageName: false,
+  askForPageName: true,
   keepNamesInSync: true,
   dailyInk: "off",
 
@@ -185,7 +186,9 @@ export function loadSettings(raw: unknown): InkSettings {
     paper: normalizePaperSpec(r.paper ?? (isPaperStyle(r.paperStyle) ? { style: r.paperStyle } : undefined), d.paper),
     askForPaper: bool(r.askForPaper, d.askForPaper),
     textViewMode: oneOf(r.textViewMode, ["reading", "editing", "keep"] as const, d.textViewMode),
-    askForPageName: bool(r.askForPageName, d.askForPageName),
+    // Before version 4 new pages were named with the date and time unless this was turned on;
+    // choosing the name is the default now, so earlier data starts with it on.
+    askForPageName: version >= 4 ? bool(r.askForPageName, d.askForPageName) : d.askForPageName,
     keepNamesInSync: bool(r.keepNamesInSync, d.keepNamesInSync),
     dailyInk: oneOf(r.dailyInk, ["off", "attach", "open"] as const, d.dailyInk),
 
