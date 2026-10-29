@@ -17,6 +17,17 @@ export function einkActive(settings: InkSettings): boolean {
   return currentDevice().isEink;
 }
 
+/**
+ * Whether the ink page uses Chrome's low-latency ("desynchronized") canvas.
+ * Not on e-ink screens: when it is the only thing on screen, Chrome hands it to
+ * the display directly and Boox colour screens show it with the dither pattern
+ * of their fast refresh (stripes in colours and the highlighter).
+ */
+export function lowLatencyActive(settings: InkSettings): boolean {
+  if (settings.lowLatency !== "auto") return settings.lowLatency === "on";
+  return !einkActive(settings) && !currentDevice().isEink;
+}
+
 /** Apply (or remove) the e-ink body classes. */
 export function applyEinkClasses(settings: InkSettings): void {
   const body = document.body;
