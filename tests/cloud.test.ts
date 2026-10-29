@@ -70,6 +70,15 @@ describe("recognition settings", () => {
     expect(loadSettings(JSON.parse(JSON.stringify(turnedOn))).highlightUncertain).toBe(true);
   });
 
+  it("asks for the name of a new page unless the user turned it off", () => {
+    expect(loadSettings({}).askForPageName).toBe(true);
+    // stored before version 4, when pages were named with the date and time by default
+    expect(loadSettings({ askForPageName: false, settingsVersion: 3 }).askForPageName).toBe(true);
+    const turnedOff = loadSettings({ ...loadSettings({}), askForPageName: false });
+    expect(turnedOff.askForPageName).toBe(false);
+    expect(loadSettings(JSON.parse(JSON.stringify(turnedOff))).askForPageName).toBe(false);
+  });
+
   it("uses the built-in server unless overridden", () => {
     expect(cloudEndpointFor(loadSettings({}))).toMatch(/^https:\/\/\w+\.supabase\.co\/functions\/v1\/ocr$/);
     expect(cloudEndpointFor(loadSettings({ cloudEndpoint: "http://127.0.0.1:8765/ocr/" }))).toBe("http://127.0.0.1:8765/ocr");

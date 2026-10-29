@@ -11,6 +11,8 @@ export type AzureApi = "auto" | "v4" | "v3.2";
 /** cloud: Ink Notebook Cloud subscription; azure: the user's own Azure resource. */
 export type OcrProvider = "cloud" | "azure";
 export type EinkMode = "auto" | "on" | "off";
+/** Chrome's low-latency canvas for the ink page; auto: not on e-ink screens. */
+export type LowLatencyMode = "auto" | "on" | "off";
 export type BookmarkPosition = "top" | "middle" | "bottom";
 export type TextViewMode = "reading" | "editing" | "keep";
 export type DiagramSensitivity = "low" | "normal" | "high";
@@ -40,6 +42,7 @@ export interface InkSettings {
   /** Show the paper picker when creating a page. */
   askForPaper: boolean;
   textViewMode: TextViewMode;
+  /** Ask for the name of a new page (the date and time is suggested); otherwise it is named with the date and time. */
   askForPageName: boolean;
   keepNamesInSync: boolean;
   dailyInk: DailyInk;
@@ -81,7 +84,7 @@ export interface InkSettings {
   holdToShape: boolean;
   fit: FitMode;
   toolbarPosition: ToolbarPosition;
-  lowLatency: boolean;
+  lowLatency: LowLatencyMode;
 
   // ---- display ----
   einkMode: EinkMode;
@@ -100,7 +103,7 @@ export interface InkSettings {
   settingsVersion: number;
 }
 
-export const SETTINGS_VERSION = 3;
+export const SETTINGS_VERSION = 4;
 
 export const DEFAULT_SETTINGS: InkSettings = {
   setupDone: false,
@@ -110,7 +113,7 @@ export const DEFAULT_SETTINGS: InkSettings = {
   paper: DEFAULT_PAPER,
   askForPaper: true,
   textViewMode: "reading",
-  askForPageName: false,
+  askForPageName: true,
   keepNamesInSync: true,
   dailyInk: "off",
 
@@ -141,7 +144,7 @@ export const DEFAULT_SETTINGS: InkSettings = {
   holdToShape: true,
   fit: "page",
   toolbarPosition: "top",
-  lowLatency: true,
+  lowLatency: "auto",
 
   einkMode: "auto",
   bookmarkPosition: "top",
@@ -185,7 +188,9 @@ export function loadSettings(raw: unknown): InkSettings {
     paper: normalizePaperSpec(r.paper ?? (isPaperStyle(r.paperStyle) ? { style: r.paperStyle } : undefined), d.paper),
     askForPaper: bool(r.askForPaper, d.askForPaper),
     textViewMode: oneOf(r.textViewMode, ["reading", "editing", "keep"] as const, d.textViewMode),
-    askForPageName: bool(r.askForPageName, d.askForPageName),
+    // Before version 4 new pages were named with the date and time unless this was turned on;
+    // choosing the name is the default now, so earlier data starts with it on.
+    askForPageName: version >= 4 ? bool(r.askForPageName, d.askForPageName) : d.askForPageName,
     keepNamesInSync: bool(r.keepNamesInSync, d.keepNamesInSync),
     dailyInk: oneOf(r.dailyInk, ["off", "attach", "open"] as const, d.dailyInk),
 
@@ -218,7 +223,8 @@ export function loadSettings(raw: unknown): InkSettings {
     holdToShape: bool(r.holdToShape, d.holdToShape),
     fit: oneOf(r.fit, ["page", "width"] as const, d.fit),
     toolbarPosition: oneOf(r.toolbarPosition, ["top", "bottom", "left", "right"] as const, d.toolbarPosition),
-    lowLatency: bool(r.lowLatency, d.lowLatency),
+    // it was a switch, on by default: on becomes automatic (off on e-ink screens)
+    lowLatency: r.lowLatency === false ? "off" : oneOf(r.lowLatency, ["auto", "on", "off"] as const, d.lowLatency),
 
     einkMode: oneOf(r.einkMode, ["auto", "on", "off"] as const, d.einkMode),
     bookmarkPosition: oneOf(r.bookmarkPosition, ["top", "middle", "bottom"] as const, d.bookmarkPosition),

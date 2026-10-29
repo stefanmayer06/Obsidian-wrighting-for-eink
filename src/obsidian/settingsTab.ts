@@ -5,7 +5,7 @@ import { cleanSubfolder } from "../core/folders";
 import { PaperPickerModal } from "./paperPicker";
 import { SetupWizard } from "./setupWizard";
 import { renderRecognitionSettings } from "./recognitionSettings";
-import { DAILY_INK_OPTIONS, type BookmarkPosition, type DailyInk, type DiagramSensitivity, type InkSettings, type PageLocation, type TextViewMode } from "../settings";
+import { DAILY_INK_OPTIONS, type BookmarkPosition, type DailyInk, type DiagramSensitivity, type InkSettings, type LowLatencyMode, type PageLocation, type TextViewMode } from "../settings";
 import { dailyNoteSettings } from "./dailyNotes";
 
 export class InkSettingTab extends PluginSettingTab {
@@ -86,7 +86,18 @@ export class InkSettingTab extends PluginSettingTab {
             await apply();
           }),
       );
-    toggle("Low-latency drawing", "Draws the ink straight to the screen. Turn off if the page flickers on your device.", "lowLatency");
+    new Setting(containerEl)
+      .setName("Low-latency drawing")
+      .setDesc("Draws the ink straight to the screen. Automatic leaves it off on e-ink screens, where it can show colours and the highlighter with a stripy pattern. Turn it off if the page flickers on your device.")
+      .addDropdown((d) =>
+        d
+          .addOptions({ auto: "Automatic", on: "Always on", off: "Off" })
+          .setValue(s.lowLatency)
+          .onChange(async (v) => {
+            s.lowLatency = v as LowLatencyMode;
+            await apply();
+          }),
+      );
 
     // ------------------------------------------------------------------ pages
     new Setting(containerEl).setName("Pages").setHeading();
@@ -146,7 +157,7 @@ export class InkSettingTab extends PluginSettingTab {
       );
     new Setting(containerEl)
       .setName("Ask for a name when creating a page")
-      .setDesc("Otherwise pages are named with the date and time; rename them any time.")
+      .setDesc("Type the name of a new page (the date and time is filled in – keep it or type over it). Off: pages are named with the date and time; rename them any time.")
       .addToggle((t) =>
         t.setValue(s.askForPageName).onChange(async (v) => {
           s.askForPageName = v;

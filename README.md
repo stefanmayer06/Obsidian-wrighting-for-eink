@@ -160,7 +160,7 @@ Privacy: only your handwriting strokes are rendered and sent (black on white –
 
 | What | How |
 | --- | --- |
-| New page | Ribbon pencil icon, command **New ink page**, or right-click a folder → *New ink page*. Choose the paper (and name, if enabled); the dialog shows the folder – *Change…* puts the page elsewhere (or type the name of a new folder) |
+| New page | Ribbon pencil icon, command **New ink page**, or right-click a folder → *New ink page*. Type its name (the date and time is filled in – keep it or type over it) and choose the paper; the dialog shows the folder – *Change…* puts the page elsewhere (or type the name of a new folder) |
 | Draw on a note you already have | Command **Add an ink page to this note**, or right-click the note (in the file list or the editor) → *Add an ink page*. The note keeps its text and becomes the text page; the transcript goes below its text |
 | Daily notes | *Settings → Pages → Daily notes*: new daily notes come with an ink page (optionally opened to write on). Command **Open today's daily note on the ink page** works with any setting |
 | Names that don't match | Command **Match up the names of ink and text pages** (e.g. `2026-10-27 (text).md` → `2026-10-27.md` with `Attachments/2026-10-27.ink.md`); it lists the renames first |
@@ -195,15 +195,16 @@ The two `%% … %%` lines mark the transcript; in Live Preview they are shown as
 
 ## Settings
 
-- **Writing** – pen side button (erase, lasso, nothing), draw with a finger, pressure sensitivity, scribble to erase, snap shapes, swipe to turn pages, two/three-finger taps, whole page or page width, toolbar position, low-latency drawing.
-- **Pages** – where new pages go (folder of the current note, a fixed folder, or ask every time), the subfolder for ink files (`Attachments` by default; empty = next to the text page), paper for new pages and whether to choose it every time, ask for a name, open the text page in reading or editing view, daily notes with an ink page (off / with an ink page / with an ink page opened to write on), match up the names of ink and text pages, keep names in sync on rename/move.
+- **Writing** – pen side button (erase, lasso, nothing), draw with a finger, pressure sensitivity, scribble to erase, snap shapes, swipe to turn pages, two/three-finger taps, whole page or page width, toolbar position, low-latency drawing (automatic: off on e-ink screens).
+- **Pages** – where new pages go (folder of the current note, a fixed folder, or ask every time), the subfolder for ink files (`Attachments` by default; empty = next to the text page), paper for new pages and whether to choose it every time, ask for a name (on by default; off names pages with the date and time), open the text page in reading or editing view, daily notes with an ink page (off / with an ink page / with an ink page opened to write on), match up the names of ink and text pages, keep names in sync on rename/move.
 - **Handwriting recognition** – service (Ink Notebook Cloud or your own Azure key), license key or endpoint and key, API version, language hint, highlight uncertain words, transcribe while writing, how long to wait when flipping, requests per minute, clickable handwritten links, diagram detection sensitivity, offline queue and cache.
 - **Display & e‑ink** – e‑ink mode (automatic / on / off), large touch targets, position of the bookmarks on the text page.
 - **PDF annotation** – how many pages to import without asking, the folder for papers from arXiv (`Papers` by default).
 
 ## Troubleshooting
 
-- **The page flickers while writing** – turn off *Settings → Ink Notebook → Low-latency drawing*.
+- **The page flickers while writing** – set *Settings → Ink Notebook → Low-latency drawing* to *Off*.
+- **Colours and the highlighter have a stripy pattern on a colour e-ink screen** (and look right while the side panel is open) – set *Low-latency drawing* to *Automatic* (it is then off on e-ink screens) or *Off*. If the device is not recognised as e-ink, set *E-ink optimisations* to *Always on* as well.
 - **Writing feels slow on the Boox** – set Obsidian's refresh mode to *Fast* or *Balanced* in the Boox E-Ink Center; avoid *HD* / *Regal* while writing.
 - **"This license key is not active"** (Ink Notebook Cloud) – check the key in the settings (press *Check*), or renew the subscription in Polar's customer portal. Pages are transcribed automatically once the key works again.
 - **"You have used all … recognitions for this month"** – the allowance renews on the first of the month; until then pages are kept as pictures and queued.
@@ -219,7 +220,7 @@ The two `%% … %%` lines mark the transcript; in Live Preview they are shown as
 
 ## How it works
 
-- **The pen engine** (`src/ink`) draws on one opaque canvas that always shows the page as it looks now. Each pen movement adds one curve piece, drawn straight onto it (with the low-latency `desynchronized` canvas and every coalesced/raw pointer event), so the cost per movement does not grow with the page. Erasing and moving redraw only the area that changed; neighbouring pages are rendered in the background so that turning pages is instant. A second canvas shows previews (highlighter, lasso, shapes, moved selections). Strokes keep their pressure and are drawn with the same code live, on redraw, in figures and in exports (as SVG paths – the PDF export uses them too), so they look the same everywhere.
+- **The pen engine** (`src/ink`) draws on one opaque canvas that always shows the page as it looks now. Each pen movement adds one curve piece, drawn straight onto it (with every coalesced/raw pointer event, and the low-latency `desynchronized` canvas except on e-ink screens, where Boox shows that canvas with the dither pattern of its fast refresh), so the cost per movement does not grow with the page. Erasing and moving redraw only the area that changed; neighbouring pages are rendered in the background so that turning pages is instant. A second canvas shows previews (highlighter, lasso, shapes, moved selections). Strokes keep their pressure and are drawn with the same code live, on redraw, in figures and in exports (as SVG paths – the PDF export uses them too), so they look the same everywhere.
 - **The file** (`core/ink/codec.ts`): a Markdown file whose ink data sits in a hidden `%% ```ink-data … ``` %%` block, one line per page and per stroke; points are delta-encoded integers (0.1 units, pressure in 1/255) in base64. Edits are immutable updates (undo keeps old versions; they share everything that did not change).
 - **Recognition**: strokes are grouped into writing areas, rendered black on white (without long straight lines such as table lines and underlines, which only confuse OCR) and sent to Azure; the returned word boxes are mapped back onto the strokes to separate handwriting from drawings. Drawings are clustered into diagrams, each with a diagram area stored in the ink page; the text page shows that area with an `ink-figure` block.
 - The transcript region stores a compact fingerprint of what was generated, which is how your corrections, deletions and additions are recognised and kept.
