@@ -18,6 +18,7 @@ import { selectionToText } from "./obsidian/lassoText";
 import { migrateExcalidrawPages } from "./obsidian/migrate";
 import { transcriptEditorExtension } from "./obsidian/editorExtension";
 import { PaperService } from "./obsidian/papers";
+import { LibraryService } from "./obsidian/library";
 import { PaperSearchModal } from "./obsidian/paperSearch";
 import { DailyInk } from "./obsidian/dailyNotes";
 import { ConfirmModal } from "./obsidian/modals";
@@ -39,6 +40,7 @@ export default class InkNotebookPlugin extends Plugin {
   images!: VaultImages;
   /** Papers from arXiv. */
   papers!: PaperService;
+  library!: LibraryService;
   /** Daily notes that come with an ink page. */
   daily!: DailyInk;
   /** The page each notebook was last open at. */
@@ -55,6 +57,7 @@ export default class InkNotebookPlugin extends Plugin {
     this.settings = loadSettings(await this.loadData());
     this.images = new VaultImages(this.app);
     this.papers = new PaperService(this);
+    this.library = new LibraryService(this);
     this.daily = new DailyInk(this);
     this.pairs = new PairManager(this.app, () => this.settings.inkSubfolder);
     this.ocr = new OcrService(
@@ -584,6 +587,7 @@ export default class InkNotebookPlugin extends Plugin {
       ["eraser", "Eraser", "eraser"],
       ["lasso", "Lasso", "lasso"],
       ["shape", "Shapes", "shapes"],
+      ["fill", "Fill", "paint-bucket"],
       ["text", "Text", "type"],
     ];
     for (const [tool, label, icon] of tools) {
@@ -611,6 +615,7 @@ export default class InkNotebookPlugin extends Plugin {
       icon: "image",
       callback: () => run(annotateImage(this, null), "Could not annotate the image"),
     });
+    onInk("object-library", "Open the object library (flowchart shapes, Excalidraw libraries)", "library", (v) => v.openLibrary());
     onInk("export-annotated-pdf", "Export annotated PDF", "download", (v) => {
       if (!v.surface.document.pages.some((p) => p.bg.kind === "pdf")) {
         new Notice('This ink page has no PDF pages. Use "Annotate a PDF" to start one.');

@@ -17,7 +17,8 @@ import type { InkView } from "./inkView";
 export async function selectionToText(plugin: InkNotebookPlugin, view: InkView): Promise<void> {
   const s = view.surface;
   const items = s.selectedItems();
-  const strokes = items.strokes.filter((st) => !isMarker(st));
+  // highlighters and fills are not handwriting
+  const strokes = items.strokes.filter((st) => !isMarker(st) && !st.area);
   if (strokes.length === 0) {
     new Notice("Select some handwriting first.");
     return;

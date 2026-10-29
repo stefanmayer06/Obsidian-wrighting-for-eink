@@ -333,5 +333,16 @@ export class InkSettingTab extends PluginSettingTab {
           await save();
         }),
       );
+
+    new Setting(containerEl).setName("Object libraries").setHeading();
+    new Setting(containerEl)
+      .setName("Folder for libraries")
+      .setDesc("Excalidraw libraries you import and “My library” (what you keep with “To library” in the lasso menu) are saved here. Libraries (.excalidrawlib) anywhere else in the vault and the library of the Excalidraw plugin are shown too.")
+      .addText((t) =>
+        t.setValue(s.libraryFolder).onChange(async (v) => {
+          s.libraryFolder = v.trim().replace(/^\/+|\/+$/g, "") || "Ink libraries";
+          await save();
+        }),
+      );
   }
 }

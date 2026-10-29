@@ -26,6 +26,8 @@ export interface SceneElement {
   strokeWidth?: number;
   strokeColor?: string;
   backgroundColor?: string;
+  /** How Excalidraw fills a shape: "solid", "hachure", "cross-hatch", … */
+  fillStyle?: string;
   points?: ReadonlyArray<Point>;
   pressures?: ReadonlyArray<number>;
   text?: string;

@@ -2,6 +2,7 @@ import { normalizePaperSpec } from "../paper";
 import { splitFrontmatter } from "../transcript";
 import {
   EMPTY_META,
+  FILL_STYLES,
   makeStroke,
   newDoc,
   PEN_TYPES,
@@ -16,6 +17,7 @@ import {
   type PenType,
   type Region,
   type Stroke,
+  type TextAlign,
   type TextBox,
 } from "./model";
 
@@ -37,14 +39,15 @@ import {
  *   ```ink-data
  *   H {"v":1,"regions":[…],"handLinks":{…}}
  *   P {"id":"…","w":1000,"h":1414,"bg":{…}}
- *   S <id> <pen> <colour> <width> <flags> <points>
+ *   S <id> <pen> <colour> <width> <flags> <points> [f:<fill> s:<fill style> a:<from> b:<to>]
  *   T {…text box…}
  *   ```
  *   %%
  *
  * One line per page and per item keeps the file compact and diffs readable.
  * Points are stored as delta-encoded integers (0.1 units, pressure in 1/255)
- * in base64url.
+ * in base64url. Optional stroke fields follow the points as `key:value`
+ * words, which earlier versions ignore (they show the stroke without them).
  */
 
 export const INK_FRONTMATTER_KEY = "ink-notebook";
@@ -68,6 +71,11 @@ const FLAG_POLY = 1;
 const FLAG_CLOSED = 2;
 const FLAG_ARROW = 4;
 const FLAG_DASH = 8;
+const FLAG_AREA = 16;
+const FLAG_ARROW_START = 32;
+const FLAG_ELBOW = 64;
+
+const FILL_STYLE_CODES = { solid: "o", hatch: "h", cross: "x" } as const;
 
 // ------------------------------------------------------------------ base64url
 
@@ -193,8 +201,19 @@ const encodedCache = new WeakMap<Stroke, string>();
 function strokeLine(s: Stroke): string {
   let line = encodedCache.get(s);
   if (line === undefined) {
-    const flags = (s.poly ? FLAG_POLY : 0) | (s.closed ? FLAG_CLOSED : 0) | (s.arrow ? FLAG_ARROW : 0) | (s.dash ? FLAG_DASH : 0);
+    const flags =
+      (s.poly ? FLAG_POLY : 0) |
+      (s.closed ? FLAG_CLOSED : 0) |
+      (s.arrow ? FLAG_ARROW : 0) |
+      (s.dash ? FLAG_DASH : 0) |
+      (s.area ? FLAG_AREA : 0) |
+      (s.arrowStart ? FLAG_ARROW_START : 0) |
+      (s.elbow ? FLAG_ELBOW : 0);
     line = `S ${s.id} ${PEN_CODES[s.pen] ?? "b"} ${s.color.replace(/^#/, "")} ${num(s.width)} ${flags} ${encodePoints(s.pts)}`;
+    if (s.fill) line += ` f:${s.fill.replace(/^#/, "")}`;
+    if (s.fill && s.fillStyle && s.fillStyle !== "solid") line += ` s:${FILL_STYLE_CODES[s.fillStyle]}`;
+    if (s.from) line += ` a:${s.from}`;
+    if (s.to) line += ` b:${s.to}`;
     encodedCache.set(s, line);
   }
   return line;
@@ -329,6 +348,14 @@ export function parseInkFile(text: string): ParsedInkFile {
         const f = rest.split(" ");
         if (f.length < 6) throw new InkParseError("Invalid stroke");
         const flags = parseInt(f[4], 10) || 0;
+        const extra: Record<string, string> = {};
+        for (const word of f.slice(6)) {
+          const m = /^([a-z]+):(.+)$/.exec(word);
+          if (m) extra[m[1]] = m[2];
+        }
+        const fill = extra.f && COLOR_RE.test(extra.f) ? color(extra.f) : undefined;
+        const style = FILL_STYLES.find((st) => FILL_STYLE_CODES[st] === extra.s);
+        const ref = (v: string | undefined) => (v && ID_RE.test(v) ? v : undefined);
         cur().strokes.push(
           makeStroke({
             id: id(f[0]),
@@ -339,14 +366,22 @@ export function parseInkFile(text: string): ParsedInkFile {
             poly: !!(flags & FLAG_POLY),
             closed: !!(flags & FLAG_CLOSED),
             arrow: !!(flags & FLAG_ARROW),
+            arrowStart: !!(flags & FLAG_ARROW_START),
             dash: !!(flags & FLAG_DASH),
+            // an area is only its fill
+            area: !!(flags & FLAG_AREA) && !!fill,
+            elbow: !!(flags & FLAG_ELBOW),
+            fill,
+            fillStyle: style,
+            from: ref(extra.a),
+            to: ref(extra.b),
           }),
         );
         break;
       }
       case "T": {
         const t = obj(rest);
-        cur().texts.push({
+        const box: TextBox = {
           id: id(t.id),
           x: finite(t.x),
           y: finite(t.y),
@@ -355,7 +390,10 @@ export function parseInkFile(text: string): ParsedInkFile {
           text: str(t.text),
           size: Math.max(4, finite(t.size, 24)),
           color: color(t.color),
-        });
+        };
+        const align = (["center", "right"] as const).find((a: TextAlign) => a === t.align);
+        const container = typeof t.container === "string" && ID_RE.test(t.container) ? t.container : undefined;
+        cur().texts.push(align || container ? { ...box, ...(align ? { align } : {}), ...(container ? { container } : {}) } : box);
         break;
       }
       case "I": {

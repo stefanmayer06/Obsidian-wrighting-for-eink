@@ -1,5 +1,7 @@
 import { INK_COLORS, MARKER_COLORS, PENS } from "../../core/ink/pens";
 import { SHAPES, type ShapeKind } from "../../core/ink/shapes";
+import { FILL_COLORS, FILL_STYLE_INFO } from "../../core/ink/fill";
+import { FILL_STYLES } from "../../core/ink/model";
 import type { InkSurface } from "../surface";
 import type { EraserMode, SurfaceSettings, ToolId, ToolState, WritingPen } from "../types";
 import { button, el, menu, Popover, section, swatches, thickness, tiles, toggle, type IconFn, type MenuSection } from "./popover";
@@ -25,6 +27,8 @@ export interface ToolbarHost {
   settingsChanged(patch: Partial<SurfaceSettings>): void;
   /** Buttons at the end of the bar (typed notes, text page). */
   endButtons(): Array<{ id: string; icon: string; label: string; showLabel?: boolean; run(): void }>;
+  /** Open the object libraries (the Library button is shown when this is given). */
+  openLibrary?(): void;
 }
 
 const WRITING_PENS: WritingPen[] = ["fountain", "ballpoint", "pencil", "brush", "calligraphy"];
@@ -60,6 +64,8 @@ export class Toolbar {
   private pageLabel!: HTMLButtonElement;
   private endEl!: HTMLElement;
   private insertBtn!: HTMLButtonElement;
+  private libraryBtn: HTMLButtonElement | null = null;
+  private moreBtn: HTMLButtonElement | null = null;
   private resizeObserver: ResizeObserver | null = null;
   /** How much was folded into the "More" menu to make the bar fit (0 = nothing). */
   private level = 0;
@@ -89,13 +95,14 @@ export class Toolbar {
   /**
    * Make the bar fit its width (or height): first the favourite pens, the
    * "add page" and typed-notes buttons and the text label go (into the menu),
-   * then the buttons get a little smaller, then the insert button goes, then
-   * the page arrows (swipe instead), and last undo/redo (two- and three-finger taps).
+   * then the buttons get a little smaller, then the insert and library buttons
+   * go, then the fill tool, then the page arrows (swipe instead), and last
+   * undo/redo (two- and three-finger taps).
    */
   fit(): void {
     const vertical = this.el.hasAttribute("data-vertical");
     const overflows = () => (vertical ? this.el.scrollHeight > this.el.clientHeight + 1 : this.el.scrollWidth > this.el.clientWidth + 1);
-    for (let level = 0; level <= 5; level++) {
+    for (let level = 0; level <= 6; level++) {
       this.el.dataset.fold = String(level);
       this.level = level;
       if (!overflows()) break;
@@ -119,7 +126,12 @@ export class Toolbar {
     tool("eraser", "eraser", "Eraser");
     tool("lasso", "lasso", "Lasso");
     tool("shape", "shapes", "Shapes");
+    tool("fill", "paint-bucket", "Fill");
     tool("text", "type", "Text");
+    const openLibrary = this.host.openLibrary;
+    if (openLibrary) {
+      this.libraryBtn = button(tools, this.icon, { icon: "library", label: "Object library", cls: "ink-tb-btn ink-tb-library", onClick: () => (Popover.closeAll(), openLibrary()) });
+    }
     const ins = button(tools, this.icon, { icon: "image-plus", label: "Insert", cls: "ink-tb-btn ink-tb-insert", onClick: () => this.openMenu(ins, this.host.insertMenu()) });
     this.insertBtn = ins;
 
@@ -154,6 +166,7 @@ export class Toolbar {
       button(this.endEl, this.icon, { icon: b.icon, label: b.label, showLabel: b.showLabel, cls: `ink-tb-btn ink-tb-${b.id}`, onClick: () => b.run() });
     }
     const more = button(this.endEl, this.icon, { icon: "ellipsis-vertical", label: "More", cls: "ink-tb-btn ink-tb-more", onClick: () => this.openMenu(more, this.moreSections()) });
+    this.moreBtn = more;
   }
 
   /** The menu, with whatever was folded out of the bar. */
@@ -170,8 +183,27 @@ export class Toolbar {
       const notes = this.host.endButtons().find((b) => b.id === "notes");
       if (notes) folded.push({ items: [{ icon: notes.icon, label: notes.label, run: () => notes.run() }] });
     }
+    const openLibrary = this.host.openLibrary;
+    if (this.level >= 3 && openLibrary) folded.push({ items: [{ icon: "library", label: "Object library…", run: () => openLibrary() }] });
     if (this.level >= 3) folded.push(...this.host.insertMenu().map((s) => ({ ...s, title: s.title ?? "Insert" })));
-    if (this.level >= 5) folded.push({ items: [{ icon: "undo-2", label: "Undo", run: () => this.surface.undo() }, { icon: "redo-2", label: "Redo", run: () => this.surface.redo() }] });
+    if (this.level >= 4) {
+      const more = this.moreBtn;
+      folded.push({
+        items: [
+          {
+            icon: "paint-bucket",
+            label: "Fill…",
+            hint: "Tap inside a shape or a closed area to fill it",
+            checked: this.surface.tools.tool === "fill",
+            run: () => {
+              this.setTools({ tool: "fill" });
+              if (more) this.openOptions("fill", more);
+            },
+          },
+        ],
+      });
+    }
+    if (this.level >= 6) folded.push({ items: [{ icon: "undo-2", label: "Undo", run: () => this.surface.undo() }, { icon: "redo-2", label: "Redo", run: () => this.surface.redo() }] });
     return [...folded, ...this.host.moreMenu()];
   }
 
@@ -206,6 +238,13 @@ export class Toolbar {
       pen.title = `${PENS[t.pen].label} – tap again for options`;
     }
     this.toolButtons.get("marker")?.style.setProperty("--ink-pen-color", t.markerColor);
+    this.toolButtons.get("fill")?.style.setProperty("--ink-pen-color", t.fillColor || "transparent");
+    if (this.libraryBtn) {
+      const placing = t.tool === "stamp";
+      this.libraryBtn.classList.toggle("is-active", placing);
+      this.libraryBtn.setAttribute("aria-pressed", String(placing));
+      this.libraryBtn.title = placing && this.surface.stamp ? `Placing “${this.surface.stamp.name}” – tap the page` : "Object library";
+    }
     const shape = this.toolButtons.get("shape");
     if (shape) {
       const i = shape.querySelector(".ink-btn-icon") as HTMLElement | null;
@@ -268,7 +307,7 @@ export class Toolbar {
     if (!wasActive) {
       this.setTools({ tool: id });
       // tools whose options matter first open them right away
-      if (id !== "shape") return;
+      if (id !== "shape" && id !== "fill") return;
     }
     this.openOptions(id, b);
   }
@@ -383,7 +422,23 @@ export class Toolbar {
             close();
           },
         );
+        swatches(section(root, "Fill of new shapes"), [{ color: "", label: "No fill" }, ...FILL_COLORS], t.shapeFill, (c) => set({ shapeFill: c }));
+        if (t.shapeFill) this.fillStyles(root, t.fillStyle, (st) => set({ fillStyle: st }));
+        el(section(root), "p", "ink-pop-hint", "Arrows drawn from one shape to another stay attached to them when the shapes move.");
         toggle(section(root), "Snap shapes when you hold the pen", this.surface.settings.holdToShape, (v) => setting({ holdToShape: v }), "Draw a line, box, triangle or circle with the pen tool and keep the pen still at the end");
+        break;
+      }
+      case "fill": {
+        swatches(section(root, "Fill colour"), [{ color: "", label: "Remove fills" }, ...FILL_COLORS], t.fillColor, (c) => set({ fillColor: c }));
+        this.fillStyles(root, t.fillStyle, (st) => set({ fillStyle: st }));
+        el(
+          section(root),
+          "p",
+          "ink-pop-hint",
+          t.fillColor
+            ? "Tap inside a shape or an area enclosed by lines to fill it. Fills stay underneath your writing."
+            : "Tap a fill to remove it.",
+        );
         break;
       }
       case "text": {
@@ -398,6 +453,16 @@ export class Toolbar {
       default:
         break;
     }
+  }
+
+  private fillStyles(root: HTMLElement, current: (typeof FILL_STYLES)[number], onPick: (st: (typeof FILL_STYLES)[number]) => void): void {
+    tiles(
+      section(root, "Fill style"),
+      this.icon,
+      FILL_STYLES.map((st) => ({ value: st, icon: FILL_STYLE_INFO[st].icon, label: FILL_STYLE_INFO[st].label })),
+      current,
+      onPick,
+    );
   }
 
   private confirmClear(): void {

@@ -143,14 +143,15 @@ export function tiles<T extends string>(
   }
 }
 
+/** Colour buttons; a colour "" is "none" (drawn crossed out). */
 export function swatches(parent: HTMLElement, colors: ReadonlyArray<{ color: string; label: string }>, current: string, onPick: (c: string) => void): void {
   const row = el(parent, "div", "ink-swatches");
   for (const c of colors) {
-    const b = el(row, "button", `ink-swatch-btn${c.color.toLowerCase() === current.toLowerCase() ? " is-active" : ""}`);
+    const b = el(row, "button", `ink-swatch-btn${c.color.toLowerCase() === current.toLowerCase() ? " is-active" : ""}${c.color ? "" : " is-none"}`);
     b.type = "button";
     b.title = c.label;
     b.setAttribute("aria-label", c.label);
-    b.style.setProperty("--swatch", c.color);
+    if (c.color) b.style.setProperty("--swatch", c.color);
     b.addEventListener("click", (e) => {
       e.preventDefault();
       onPick(c.color);

@@ -2,7 +2,7 @@ import { DEFAULT_PAPER, isPaperStyle, normalizePaperSpec, type PaperSpec } from 
 import { cleanSubfolder } from "./core/folders";
 import { CLOUD_ENDPOINT } from "./core/cloud";
 import { PENS } from "./core/ink/pens";
-import { PEN_TYPES } from "./core/ink/model";
+import { FILL_STYLES, PEN_TYPES } from "./core/ink/model";
 import { SHAPES, type ShapeKind } from "./core/ink/shapes";
 import { DEFAULT_TOOL_STATE, type FitMode, type PenButtonAction, type ToolState, type WritingPen } from "./ink/types";
 import type { ToolbarPosition } from "./ink/ui/toolbar";
@@ -96,6 +96,12 @@ export interface InkSettings {
   /** Folder for papers imported from arXiv (their text pages; PDF and ink page go into its ink subfolder). */
   papersFolder: string;
 
+  // ---- object libraries ----
+  /** Folder for imported Excalidraw libraries and "My library". */
+  libraryFolder: string;
+  /** The library shown last in the library panel. */
+  lastLibrary: string;
+
   // ---- internal ----
   /** Drawing paths waiting for handwriting recognition (offline queue). */
   queue: string[];
@@ -152,6 +158,9 @@ export const DEFAULT_SETTINGS: InkSettings = {
 
   pdfMaxPagesWithoutAsking: 30,
   papersFolder: "Papers",
+
+  libraryFolder: "Ink libraries",
+  lastLibrary: "",
 
   queue: [],
   settingsVersion: SETTINGS_VERSION,
@@ -233,6 +242,9 @@ export function loadSettings(raw: unknown): InkSettings {
     pdfMaxPagesWithoutAsking: numberIn(r.pdfMaxPagesWithoutAsking, 1, 1000, d.pdfMaxPagesWithoutAsking),
     papersFolder: str(r.papersFolder, d.papersFolder).replace(/^\/+|\/+$/g, "") || d.papersFolder,
 
+    libraryFolder: str(r.libraryFolder, d.libraryFolder).replace(/^\/+|\/+$/g, "") || d.libraryFolder,
+    lastLibrary: str(r.lastLibrary, d.lastLibrary),
+
     queue: Array.isArray(r.queue) ? r.queue.filter((q): q is string => typeof q === "string").slice(0, 500) : [],
     settingsVersion: SETTINGS_VERSION,
   };
@@ -259,7 +271,8 @@ export function loadTools(raw: unknown): ToolState {
     };
   });
   return {
-    tool: oneOf(r.tool, ["pen", "marker", "eraser", "lasso", "shape", "text"] as const, d.tool),
+    // "stamp" needs the library item it places, which is not kept: it starts with the default tool
+    tool: oneOf(r.tool, ["pen", "marker", "eraser", "lasso", "shape", "text", "fill"] as const, d.tool),
     pen: oneOf(r.pen, WRITING_PENS, d.pen),
     color: color(r.color, d.color),
     widths,
@@ -267,6 +280,9 @@ export function loadTools(raw: unknown): ToolState {
     eraser: oneOf(r.eraser, ["partial", "stroke", "lasso"] as const, d.eraser),
     eraserSize: numberIn(r.eraserSize, 2, 80, d.eraserSize),
     shape: oneOf(r.shape, Object.keys(SHAPES) as ShapeKind[], d.shape),
+    shapeFill: r.shapeFill === "" ? "" : color(r.shapeFill, d.shapeFill),
+    fillColor: r.fillColor === "" ? "" : color(r.fillColor, d.fillColor),
+    fillStyle: oneOf(r.fillStyle, FILL_STYLES, d.fillStyle),
     textSize: numberIn(r.textSize, 8, 120, d.textSize),
     favorites,
   };

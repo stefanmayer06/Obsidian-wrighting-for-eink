@@ -33,7 +33,7 @@ const MAX_WIDTH_FACTOR = 1.9;
 /** Area a stroke can paint (points plus the widest the pen can get, and the arrow head). */
 export function strokeBounds(s: Stroke): Rect {
   const r = strokePointBounds(s);
-  const pad = (s.width * MAX_WIDTH_FACTOR) / 2 + 1 + (s.arrow ? Math.max(14, s.width * 5) : 0);
+  const pad = (s.width * MAX_WIDTH_FACTOR) / 2 + 1 + (s.arrow || s.arrowStart ? Math.max(14, s.width * 5) : 0);
   return inflate(r, pad);
 }
 

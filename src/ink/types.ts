@@ -1,8 +1,9 @@
-import type { PenType } from "../core/ink/model";
+import type { FillStyle, PenType } from "../core/ink/model";
 import type { ShapeKind } from "../core/ink/shapes";
 import type { ImageSource } from "./render";
 
-export type ToolId = "pen" | "marker" | "eraser" | "lasso" | "shape" | "text";
+/** "stamp" places an item of an object library (see InkSurface.stamp). */
+export type ToolId = "pen" | "marker" | "eraser" | "lasso" | "shape" | "text" | "fill" | "stamp";
 export type EraserMode = "partial" | "stroke" | "lasso";
 export type WritingPen = Exclude<PenType, "marker">;
 
@@ -18,6 +19,12 @@ export interface ToolState {
   /** Eraser radius in page units. */
   eraserSize: number;
   shape: ShapeKind;
+  /** Fill of new closed shapes ("" = none). */
+  shapeFill: string;
+  /** Colour of the fill tool ("" = it removes fills). */
+  fillColor: string;
+  /** How fills are drawn (the fill tool and new shapes). */
+  fillStyle: FillStyle;
   /** Font size of new text boxes (page units). */
   textSize: number;
   /** Two quick pens (like the Boox Notes' favourite pens). */
@@ -33,6 +40,9 @@ export const DEFAULT_TOOL_STATE: ToolState = {
   eraser: "partial",
   eraserSize: 8,
   shape: "rect",
+  shapeFill: "",
+  fillColor: "#c4dfff",
+  fillStyle: "solid",
   textSize: 24,
   favorites: [
     { pen: "fountain", color: "#000000", width: 1.8 },

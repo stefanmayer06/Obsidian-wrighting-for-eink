@@ -943,6 +943,106 @@ steps.migrate = async () => {
   check("the text page now points at the new ink page", /ink-drawing: "\[\[Old\/Attachments\/Old page\.ink\]\]"/.test(info.text ?? ""), info.text);
 };
 
+steps.flowchart = async () => {
+  console.log("\n▶ fill, flowcharts and object libraries");
+  await setWindow(1100, 1180);
+  // an Excalidraw library somewhere in the vault, and a new ink page
+  const lib = {
+    type: "excalidrawlib",
+    version: 2,
+    libraryItems: [
+      {
+        id: "srv",
+        name: "Labelled box",
+        status: "published",
+        elements: [
+          { id: "r", type: "rectangle", x: 0, y: 0, width: 200, height: 90, strokeColor: "#1971c2", backgroundColor: "#a5d8ff", fillStyle: "hachure", strokeWidth: 2, roundness: { type: 3 } },
+          { id: "t", type: "text", x: 50, y: 32, width: 100, height: 25, text: "Server", originalText: "Server", fontSize: 20, textAlign: "center", containerId: "r", strokeColor: "#1971c2" },
+        ],
+      },
+    ],
+  };
+  fs.mkdirSync(path.join(VAULT, "Libraries"), { recursive: true });
+  fs.writeFileSync(path.join(VAULT, "Libraries", "Servers.excalidrawlib"), JSON.stringify(lib));
+  fs.mkdirSync(path.join(VAULT, "Flow", "Attachments"), { recursive: true });
+  fs.writeFileSync(path.join(VAULT, "Flow", "Attachments", "Flow.ink.md"), "---\nink-notebook: 1\n---\n");
+  await sleep(1500);
+  const file = "Flow/Attachments/Flow.ink.md";
+  await openFile(file, "ink-notebook");
+  await waitView("ink-notebook", file);
+  await ev(() => app.commands.executeCommandById("ink-notebook:object-library"));
+  const panel = ".workspace-leaf.mod-active .ink-library-panel";
+  await page.waitForSelector(`${panel} .ink-library-tile[aria-label='Process']`, { timeout: 5000 });
+  const sources = await ev(() => [...document.querySelectorAll(".workspace-leaf.mod-active .ink-library-source")].map((b) => b.getAttribute("aria-label")));
+  check("the object library lists the flowchart shapes, My library and the library in the vault", sources.includes("Flowchart") && sources.includes("My library") && sources.includes("Servers"), JSON.stringify(sources));
+  const m = await mapping();
+  await page.click(`${panel} .ink-library-tile[aria-label='Process']`);
+  await pen([[200, 200], [200, 200]], { m });
+  await page.click(`${panel} .ink-library-tile[aria-label='Decision']`);
+  await pen([[200, 480], [200, 480]], { m });
+  await ev(() => __t.surface().setTools({ tool: "shape", shape: "arrow" }));
+  await pen(along([[200, 200], [200, 480]], 8), { m });
+  const flow = await ev(() => {
+    const [a, b, c] = __t.surface().page.strokes;
+    return { closed: [!!a?.closed, !!b?.closed], from: c?.from === a?.id, to: c?.to === b?.id };
+  });
+  check("shapes from the library are placed with a tap, and an arrow drawn between them attaches to both", flow.closed.every(Boolean) && flow.from && flow.to, JSON.stringify(flow));
+  await ev(() => __t.surface().setTools({ tool: "fill", fillColor: "#fff3bf", fillStyle: "solid" }));
+  await pen([[200, 480], [200, 480]], { m });
+  const filled = await ev(() => __t.surface().page.strokes[1].fill);
+  check("the fill tool fills the decision", filled === "#fff3bf", filled);
+  await ev(() => __t.surface().setTools({ tool: "text" }));
+  await pen([[200, 200], [200, 200]], { m });
+  await sleep(200);
+  await page.keyboard.type("Start");
+  await page.keyboard.press("Escape");
+  const label = await ev(() => {
+    const p = __t.surface().page;
+    const t = p.texts[0];
+    return { text: t?.text, inShape: t?.container === p.strokes[0].id, align: t?.align };
+  });
+  check("the text tool labels the shape it is tapped into", label.text === "Start" && label.inShape && label.align === "center", JSON.stringify(label));
+  // keep the decision in My library
+  await ev(() => __t.surface().setTools({ tool: "lasso" }));
+  await pen([[110, 480], [110, 480]], { m });
+  await page.click(".workspace-leaf.mod-active .ink-sel-library");
+  await page.waitForSelector(".modal input", { timeout: 3000 });
+  await page.keyboard.type("Yellow decision");
+  await page.keyboard.press("Enter");
+  const mine = await ev(async () =>
+    __t
+      .waitFor(async () => {
+        const f = app.vault.getAbstractFileByPath("Ink libraries/My library.excalidrawlib");
+        return f && JSON.parse(await app.vault.read(f)).libraryItems.map((i) => ({ name: i.name, types: i.elements.map((e) => e.type), fill: i.elements[0]?.backgroundColor }));
+      }, 5000, "My library")
+      .catch((e) => String(e)),
+  );
+  check("“To library” keeps the selection in My library, as an Excalidraw library", Array.isArray(mine) && mine[0]?.name === "Yellow decision" && mine[0].types[0] === "diamond" && mine[0].fill === "#fff3bf", JSON.stringify(mine));
+  await page.click(`${panel} .ink-library-source[aria-label='My library']`);
+  await page.waitForSelector(`${panel} .ink-library-tile[aria-label='Yellow decision']`, { timeout: 5000 });
+  // an item of the library in the vault
+  await page.click(`${panel} .ink-library-source[aria-label='Servers']`);
+  await page.waitForSelector(`${panel} .ink-library-tile[aria-label='Labelled box']`, { timeout: 5000 });
+  await page.click(`${panel} .ink-library-tile[aria-label='Labelled box']`);
+  await pen([[450, 800], [450, 800]], { m });
+  const placed = await ev(() => {
+    const p = __t.surface().page;
+    const s = p.strokes.at(-1);
+    const t = p.texts.at(-1);
+    return { fill: s.fill, style: s.fillStyle, text: t.text, inBox: t.container === s.id };
+  });
+  check("an Excalidraw library item is placed with its hatching and label", placed.fill === "#a5d8ff" && placed.style === "hatch" && placed.text === "Server" && placed.inBox, JSON.stringify(placed));
+  await shot("12-flowchart.png");
+  await ev(() => __t.surface().setTools({ tool: "pen" }));
+  const saved = await ev(async (p) => {
+    await __t.waitFor(async () => / f:a5d8ff s:h/.test(await __t.read(p)), 8000, "saved").catch(() => null);
+    const text = await __t.read(p);
+    return { fill: / f:fff3bf/.test(text), arrow: / a:\S+ b:\S+/.test(text), hatch: / f:a5d8ff s:h/.test(text), labels: (text.match(/"container":/g) ?? []).length };
+  }, file);
+  check("fills, the attached arrow and the labels are saved", saved.fill && saved.arrow && saved.hatch && saved.labels === 2, JSON.stringify(saved));
+  await page.click(`${panel} .ink-library-close`);
+};
+
 steps.eink = async () => {
   console.log("\n▶ e-ink look on a Boox-sized window");
   await setSettings({ einkMode: "on" });
@@ -972,7 +1072,7 @@ steps.eink = async () => {
   await setWindow(820, 1180);
 };
 
-const order = ["setup", "createPage", "write", "speed", "flipToText", "flipToInk", "tools", "pages", "typedNotes", "pdf", "papers", "reload", "asMarkdown", "notes", "migrate", "eink"];
+const order = ["setup", "createPage", "write", "speed", "flipToText", "flipToInk", "tools", "pages", "typedNotes", "pdf", "papers", "reload", "asMarkdown", "notes", "migrate", "flowchart", "eink"];
 const run = only ? ["setup", only] : order;
 for (const name of run) {
   try {

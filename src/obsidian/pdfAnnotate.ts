@@ -5,6 +5,7 @@ import { normalizeRotation, parsePageRange, type PdfRotation } from "../core/pdf
 import { cleanSubfolder, homeFolder, joinPath } from "../core/folders";
 import { emptyPage, insertPage, type InkDoc, type Page, type TextBox } from "../core/ink/model";
 import { dashPattern, isMarker, strokeRuns } from "../core/ink/pens";
+import { fillGeometry } from "../core/ink/fill";
 import { paperDrawing } from "../core/paper";
 import { renderPageCanvas, TEXT_LINE_HEIGHT, wrapText, measuringContext, drawText } from "../ink/render";
 import { FilePickModal, PdfImportModal } from "./modals";
@@ -182,7 +183,16 @@ function mapPoint(p: Placement, u: number, v: number): { x: number; y: number } 
 
 function drawStrokes(out: PDFPage, page: Page, p: Placement): number {
   let n = 0;
-  const strokes = [...page.strokes.filter(isMarker), ...page.strokes.filter((s) => !isMarker(s))];
+  const at = { x: p.x, y: p.y, scale: p.scale, rotate: degrees(p.rotate) };
+  // fills underneath everything written, like on the page
+  for (const s of page.strokes) {
+    const g = fillGeometry(s);
+    if (!g) continue;
+    if (g.area) out.drawSvgPath(g.area, { ...at, color: color(g.color), borderWidth: 0 });
+    if (g.lines) out.drawSvgPath(g.lines, { ...at, borderColor: color(g.color), borderWidth: g.lineWidth, borderLineCap: LineCapStyle.Round });
+    n++;
+  }
+  const strokes = [...page.strokes.filter(isMarker), ...page.strokes.filter((s) => !isMarker(s) && !s.area)];
   for (const s of strokes) {
     const marker = isMarker(s);
     for (const run of strokeRuns(s)) {
@@ -225,8 +235,10 @@ async function drawTexts(doc: PDFDocument, out: PDFPage, page: Page, p: Placemen
     const lh = t.size * TEXT_LINE_HEIGHT;
     try {
       lines.forEach((line, i) => {
+        const free = t.w - font.widthOfTextAtSize(line, t.size);
+        const dx = t.align === "center" ? free / 2 : t.align === "right" ? free : 0;
         // baseline: the canvas draws text from its top with the em box centred in the line
-        const pos = mapPoint(p, t.x, t.y + i * lh + (lh - t.size) / 2 + t.size * 0.8);
+        const pos = mapPoint(p, t.x + dx, t.y + i * lh + (lh - t.size) / 2 + t.size * 0.8);
         out.drawText(line, { x: pos.x, y: pos.y, size: t.size * p.scale, font, color: color(t.color), rotate: degrees(p.rotate) });
       });
     } catch {

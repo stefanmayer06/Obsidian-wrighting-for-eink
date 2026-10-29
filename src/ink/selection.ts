@@ -1,6 +1,8 @@
 import type { Rect } from "../core/geometry";
 import { selectionSize } from "../core/ink/model";
 import { INK_COLORS } from "../core/ink/pens";
+import { FILL_COLORS, FILL_STYLE_INFO } from "../core/ink/fill";
+import { FILL_STYLES } from "../core/ink/model";
 import { apply, canRotate, type Matrix } from "../core/ink/transform";
 import type { InkSurface } from "./surface";
 import type { SelectionAction } from "./types";
@@ -21,6 +23,7 @@ export class SelectionOverlay {
   private palette: HTMLElement;
   private screenBox: Rect | null = null;
   private barFor = "";
+  private paletteKind: "color" | "fill" = "color";
 
   constructor(private s: InkSurface) {
     const doc = s.el.ownerDocument;
@@ -123,7 +126,8 @@ export class SelectionOverlay {
       { id: "cut", icon: "scissors", label: "Cut", run: () => s.cutSelection() },
       { id: "copy", icon: "copy", label: "Copy", run: () => s.copySelection() },
       { id: "duplicate", icon: "copy-plus", label: "Duplicate", run: () => s.duplicateSelection() },
-      { id: "color", icon: "palette", label: "Colour", run: () => this.togglePalette() },
+      { id: "color", icon: "palette", label: "Colour", run: () => this.togglePalette("color") },
+      ...(s.selectionFillable ? [{ id: "fill", icon: "paint-bucket", label: "Fill", run: () => this.togglePalette("fill") }] : []),
       { id: "figure", icon: "frame", label: "Figure", run: () => s.makeFigure() },
       ...(s.host.selectionActions?.() ?? []),
       { id: "done", icon: "x", label: "Done", run: () => s.setSelection({ strokes: new Set(), texts: new Set(), images: new Set(), links: new Set(), figures: new Set() }) },
@@ -151,27 +155,59 @@ export class SelectionOverlay {
     }
   }
 
-  private togglePalette(): void {
-    if (!this.palette.hidden) {
+  private swatch(color: string, label: string, onPick: () => void, cls = ""): HTMLButtonElement {
+    const b = this.palette.ownerDocument.createElement("button");
+    b.className = `ink-swatch-btn ${cls}`.trim();
+    b.type = "button";
+    b.title = label;
+    b.setAttribute("aria-label", label);
+    if (color) b.style.setProperty("--swatch", color);
+    b.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      onPick();
+    });
+    this.palette.appendChild(b);
+    return b;
+  }
+
+  private togglePalette(kind: "color" | "fill"): void {
+    if (!this.palette.hidden && this.paletteKind === kind) {
       this.palette.hidden = true;
       return;
     }
+    this.showPalette(kind);
+  }
+
+  /** The colours for the selection (or its fills, with the fill styles). */
+  private showPalette(kind: "color" | "fill"): void {
+    this.paletteKind = kind;
     this.palette.replaceChildren();
-    for (const c of INK_COLORS) {
-      const b = this.palette.ownerDocument.createElement("button");
-      b.className = "ink-swatch-btn";
-      b.type = "button";
-      b.title = c.label;
-      b.setAttribute("aria-label", c.label);
-      b.style.setProperty("--swatch", c.color);
-      b.addEventListener("click", (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        this.s.recolorSelection(c.color);
-        this.palette.hidden = true;
-        this.update();
-      });
-      this.palette.appendChild(b);
+    const done = () => {
+      this.palette.hidden = true;
+      this.update();
+    };
+    if (kind === "color") {
+      for (const c of INK_COLORS) this.swatch(c.color, c.label, () => (this.s.recolorSelection(c.color), done()));
+    } else {
+      const t = this.s.tools;
+      for (const st of FILL_STYLES) {
+        const b = this.palette.ownerDocument.createElement("button");
+        b.className = `ink-sel-style${t.fillStyle === st ? " is-active" : ""}`;
+        b.type = "button";
+        b.title = FILL_STYLE_INFO[st].label;
+        b.setAttribute("aria-label", FILL_STYLE_INFO[st].label);
+        this.s.host.icon(b, FILL_STYLE_INFO[st].icon);
+        b.addEventListener("click", (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          this.s.setTools({ fillStyle: st });
+          this.showPalette("fill");
+        });
+        this.palette.appendChild(b);
+      }
+      this.swatch("", "No fill", () => (this.s.fillSelection("", t.fillStyle), done()), "is-none");
+      for (const c of FILL_COLORS) this.swatch(c.color, c.label, () => (this.s.fillSelection(c.color, this.s.tools.fillStyle), done()));
     }
     this.palette.hidden = false;
     this.update();
