@@ -24,8 +24,8 @@ Taken by the automated end-to-end tests in real Obsidian (the "handwriting" is g
 | ![Ink page with handwriting, a diagram and a text box](docs/ink-page.png) | ![Text page with the transcript and a live figure](docs/text-page-eink.png) |
 | **Pen options** | **All pages** |
 | ![The pen card: pens, thickness, colours](docs/pen-options.png) | ![Page overview](docs/pages.png) |
-| **Papers from arXiv** | |
-| ![Search arXiv; the most popular papers with an Import button](docs/arxiv.png) | |
+| **Papers from arXiv** | **Flowcharts, fills, object libraries** |
+| ![Search arXiv; the most popular papers with an Import button](docs/arxiv.png) | ![A flowchart from the object library: shapes with labels, attached arrows, a filled decision and a hatched box from an Excalidraw library](docs/flowchart.png) |
 
 ## Writing – like in the Boox Notes app
 

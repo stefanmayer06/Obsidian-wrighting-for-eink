@@ -1002,6 +1002,24 @@ steps.flowchart = async () => {
     return { text: t?.text, inShape: t?.container === p.strokes[0].id, align: t?.align };
   });
   check("the text tool labels the shape it is tapped into", label.text === "Start" && label.inShape && label.align === "center", JSON.stringify(label));
+  // a second shape, connected with an elbow arrow, and its label
+  await page.click(`${panel} .ink-library-tile[aria-label='Start / end']`);
+  await pen([[480, 700], [480, 700]], { m });
+  await ev(() => __t.surface().setTools({ tool: "shape", shape: "elbow" }));
+  await pen(along([[200, 480], [480, 700]], 8), { m });
+  const elbow = await ev(() => {
+    const p = __t.surface().page;
+    const c = p.strokes.at(-1);
+    const n = c.pts.length / 3;
+    const pts = Array.from({ length: n }, (_, i) => [c.pts[i * 3], c.pts[i * 3 + 1]]);
+    return { from: c.from === p.strokes[1].id, to: c.to === p.strokes.at(-2).id, square: pts.every((q, i) => i === 0 || q[0] === pts[i - 1][0] || q[1] === pts[i - 1][1]), n };
+  });
+  check("an elbow arrow attaches too and keeps right angles", elbow.from && elbow.to && elbow.square && elbow.n >= 3, JSON.stringify(elbow));
+  await ev(() => __t.surface().setTools({ tool: "text" }));
+  await pen([[480, 700], [480, 700]], { m });
+  await sleep(200);
+  await page.keyboard.type("Done");
+  await page.keyboard.press("Escape");
   // keep the decision in My library
   await ev(() => __t.surface().setTools({ tool: "lasso" }));
   await pen([[110, 480], [110, 480]], { m });
@@ -1024,7 +1042,7 @@ steps.flowchart = async () => {
   await page.click(`${panel} .ink-library-source[aria-label='Servers']`);
   await page.waitForSelector(`${panel} .ink-library-tile[aria-label='Labelled box']`, { timeout: 5000 });
   await page.click(`${panel} .ink-library-tile[aria-label='Labelled box']`);
-  await pen([[450, 800], [450, 800]], { m });
+  await pen([[200, 900], [200, 900]], { m });
   const placed = await ev(() => {
     const p = __t.surface().page;
     const s = p.strokes.at(-1);
@@ -1032,14 +1050,15 @@ steps.flowchart = async () => {
     return { fill: s.fill, style: s.fillStyle, text: t.text, inBox: t.container === s.id };
   });
   check("an Excalidraw library item is placed with its hatching and label", placed.fill === "#a5d8ff" && placed.style === "hatch" && placed.text === "Server" && placed.inBox, JSON.stringify(placed));
+  await ev(() => document.querySelectorAll(".notice").forEach((n) => n.remove()));
   await shot("12-flowchart.png");
   await ev(() => __t.surface().setTools({ tool: "pen" }));
   const saved = await ev(async (p) => {
     await __t.waitFor(async () => / f:a5d8ff s:h/.test(await __t.read(p)), 8000, "saved").catch(() => null);
     const text = await __t.read(p);
-    return { fill: / f:fff3bf/.test(text), arrow: / a:\S+ b:\S+/.test(text), hatch: / f:a5d8ff s:h/.test(text), labels: (text.match(/"container":/g) ?? []).length };
+    return { fill: / f:fff3bf/.test(text), arrows: (text.match(/ a:\S+ b:\S+/g) ?? []).length, hatch: / f:a5d8ff s:h/.test(text), labels: (text.match(/"container":/g) ?? []).length };
   }, file);
-  check("fills, the attached arrow and the labels are saved", saved.fill && saved.arrow && saved.hatch && saved.labels === 2, JSON.stringify(saved));
+  check("fills, the attached arrows and the labels are saved", saved.fill && saved.arrows === 2 && saved.hatch && saved.labels === 3, JSON.stringify(saved));
   await page.click(`${panel} .ink-library-close`);
 };
 
