@@ -9,7 +9,7 @@ import { InkSurface } from "../ink/surface";
 import { Toolbar, type ToolbarPosition } from "../ink/ui/toolbar";
 import { Popover, type MenuSection } from "../ink/ui/popover";
 import type { SelectionAction, SurfaceSettings } from "../ink/types";
-import { einkActive } from "./einkMode";
+import { einkActive, lowLatencyActive } from "./einkMode";
 import { ConfirmModal, FilePickModal, NotePickModal } from "./modals";
 import { PaperPickerModal } from "./paperPicker";
 import { PageOverviewModal } from "./pageOverview";
@@ -152,7 +152,7 @@ export class InkView extends TextFileView {
       scribbleErase: s.scribbleErase,
       holdToShape: s.holdToShape,
       fit: s.fit,
-      lowLatency: s.lowLatency,
+      lowLatency: lowLatencyActive(s),
       eink,
     };
     this.surface.setSettings(patch);

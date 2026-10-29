@@ -11,6 +11,8 @@ export type AzureApi = "auto" | "v4" | "v3.2";
 /** cloud: Ink Notebook Cloud subscription; azure: the user's own Azure resource. */
 export type OcrProvider = "cloud" | "azure";
 export type EinkMode = "auto" | "on" | "off";
+/** Chrome's low-latency canvas for the ink page; auto: not on e-ink screens. */
+export type LowLatencyMode = "auto" | "on" | "off";
 export type BookmarkPosition = "top" | "middle" | "bottom";
 export type TextViewMode = "reading" | "editing" | "keep";
 export type DiagramSensitivity = "low" | "normal" | "high";
@@ -82,7 +84,7 @@ export interface InkSettings {
   holdToShape: boolean;
   fit: FitMode;
   toolbarPosition: ToolbarPosition;
-  lowLatency: boolean;
+  lowLatency: LowLatencyMode;
 
   // ---- display ----
   einkMode: EinkMode;
@@ -142,7 +144,7 @@ export const DEFAULT_SETTINGS: InkSettings = {
   holdToShape: true,
   fit: "page",
   toolbarPosition: "top",
-  lowLatency: true,
+  lowLatency: "auto",
 
   einkMode: "auto",
   bookmarkPosition: "top",
@@ -221,7 +223,8 @@ export function loadSettings(raw: unknown): InkSettings {
     holdToShape: bool(r.holdToShape, d.holdToShape),
     fit: oneOf(r.fit, ["page", "width"] as const, d.fit),
     toolbarPosition: oneOf(r.toolbarPosition, ["top", "bottom", "left", "right"] as const, d.toolbarPosition),
-    lowLatency: bool(r.lowLatency, d.lowLatency),
+    // it was a switch, on by default: on becomes automatic (off on e-ink screens)
+    lowLatency: r.lowLatency === false ? "off" : oneOf(r.lowLatency, ["auto", "on", "off"] as const, d.lowLatency),
 
     einkMode: oneOf(r.einkMode, ["auto", "on", "off"] as const, d.einkMode),
     bookmarkPosition: oneOf(r.bookmarkPosition, ["top", "middle", "bottom"] as const, d.bookmarkPosition),

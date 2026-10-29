@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { detectDevice } from "../src/core/device";
+import { loadSettings } from "../src/settings";
 import { applyTransform, displayedSize, normalizeRotation, parsePageRange, unrotateTransform } from "../src/core/pdfMath";
 import { imageRectToScene, makeRenderPlan, planOcrUnits, sceneToImage, DEFAULT_RASTER_LIMITS } from "../src/core/rasterPlan";
 import { applyTypedNotes, extractTypedNotes } from "../src/core/typedNotes";
@@ -12,6 +13,8 @@ describe("device detection", () => {
     ["Mozilla/5.0 (Linux; Android 11; Tab Ultra C Build/RKQ1; wv) AppleWebKit/537.36", true],
     ["Mozilla/5.0 (Linux; Android 13; Note Air4 C Build/TP1A; wv) AppleWebKit/537.36", true],
     ["Mozilla/5.0 (Linux; Android 12; Go Color 7 Build/SKQ1; wv) AppleWebKit/537.36", true],
+    ["Mozilla/5.0 (Linux; Android 13; NoteAir5C Build/TP1A; wv) AppleWebKit/537.36", true],
+    ["Mozilla/5.0 (Linux; Android 14; Note Air6 C Build/UP1A; wv) AppleWebKit/537.36", true],
     ["Mozilla/5.0 (Linux; Android 11; Palma Build/RKQ1; wv) AppleWebKit/537.36", true],
     ["Mozilla/5.0 (Linux; Android 14; SM-S911B Build/UP1A; wv) AppleWebKit/537.36", false],
     ["Mozilla/5.0 (Linux; Android 10; HUAWEI nova 5T Build/HUAWEI; wv)", false],
@@ -19,6 +22,17 @@ describe("device detection", () => {
     ["Mozilla/5.0 (Linux; Android 11; ONYX BOOX Build/1)", true],
   ])("%s -> %s", (ua, expected) => {
     expect(detectDevice(ua).isEink).toBe(expected);
+  });
+});
+
+describe("low-latency setting", () => {
+  it("is left to the device unless it was turned off", () => {
+    expect(loadSettings({}).lowLatency).toBe("auto");
+    // stored when it was a switch that was on by default
+    expect(loadSettings({ lowLatency: true }).lowLatency).toBe("auto");
+    expect(loadSettings({ lowLatency: false }).lowLatency).toBe("off");
+    expect(loadSettings({ lowLatency: "on" }).lowLatency).toBe("on");
+    expect(loadSettings({ lowLatency: "sometimes" }).lowLatency).toBe("auto");
   });
 });
 
