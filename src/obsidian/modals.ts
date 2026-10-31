@@ -4,6 +4,7 @@ import { cleanSubfolder } from "../core/folders";
 /** Simple text prompt that resolves to the entered text (or null when cancelled). */
 export class TextPromptModal extends Modal {
   private value: string;
+  private readonly initial: string;
   private resolved = false;
 
   private constructor(
@@ -14,6 +15,7 @@ export class TextPromptModal extends Modal {
   ) {
     super(app);
     this.value = initial;
+    this.initial = initial;
   }
 
   static ask(app: App, title: string, initial = ""): Promise<string | null> {
@@ -33,6 +35,8 @@ export class TextPromptModal extends Modal {
         }
       });
       window.setTimeout(() => {
+        // select the suggested text to replace it – unless typing has already begun
+        if (t.inputEl.value !== this.initial) return;
         t.inputEl.focus();
         t.inputEl.select();
       }, 50);

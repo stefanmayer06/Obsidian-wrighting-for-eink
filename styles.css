@@ -1527,6 +1527,88 @@ canvas.ink-preview-page {
   margin-bottom: 8px;
 }
 
+/* ---------- Mermaid diagrams -------------------------------------------- */
+
+.ink-modal.ink-mermaid-modal {
+  width: min(760px, 96vw);
+}
+
+.ink-mermaid-modal [hidden] {
+  display: none !important;
+}
+
+.ink-mermaid-intro {
+  margin: 0 0 8px;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+.ink-mermaid-name {
+  padding-top: 4px;
+}
+
+.ink-mermaid-sources,
+.ink-mermaid-pick {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0;
+}
+
+.ink-mermaid-pick span {
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+.ink-mermaid-modal button.ink-mermaid-source {
+  height: 40px;
+  padding: 0 14px;
+  border: 2px solid var(--background-modifier-border);
+  box-shadow: none;
+  font-size: 15px;
+}
+
+.ink-mermaid-modal button.ink-mermaid-source.is-active {
+  border-color: var(--text-normal);
+}
+
+.ink-mermaid-modal textarea.ink-mermaid-code {
+  width: 100%;
+  min-height: 170px;
+  max-height: 38vh;
+  margin: 4px 0 8px;
+  resize: vertical;
+  font-family: var(--font-monospace);
+  font-size: 14px;
+  line-height: 1.4;
+  white-space: pre;
+  tab-size: 4;
+}
+
+.ink-mermaid-preview {
+  overflow: hidden;
+  border: 2px solid var(--background-modifier-border);
+  border-radius: 6px;
+  background: #ffffff;
+}
+
+.ink-mermaid-canvas {
+  display: block;
+  margin: 0 auto;
+}
+
+.ink-mermaid-status {
+  min-height: 1.4em;
+  margin: 6px 2px 0;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+.ink-mermaid-status.is-error {
+  color: var(--text-error);
+}
+
 /* ---------- Papers from arXiv ------------------------------------------- */
 
 .ink-modal.ink-arxiv-modal {

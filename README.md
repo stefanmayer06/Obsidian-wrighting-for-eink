@@ -26,6 +26,8 @@ Taken by the automated end-to-end tests in real Obsidian (the "handwriting" is g
 | ![The pen card: pens, thickness, colours](docs/pen-options.png) | ![Page overview](docs/pages.png) |
 | **Papers from arXiv** | **Flowcharts, fills, object libraries** |
 | ![Search arXiv; the most popular papers with an Import button](docs/arxiv.png) | ![A flowchart from the object library: shapes with labels, attached arrows, a filled decision and a hatched box from an Excalidraw library](docs/flowchart.png) |
+| **Adding a Mermaid diagram** | **A Mermaid diagram on the page** |
+| ![The dialog: Mermaid code taken from a note, shown as ink, with its shapes and arrows counted](docs/mermaid-dialog.png) | ![A Mermaid flowchart placed as ink: subgraphs, coloured shapes with labels, elbow arrows, the Mermaid library next to it](docs/mermaid.png) |
 
 ## Writing – like in the Boox Notes app
 
@@ -40,8 +42,8 @@ The toolbar sits at the top (or bottom, left, right – see *More → View*). Ta
 | **Shapes** | Line, arrow, elbow arrow, dashed line, rectangle, ellipse, circle, triangle, diamond – drag to draw. New shapes can be filled. An arrow drawn from one shape to another **stays attached** to both |
 | **Fill** | Tap inside a shape – or inside any area closed by lines, like a box drawn with four strokes or a circle drawn with the pen – to fill it. Twelve colours, solid, hatched or cross-hatched; *Remove fills* takes a fill away. Fills stay underneath your writing |
 | **Text** | Tap the page and type; tap a text to change it. Tap inside a shape to give it a **label**, centred in the shape, that moves with it. Four sizes |
-| **Object library** | Flowchart shapes and the objects of **Excalidraw libraries**: tap one, then tap the page to put it there (see *Flowcharts and object libraries*) |
-| **Insert** | Images (from the vault or the device), a link to a note (a tappable chip on the page), objects from the library, pages from a PDF |
+| **Object library** | Flowchart shapes, **Mermaid diagrams** and the objects of **Excalidraw libraries**: tap one, then tap the page to put it there (see *Flowcharts and object libraries*) |
+| **Insert** | Images (from the vault or the device), a link to a note (a tappable chip on the page), objects from the library, a Mermaid diagram, pages from a PDF |
 | **Undo / Redo** | Unlimited while the page is open |
 
 Smart pen features (each can be turned off):
@@ -69,11 +71,22 @@ The **library** button in the toolbar (or *Insert → From the object library…
 
 - **Flowchart** – the usual flowchart symbols: process, decision, start/end, input/output, document, predefined process, database, manual input, preparation, manual operation, delay, display, connector, off-page connector, merge, extract and comment. They are drawn in the pen colour and thickness you have chosen, and with the fill chosen for shapes.
 - **Excalidraw libraries** – every `.excalidrawlib` file in your vault, and the library of the [Excalidraw plugin](https://github.com/zsviczian/obsidian-excalidraw-plugin) if you use it. Get more at [libraries.excalidraw.com](https://libraries.excalidraw.com): *Import from a link…* takes the link of a library's *Download* button (or its *Add to Excalidraw* link), *Import a library file…* a file you downloaded. Rectangles, ellipses, diamonds, lines, curves, arrows, pen drawings and text come over with their colours, fills, hatching, rounded corners and rotation; labels stay in their shapes and arrows stay attached. (Pictures in libraries are left out.)
+- **Mermaid** – your Mermaid diagrams, turned into ink (see *Mermaid diagrams* below).
 - **My library** – lasso something on the page and tap **To library** to keep it. My library is an Excalidraw library too, so Excalidraw can use what you keep in it (and the trash button removes an item).
 
 Tap an object, then tap the page where it should go – as often as you like; choosing a tool stops. On a narrow screen the library folds away to its title while you place objects (tap it to open it again).
 
 To draw a flowchart: place the shapes, then connect them with **Arrow** or **Elbow arrow** (in the library, or in the shape tool) – draw from one shape to the next. The arrow starts and ends at the shapes' outlines and stays attached: move a shape with the lasso and its arrows follow (an elbow arrow keeps its right angles). Tap inside a shape with the **Text** tool to type its label, or write into it by hand. **Fill** colours the shapes.
+
+### Mermaid diagrams
+
+Flowcharts written in [Mermaid](https://mermaid.js.org/syntax/flowchart.html) – the ```` ```mermaid ```` blocks of your notes, or code from mermaid.live, GitHub or an AI chat – go into the library as real ink:
+
+- **Add one** with *Add a Mermaid diagram…* at the bottom of the library (or *Insert → Mermaid diagram…*, or the command *Add a Mermaid diagram to the object library*). **Paste** the code (or type it), **Choose a file…** on the device (`.mmd`, `.mermaid`, a Markdown note, a text file) or pick a note **From the vault…** – a note with several diagrams lets you choose one. You see the diagram as ink while you type, and what is wrong (with the line) when it cannot be read. **Add to library**, and on an ink page it is ready to be placed: tap the page.
+- **From a note**: right-click inside a ```` ```mermaid ```` block → *Add this Mermaid diagram to the ink library* (or run the command with the cursor in it). It is named after the note. A `.mmd` or `.mermaid` file: right-click it → *Add to the ink object library*.
+- **On the page** every node is a shape with its label in it, every link an **elbow arrow attached to the shapes** at its ends – move a shape with the lasso and its arrows follow, tap into it with the Text tool to change the label, fill it, erase it, like any shape you drew. Subgraphs (also inside subgraphs) are boxes with their title, link labels sit beside their links, links that go back up go round the side. A whole diagram may fill most of the page (it is made smaller when it is bigger than that).
+- **What is understood**: `flowchart`/`graph` with `TD`/`TB`/`BT`/`LR`/`RL` (and `direction` in subgraphs); the shapes `[rect]`, `(rounded)`, `([stadium])`, `[[subroutine]]`, `[(database)]`, `((circle))`, `(((double circle)))`, `>flag]`, `{decision}`, `{{hexagon}}`, `[/lean/]`, `[\lean\]`, `[/trapezoid\]`, `[\trapezoid/]` and `A@{ shape: … }`; links `-->`, `---`, `-.->`, `==>`, `<-->`, `--o`, `--x`, `~~~`, longer links (`--->`), labels (`-- yes -->`, `-->|yes|`), chains and `&`; labels with `"quotes"`, `<br/>`, Markdown strings and entities; `classDef`, `class`, `:::`, `style` and `linkStyle` colours (fill, stroke, text colour, line width, dashes); comments and frontmatter (`title:`). Other kinds of Mermaid diagrams (sequence, class, state, …) are not turned into ink yet.
+- **Where they are kept**: each diagram is a note with a ```` ```mermaid ```` block in the *Mermaid* folder of the library folder (`Ink libraries/Mermaid/`). Obsidian shows it as a Mermaid diagram too; change the note and the library item changes. The trash button on an item moves its note to the trash.
 
 ## The text page
 
@@ -120,6 +133,7 @@ Each ink page is two normal files:
 - Both files have the same name: `Week 1.md` and `Week 1.ink.md`. A note that is an ink page itself (`Week 1.md` with the `ink-notebook` property) moves into the ink subfolder as `Week 1.ink.md` when its text page is made, so the text page gets its name; **Match up the names of ink and text pages** does the same for pages made before.
 - New pages go into the folder of the note you're in, a fixed folder, or the one you choose each time; the ink file goes into a subfolder (`Attachments` by default), so your folders only show your notes.
 - Any note can get an ink page later (**Add an ink page to this note**): `Note.md` stays as it is, `Attachments/Note.ink.md` is added.
+- Object libraries live in `Ink libraries/` (see Settings): imported Excalidraw libraries, `My library.excalidrawlib`, and `Mermaid/` with one note per Mermaid diagram.
 
 ## Installation
 

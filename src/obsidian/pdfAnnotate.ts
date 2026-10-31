@@ -204,7 +204,7 @@ function drawStrokes(out: PDFPage, page: Page, p: Placement): number {
         borderColor: color(run.color),
         borderWidth: run.w,
         borderLineCap: LineCapStyle.Round,
-        borderDashArray: s.dash ? dashPattern(s.width) : undefined,
+        borderDashArray: s.dash && !run.head ? dashPattern(s.width) : undefined,
         blendMode: marker ? BlendMode.Multiply : undefined,
       });
       n++;

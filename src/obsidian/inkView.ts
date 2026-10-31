@@ -450,6 +450,7 @@ export class InkView extends TextFileView {
           this.rememberTools(this.surface.tools);
         },
         actions: () => [
+          { icon: "workflow", label: "Add a Mermaid diagram…", run: () => void plugin.addMermaidDiagram() },
           {
             icon: "upload",
             label: "Import a library file…",
@@ -478,6 +479,16 @@ export class InkView extends TextFileView {
       },
       () => (this.library = null),
     );
+  }
+
+  /** Show an item in the object library (opening it) and choose it to be placed. */
+  showLibraryItem(source: string, item: string): void {
+    if (!this.library) {
+      this.plugin.settings.lastLibrary = source;
+      this.openLibrary();
+    }
+    this.library?.fold(false);
+    void this.library?.reload(source, item);
   }
 
   /** "To library" in the lasso menu: keep the selection in My library. */
@@ -518,7 +529,8 @@ export class InkView extends TextFileView {
           { icon: "image", label: "Image from the vault…", run: () => void this.insertVaultImage() },
           { icon: "camera", label: "Image from this device…", run: () => this.insertDeviceImage() },
           { icon: "link", label: "Link to a note…", run: () => void this.insertLink() },
-          { icon: "library", label: "From the object library…", hint: "Flowchart shapes and Excalidraw libraries", run: () => (this.library ? undefined : this.openLibrary()) },
+          { icon: "library", label: "From the object library…", hint: "Flowchart shapes, Mermaid diagrams and Excalidraw libraries", run: () => (this.library ? undefined : this.openLibrary()) },
+          { icon: "workflow", label: "Mermaid diagram…", hint: "Paste Mermaid code or choose a file", run: () => void this.plugin.addMermaidDiagram() },
           {
             icon: "type",
             label: "Text box",
