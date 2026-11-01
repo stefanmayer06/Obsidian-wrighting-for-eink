@@ -12,28 +12,39 @@ import {
   type LibraryItem,
 } from "../core/ink/excalidrawLib";
 import { FLOWCHART_LIBRARY_ID, flowchartLibrary } from "../core/ink/flowchart";
+import { mermaidToItems } from "../core/ink/fromMermaid";
+import { mermaidBlocks, mermaidNote, removeMermaidBlock } from "../core/ink/mermaid";
 import type { Items } from "../core/ink/model";
 import { joinPath } from "../core/folders";
-import { measuringContext, wrapText } from "../ink/render";
+import { inkTextMeasure, measuringContext, wrapText } from "../ink/render";
 import type { LibrarySource } from "../ink/ui/libraryPanel";
 import { send } from "./azureClient";
 
 /**
  * Object libraries for the ink page: the built-in flowchart shapes, every
- * Excalidraw library (`.excalidrawlib`) in the vault, and the library of the
- * Obsidian Excalidraw plugin. Libraries are imported from a file or a link
- * (libraries.excalidraw.com) into the library folder; "To library" in the
- * lasso menu keeps a selection in "My library" – a normal Excalidraw library
- * too, so Excalidraw can use it.
+ * Excalidraw library (`.excalidrawlib`) in the vault, the library of the
+ * Obsidian Excalidraw plugin, and Mermaid diagrams. Libraries are imported
+ * from a file or a link (libraries.excalidraw.com) into the library folder;
+ * "To library" in the lasso menu keeps a selection in "My library" – a normal
+ * Excalidraw library too, so Excalidraw can use it. Mermaid diagrams are
+ * notes with a ```mermaid block in the library's "Mermaid" folder (pasted or
+ * from a file): they are turned into ink when the library shows them, so a
+ * changed note changes its item.
  */
 
 export const LIBRARY_EXTENSION = "excalidrawlib";
 const PLUGIN_SOURCE = "excalidraw-plugin";
 const MY_LIBRARY = "My library";
 const FILE_PREFIX = "file:";
+export const MERMAID_SOURCE = "mermaid";
+const MERMAID_FOLDER = "Mermaid";
+const MERMAID_PREFIX = "mermaid:";
+const MERMAID_EXTENSIONS = ["md", "mmd", "mermaid"];
 
 export class LibraryService {
   private cache = new Map<string, { stamp: string; items: LibraryItem[] }>();
+  /** Mermaid notes that could not be read (path → stamp), so that it is said once. */
+  private reported = new Map<string, string>();
 
   constructor(private plugin: InkNotebookPlugin) {}
 
@@ -58,8 +69,73 @@ export class LibraryService {
     return this.app.vault.getFiles().filter((f) => f.extension.toLowerCase() === LIBRARY_EXTENSION);
   }
 
+  /** Where Mermaid diagrams are kept. */
+  get mermaidFolder(): string {
+    return normalizePath(joinPath(this.folder, MERMAID_FOLDER));
+  }
+
+  private mermaidFiles(): TFile[] {
+    const prefix = `${this.mermaidFolder}/`;
+    return this.app.vault
+      .getFiles()
+      .filter((f) => f.path.startsWith(prefix) && MERMAID_EXTENSIONS.includes(f.extension.toLowerCase()))
+      .sort((a, b) => a.path.localeCompare(b.path));
+  }
+
+  /** The diagrams of a Mermaid note (or .mmd file) as library items. */
+  private async mermaidItems(file: TFile): Promise<LibraryItem[]> {
+    const stamp = `${file.stat.mtime}:${file.stat.size}`;
+    const key = MERMAID_PREFIX + file.path;
+    const hit = this.cache.get(key);
+    if (hit && hit.stamp === stamp) return hit.items;
+    const text = await this.app.vault.cachedRead(file);
+    const blocks = file.extension.toLowerCase() === "md" ? mermaidBlocks(text) : [text];
+    const items: LibraryItem[] = [];
+    const problems: string[] = [];
+    const measure = inkTextMeasure();
+    blocks.forEach((code, i) => {
+      try {
+        const ink = mermaidToItems(code, measure);
+        items.push({ id: `${MERMAID_PREFIX}${file.path}#${i}`, name: blocks.length > 1 ? `${file.basename} ${i + 1}` : file.basename, items: ink.items, fitPage: true });
+      } catch (e) {
+        problems.push(e instanceof Error ? e.message : String(e));
+      }
+    });
+    if (problems.length && this.reported.get(file.path) !== stamp) {
+      this.reported.set(file.path, stamp);
+      new Notice(`The Mermaid diagram “${file.basename}” could not be turned into ink: ${problems[0]}`, 10000);
+    }
+    this.cache.set(key, { stamp, items });
+    return items;
+  }
+
+  /**
+   * Keep a Mermaid diagram in the library (a note in the Mermaid folder).
+   * Throws MermaidError when it cannot be turned into ink. Returns the new item.
+   */
+  async addMermaid(name: string, code: string): Promise<{ source: string; item: string }> {
+    // never keep what cannot be drawn
+    const ink = mermaidToItems(code, inkTextMeasure());
+    const folder = this.mermaidFolder;
+    await this.plugin.pairs.ensureFolder(folder);
+    const base = name.replace(/[\\/:*?"<>|#^[\]]+/g, " ").replace(/\s+/g, " ").trim() || "Mermaid diagram";
+    let path = normalizePath(joinPath(folder, `${base}.md`));
+    for (let n = 2; this.app.vault.getAbstractFileByPath(path); n++) path = normalizePath(joinPath(folder, `${base} ${n}.md`));
+    await this.app.vault.create(path, mermaidNote(code));
+    new Notice(`“${base}” added to the Mermaid library: ${ink.shapes} shape${ink.shapes === 1 ? "" : "s"}, ${ink.arrows} arrow${ink.arrows === 1 ? "" : "s"}.`);
+    return { source: MERMAID_SOURCE, item: `${MERMAID_PREFIX}${path}#0` };
+  }
+
   async sources(): Promise<LibrarySource[]> {
-    const out: LibrarySource[] = [{ id: FLOWCHART_LIBRARY_ID, name: "Flowchart", flowchart: true }];
+    const out: LibrarySource[] = [
+      { id: FLOWCHART_LIBRARY_ID, name: "Flowchart", flowchart: true },
+      {
+        id: MERMAID_SOURCE,
+        name: "Mermaid",
+        editable: true,
+        emptyHint: "No Mermaid diagrams yet. Tap “Add a Mermaid diagram…” below and paste the Mermaid code of a flowchart, or choose a file.",
+      },
+    ];
     const mine = this.myLibraryPath;
     const files = this.libraryFiles().sort((a, b) => (a.path === mine ? -1 : b.path === mine ? 1 : a.basename.localeCompare(b.basename)));
     if (!files.some((f) => f.path === mine)) out.push({ id: FILE_PREFIX + mine, name: MY_LIBRARY, editable: true });
@@ -74,6 +150,11 @@ export class LibraryService {
 
   async items(id: string): Promise<LibraryItem[]> {
     if (id === FLOWCHART_LIBRARY_ID) return flowchartLibrary();
+    if (id === MERMAID_SOURCE) {
+      const out: LibraryItem[] = [];
+      for (const f of this.mermaidFiles()) out.push(...(await this.mermaidItems(f)));
+      return out;
+    }
     let text: string;
     let stamp: string;
     if (id === PLUGIN_SOURCE) {
@@ -164,6 +245,23 @@ export class LibraryService {
   }
 
   async removeItem(sourceId: string, itemId: string): Promise<void> {
+    if (sourceId === MERMAID_SOURCE) {
+      const m = /^mermaid:(.*)#(\d+)$/.exec(itemId);
+      const file = m ? this.app.vault.getAbstractFileByPath(m[1]) : null;
+      if (!m || !(file instanceof TFile)) return;
+      const index = parseInt(m[2], 10);
+      // a note with more diagrams only loses this one; otherwise it goes to the trash
+      if (file.extension.toLowerCase() === "md") {
+        const text = await this.app.vault.read(file);
+        if (mermaidBlocks(text).length > 1) {
+          const rest = removeMermaidBlock(text, index);
+          if (rest !== null) await this.app.vault.modify(file, rest);
+          return;
+        }
+      }
+      await this.app.fileManager.trashFile(file);
+      return;
+    }
     if (!sourceId.startsWith(FILE_PREFIX)) return;
     const file = this.app.vault.getAbstractFileByPath(sourceId.slice(FILE_PREFIX.length));
     if (!(file instanceof TFile)) return;

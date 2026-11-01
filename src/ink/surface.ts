@@ -81,6 +81,8 @@ export interface Stamp {
   items: Items;
   /** Drawn in the current pen colour, thickness and shape fill (the built-in flowchart shapes). */
   restyle: boolean;
+  /** A whole diagram (Mermaid): it may fill most of the page. */
+  fitPage?: boolean;
 }
 
 export class InkSurface {
@@ -804,12 +806,13 @@ export class InkSurface {
       if (this.tools.tool === "stamp") this.setTools({ tool: "pen" });
       return;
     }
-    // items bigger than most of the page are made smaller
+    // items bigger than most of the page are made smaller (a whole diagram may fill nearly all of it)
     const box = itemsBounds(stamp.items);
     const page = this.page;
     let items = stamp.items;
     if (box) {
-      const k = Math.min(1, (page.w * 0.8) / Math.max(1, box.w), (page.h * 0.6) / Math.max(1, box.h));
+      const [fw, fh] = stamp.fitPage ? [0.94, 0.94] : [0.8, 0.6];
+      const k = Math.min(1, (page.w * fw) / Math.max(1, box.w), (page.h * fh) / Math.max(1, box.h));
       if (k < 0.999) items = transformItems(items, scaling(k, { x: box.x, y: box.y }));
     }
     this.textEditor.commit();

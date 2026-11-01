@@ -385,7 +385,62 @@ function check(name, cond, detail = "") {
     return { connectors: a, labels: back.texts.filter((t) => t.container).length, fills: back.strokes.filter((x) => x.fill).length };
   });
   check("fills, connectors and labels survive saving", saved.connectors === 2 && saved.labels === 2 && saved.fills >= 2, JSON.stringify(saved));
+  // a Mermaid diagram, on a page of its own
+  console.log("object library, Mermaid");
+  await page.evaluate(() => window.surface.addPage("end"));
+  await page.click(".ink-library-fold");
+  await page.click(".ink-library-source[aria-label='Mermaid']");
+  await page.waitForSelector(".ink-library-tile[aria-label='Start up']");
+  await page.click(".ink-library-tile[aria-label='Start up']");
+  st = await state();
+  check("tapping a Mermaid diagram starts placing it", st.tool === "stamp", JSON.stringify(st));
+  await pen([[500, 707], [500, 707]]);
+  const mermaid = await page.evaluate(() => {
+    const p = window.surface.page;
+    const ids = new Set(p.strokes.map((s) => s.id));
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const s of p.strokes) for (let i = 0; i < s.pts.length; i += 3) {
+      minX = Math.min(minX, s.pts[i]); maxX = Math.max(maxX, s.pts[i]);
+      minY = Math.min(minY, s.pts[i + 1]); maxY = Math.max(maxY, s.pts[i + 1]);
+    }
+    return {
+      strokes: p.strokes.length,
+      connectors: p.strokes.filter((s) => s.from && s.to && ids.has(s.from) && ids.has(s.to)).length,
+      labels: p.texts.filter((t) => t.container && ids.has(t.container)).length,
+      texts: p.texts.length,
+      w: maxX - minX, h: maxY - minY, minX, minY, maxX, maxY, pw: p.w, ph: p.h,
+      size: p.texts.find((t) => t.text === "More players?")?.size,
+    };
+  });
+  check("the diagram is placed as shapes, labels in them and attached arrows", mermaid.strokes === 29 && mermaid.connectors === 12 && mermaid.labels === 14 && mermaid.texts === 19, JSON.stringify(mermaid));
+  check("a whole diagram may fill most of the page, and stays on it", mermaid.h > mermaid.ph * 0.7 && mermaid.minX >= 0 && mermaid.minY >= 0 && mermaid.maxX <= mermaid.pw && mermaid.maxY <= mermaid.ph, JSON.stringify(mermaid));
   await page.click(".ink-library-close");
+  await page.waitForTimeout(50);
+  await page.screenshot({ path: path.join(SHOTS, "09-mermaid.png") });
+  // move a shape of the diagram: its arrows follow it
+  const target = await page.evaluate(() => {
+    const p = window.surface.page;
+    const t = p.texts.find((x) => x.text === "Start game\nGame(shaker, players)");
+    const s = p.strokes.find((x) => x.id === t.container);
+    let minX = Infinity;
+    for (let i = 0; i < s.pts.length; i += 3) minX = Math.min(minX, s.pts[i]);
+    // its left edge (clear of the label, which a tap would pick first)
+    return { id: s.id, x: t.x + t.w / 2, y: t.y + t.h / 2, edge: minX, arrow: p.strokes.find((x) => x.to === s.id).id };
+  });
+  await page.evaluate(() => window.surface.setTools({ tool: "lasso" }));
+  await pen([[target.edge, target.y], [target.edge, target.y]]);
+  const pickedShape = await page.evaluate(() => [...window.surface.selection.strokes]);
+  await pen(along([[target.x, target.y], [target.x + 200, target.y + 20]], 8));
+  const after = await page.evaluate((t) => {
+    const p = window.surface.page;
+    const a = p.strokes.find((x) => x.id === t.arrow);
+    const n = a.pts.length / 3;
+    const s = p.strokes.find((x) => x.id === t.id);
+    let minX = Infinity, maxX = -Infinity;
+    for (let i = 0; i < s.pts.length; i += 3) { minX = Math.min(minX, s.pts[i]); maxX = Math.max(maxX, s.pts[i]); }
+    return { endX: a.pts[(n - 1) * 3], minX, maxX, to: a.to, elbow: !!a.elbow };
+  }, target);
+  check("a shape of the diagram can be moved, and its arrow follows", pickedShape.includes(target.id) && after.to === target.id && after.elbow && after.endX > after.minX - 4 && after.endX < after.maxX + 4, JSON.stringify({ pickedShape, ...after }));
   check("the library closes", (await page.$(".ink-library-panel")) === null);
 
   check("no errors in the page", errors.length === 0, errors.join("\n"));

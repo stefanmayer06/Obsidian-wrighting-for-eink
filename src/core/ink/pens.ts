@@ -236,8 +236,8 @@ export function arrowHead(s: Stroke, atStart = false): Segment[] {
   ];
 }
 
-/** All segments of a stroke, in drawing order. */
-export function strokeSegments(s: Stroke): Segment[] {
+/** The segments of a stroke's line, without its arrow heads. */
+function lineSegments(s: Stroke): Segment[] {
   const b = new StrokeBuilder(s.pen, s.color, s.width, !!s.poly);
   const out: Segment[] = [];
   const pts = s.pts;
@@ -247,9 +247,16 @@ export function strokeSegments(s: Stroke): Segment[] {
   }
   const last = b.end(!!s.closed);
   if (last) out.push(last);
-  if (s.arrow) out.push(...arrowHead(s));
-  if (s.arrowStart) out.push(...arrowHead(s, true));
   return out;
+}
+
+function headSegments(s: Stroke): Segment[] {
+  return [...(s.arrow ? arrowHead(s) : []), ...(s.arrowStart ? arrowHead(s, true) : [])];
+}
+
+/** All segments of a stroke, in drawing order. */
+export function strokeSegments(s: Stroke): Segment[] {
+  return [...lineSegments(s), ...headSegments(s)];
 }
 
 /** A run of consecutive segments with the same width and colour, as SVG path data. */
@@ -257,6 +264,8 @@ export interface StrokeRun {
   w: number;
   color: string;
   d: string;
+  /** An arrow head: drawn solid even on a dashed line. */
+  head?: boolean;
 }
 
 const f = (n: number) => (Math.round(n * 100) / 100).toString();
@@ -271,10 +280,13 @@ export function strokeRuns(s: Stroke): StrokeRun[] {
   let cur: StrokeRun | null = null;
   let endX = NaN;
   let endY = NaN;
-  for (const seg of strokeSegments(s)) {
-    const continues = cur && cur.w === seg.w && cur.color === seg.color && seg.a.x === endX && seg.a.y === endY;
+  const line = lineSegments(s);
+  const all = [...line, ...headSegments(s)];
+  all.forEach((seg, i) => {
+    const head = i >= line.length;
+    const continues = cur && !!cur.head === head && cur.w === seg.w && cur.color === seg.color && seg.a.x === endX && seg.a.y === endY;
     if (!continues) {
-      cur = { w: seg.w, color: seg.color, d: `M${f(seg.a.x)} ${f(seg.a.y)}` };
+      cur = head ? { w: seg.w, color: seg.color, d: `M${f(seg.a.x)} ${f(seg.a.y)}`, head } : { w: seg.w, color: seg.color, d: `M${f(seg.a.x)} ${f(seg.a.y)}` };
       runs.push(cur);
     }
     const run = cur as StrokeRun;
@@ -283,7 +295,7 @@ export function strokeRuns(s: Stroke): StrokeRun[] {
     else run.d += `L${f(seg.b.x)} ${f(seg.b.y)}`;
     endX = seg.b.x;
     endY = seg.b.y;
-  }
+  });
   return runs;
 }
 

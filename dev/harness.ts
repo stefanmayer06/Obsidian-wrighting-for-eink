@@ -6,7 +6,8 @@
 import { InkSurface } from "../src/ink/surface";
 import { Toolbar } from "../src/ink/ui/toolbar";
 import { newDoc, EMPTY_META } from "../src/core/ink/model";
-import { NO_IMAGES } from "../src/ink/render";
+import { inkTextMeasure, NO_IMAGES } from "../src/ink/render";
+import { mermaidToItems } from "../src/core/ink/fromMermaid";
 import { parseInkFile, serializeInkFile } from "../src/core/ink/codec";
 import { drawThumb, LibraryPanel } from "../src/ink/ui/libraryPanel";
 import { FLOWCHART_LIBRARY_ID, flowchartLibrary } from "../src/core/ink/flowchart";
@@ -28,6 +29,33 @@ const SAMPLE_LIBRARY = {
     },
   ],
 };
+
+/** A Mermaid diagram (from the feature request: subgraphs, labelled links, a loop back, classDef colours). */
+const SAMPLE_MERMAID = `flowchart TD
+    subgraph Notes
+        B["Board object<br/>2D array, n × n"]
+        P["Player object<br/>Lives on board, owns a logger"]
+    end
+    subgraph SU["Start up"]
+        M["main(): random(n)"] --> D
+        T["Tests: fixed(6, 6)"] --> D
+        D["Create dice shaker<br/>DiceRollerFactory"] --> CP(["Create player"])
+        CP --> AB["Add to board<br/>Place on start square"]
+        AB --> CL["Create logger<br/>One per player"]
+        subgraph LCF["Logger creation flow"]
+            LF(["Logger creation flow"]) --> PV["Pass player var<br/>Through an interface"]
+            PV --> AC["Assign log colour<br/>Unique per player"]
+            AC --> LR["Logger ready<br/>Prints player + dice roll"]
+        end
+        CL --> LF
+        LR --> MP{"More players?"}
+        MP -- yes --> CP
+    end
+    MP -- no --> SG["Start game<br/>Game(shaker, players)"]
+    classDef dice fill:#E1F5EE,stroke:#0F6E56,color:#085041
+    classDef logger fill:#EEEDFE,stroke:#534AB7,color:#3C3489
+    class M,T,D dice
+    class LF,PV,AC,LR logger`;
 
 const root = document.getElementById("app") as HTMLElement;
 root.classList.add("ink-view-content");
@@ -77,9 +105,15 @@ toolbar = new Toolbar(root, surface, {
         icon,
         sources: async () => [
           { id: FLOWCHART_LIBRARY_ID, name: "Flowchart", flowchart: true },
+          { id: "mermaid", name: "Mermaid", editable: true },
           { id: "sample", name: "Sample" },
         ],
-        items: async (id) => (id === FLOWCHART_LIBRARY_ID ? flowchartLibrary() : libraryItems(parseExcalidrawLibrary(sample))),
+        items: async (id) =>
+          id === FLOWCHART_LIBRARY_ID
+            ? flowchartLibrary()
+            : id === "mermaid"
+              ? [{ id: "mermaid:Start up.md#0", name: "Start up", items: mermaidToItems(SAMPLE_MERMAID, inkTextMeasure()).items, fitPage: true }]
+              : libraryItems(parseExcalidrawLibrary(sample)),
         setTools: (patch) => {
           surface.setTools(patch);
           toolbar?.refreshTools();
@@ -97,6 +131,7 @@ surface.resize();
 
 Object.assign(window, {
   surface,
+  library: () => library,
   log,
   getChanges: () => changes,
   parseInkFile,

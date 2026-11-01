@@ -22,6 +22,8 @@ export interface LibraryItem {
   items: Items;
   /** Drawn in the current pen colour and thickness when placed (the built-in shapes). */
   restyle?: boolean;
+  /** A whole diagram: it may fill most of the page when placed (other items are made smaller sooner). */
+  fitPage?: boolean;
 }
 
 /** An Excalidraw element (only what is read is typed; everything is checked). */

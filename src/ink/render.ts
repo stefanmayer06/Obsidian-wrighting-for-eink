@@ -4,6 +4,7 @@ import { figureBounds, imageBounds, LINK_CHIP_HEIGHT, linkBounds, linkChipWidth,
 import { dashPattern, isMarker, strokeRuns, type Segment } from "../core/ink/pens";
 import { fillGeometry } from "../core/ink/fill";
 import type { Figure, ImageItem, Items, LinkItem, Page, Stroke, TextBox } from "../core/ink/model";
+import type { TextMeasure } from "../core/ink/fromMermaid";
 
 /**
  * Drawing pages on a canvas. Used by the ink view, page thumbnails, figures on
@@ -31,6 +32,7 @@ interface CachedRun {
   w: number;
   color: string;
   path: Path2D;
+  head?: boolean;
 }
 
 const runCache = new WeakMap<Stroke, CachedRun[]>();
@@ -38,7 +40,7 @@ const runCache = new WeakMap<Stroke, CachedRun[]>();
 function cachedRuns(s: Stroke): CachedRun[] {
   let runs = runCache.get(s);
   if (!runs) {
-    runs = strokeRuns(s).map((r) => ({ w: r.w, color: r.color, path: new Path2D(r.d) }));
+    runs = strokeRuns(s).map((r) => ({ w: r.w, color: r.color, path: new Path2D(r.d), head: r.head }));
     runCache.set(s, runs);
   }
   return runs;
@@ -92,8 +94,9 @@ export function drawStrokeLine(ctx: Ctx, s: Stroke): void {
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
   if (marker) ctx.globalCompositeOperation = "multiply";
-  if (s.dash) ctx.setLineDash(dashPattern(s.width));
   for (const run of cachedRuns(s)) {
+    // arrow heads stay solid on a dashed line
+    ctx.setLineDash(s.dash && !run.head ? dashPattern(s.width) : []);
     ctx.strokeStyle = run.color;
     ctx.lineWidth = run.w;
     ctx.stroke(run.path);
@@ -243,6 +246,19 @@ export function measuringContext(): Ctx {
     measureCtx = c.getContext("2d") as Ctx;
   }
   return measureCtx;
+}
+
+/** Text measured as the ink page draws it (for laying out Mermaid diagrams). */
+export function inkTextMeasure(): TextMeasure {
+  const ctx = measuringContext();
+  return {
+    measure: (text, size) => {
+      ctx.font = fontFor(size);
+      return ctx.measureText(text).width;
+    },
+    wrap: (text, width, size) => wrapText(ctx, text, width, size),
+    lineHeight: TEXT_LINE_HEIGHT,
+  };
 }
 
 /** Height of a text box's text. */

@@ -20,7 +20,9 @@ ink page), daily notes with an ink page, matching up the names of ink and text
 pages, choosing the folder of a new page, converting pages made with the
 earlier Excalidraw-based versions, fills, flowcharts and object libraries
 (placing library shapes, arrows attached to shapes, labels, an Excalidraw
-library in the vault, "To library"), and
+library in the vault, "To library"), Mermaid diagrams (from the code block of
+a note and pasted on an ink page, placed as attached shapes and arrows,
+saved, removed), and
 the e-ink look on a Boox-sized window (toolbar fits).
 
 Linux only (uses Xvfb). Requirements: Node 20+, `xvfb`, the GTK/NSS libraries Electron needs.

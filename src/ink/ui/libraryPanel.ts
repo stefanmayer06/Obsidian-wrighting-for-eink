@@ -18,6 +18,8 @@ export interface LibrarySource {
   flowchart?: boolean;
   /** Items can be removed (the user's own library). */
   editable?: boolean;
+  /** What to show while the library has no items. */
+  emptyHint?: string;
 }
 
 export interface LibraryHost {
@@ -78,14 +80,19 @@ export class LibraryPanel {
     void this.reload();
   }
 
-  /** Read the list of libraries again (after an import). */
-  async reload(select?: string): Promise<void> {
+  /** Read the list of libraries again (after an import); `pick` an item of it to place. */
+  async reload(select?: string, pick?: string): Promise<void> {
     this.sources = await this.host.sources();
     if (this.closed) return;
     if (select) this.current = select;
     if (!this.sources.some((s) => s.id === this.current)) this.current = this.sources[0]?.id ?? "";
     this.renderSources();
     await this.show(this.current);
+    const item = pick ? this.items.find((it) => it.id === pick) : undefined;
+    if (item && !this.closed && !(this.surface.tools.tool === "stamp" && this.surface.stamp?.id === item.id)) {
+      this.pick(item);
+      this.tiles.get(item.id)?.scrollIntoView({ block: "nearest" });
+    }
   }
 
   private renderSources(): void {
@@ -125,9 +132,8 @@ export class LibraryPanel {
     if (this.current !== id || this.closed) return;
     this.hint.textContent =
       this.items.length === 0
-        ? src.editable
-          ? "Nothing here yet. Select something on the page with the lasso and tap “To library” to keep it here."
-          : "This library has no items that can be drawn."
+        ? (src.emptyHint ??
+          (src.editable ? "Nothing here yet. Select something on the page with the lasso and tap “To library” to keep it here." : "This library has no items that can be drawn."))
         : "Tap an item, then tap the page where it should go – as often as you like. Choose a tool to stop.";
     this.renderItems(src);
   }
@@ -201,7 +207,7 @@ export class LibraryPanel {
   private pick(it: LibraryItem): void {
     const placing = this.surface.tools.tool === "stamp" && this.surface.stamp?.id === it.id;
     if (placing) this.surface.setStamp(null);
-    else this.surface.setStamp({ id: it.id, name: it.name, items: it.items, restyle: !!it.restyle });
+    else this.surface.setStamp({ id: it.id, name: it.name, items: it.items, restyle: !!it.restyle, fitPage: !!it.fitPage });
     this.host.setTools({});
     this.markActive();
     this.renderConnect(!!this.sources.find((s) => s.id === this.current)?.flowchart);

@@ -19,6 +19,9 @@ import { migrateExcalidrawPages } from "./obsidian/migrate";
 import { transcriptEditorExtension } from "./obsidian/editorExtension";
 import { PaperService } from "./obsidian/papers";
 import { LibraryService } from "./obsidian/library";
+import { inkTextMeasure } from "./ink/render";
+import { MermaidModal, type MermaidDraft } from "./obsidian/mermaidModal";
+import { mermaidBlockAt, mermaidName } from "./core/ink/mermaid";
 import { PaperSearchModal } from "./obsidian/paperSearch";
 import { DailyInk } from "./obsidian/dailyNotes";
 import { ConfirmModal } from "./obsidian/modals";
@@ -243,6 +246,32 @@ export default class InkNotebookPlugin extends Plugin {
 
   selectionToText(view: InkView): Promise<void> {
     return selectionToText(this, view);
+  }
+
+  /**
+   * Add a Mermaid diagram to the object library (asked for, prefilled with
+   * `initial`). On an ink page the library opens with the new diagram ready
+   * to be placed.
+   */
+  async addMermaidDiagram(initial: Partial<MermaidDraft> = {}): Promise<void> {
+    const view = this.app.workspace.getActiveViewOfType(InkView);
+    const draft = await MermaidModal.ask(this.app, inkTextMeasure(), initial);
+    if (!draft) return;
+    try {
+      const added = await this.library.addMermaid(draft.name, draft.code);
+      view?.showLibraryItem(added.source, added.item);
+    } catch (e) {
+      this.switcher.reportError("Could not add the Mermaid diagram", e);
+    }
+  }
+
+  /** The Mermaid diagram the cursor of the active note is in (to prefill "Add a Mermaid diagram"). */
+  private mermaidAtCursor(): Partial<MermaidDraft> {
+    const editor = this.app.workspace.activeEditor?.editor;
+    const file = this.app.workspace.activeEditor?.file;
+    if (!editor) return {};
+    const code = mermaidBlockAt(editor.getValue(), editor.posToOffset(editor.getCursor()));
+    return code ? { code, name: mermaidName(code, file?.basename) ?? undefined } : {};
   }
 
   /** Search arXiv and import a paper (as a new ink page, or – with `into` – as more pages of that one). */
@@ -615,7 +644,13 @@ export default class InkNotebookPlugin extends Plugin {
       icon: "image",
       callback: () => run(annotateImage(this, null), "Could not annotate the image"),
     });
-    onInk("object-library", "Open the object library (flowchart shapes, Excalidraw libraries)", "library", (v) => v.openLibrary());
+    onInk("object-library", "Open the object library (flowchart shapes, Mermaid diagrams, Excalidraw libraries)", "library", (v) => v.openLibrary());
+    this.addCommand({
+      id: "add-mermaid",
+      name: "Add a Mermaid diagram to the object library…",
+      icon: "workflow",
+      callback: () => void this.addMermaidDiagram(this.mermaidAtCursor()),
+    });
     onInk("export-annotated-pdf", "Export annotated PDF", "download", (v) => {
       if (!v.surface.document.pages.some((p) => p.bg.kind === "pdf")) {
         new Notice('This ink page has no PDF pages. Use "Annotate a PDF" to start one.');
@@ -658,8 +693,17 @@ export default class InkNotebookPlugin extends Plugin {
 
   private registerFileMenus(): void {
     this.registerEvent(
-      this.app.workspace.on("editor-menu", (menu, _editor, info) => {
+      this.app.workspace.on("editor-menu", (menu, editor, info) => {
         const file = info.file;
+        const code = mermaidBlockAt(editor.getValue(), editor.posToOffset(editor.getCursor()));
+        if (code) {
+          menu.addItem((i) =>
+            i
+              .setTitle("Add this Mermaid diagram to the ink library")
+              .setIcon("workflow")
+              .onClick(() => void this.addMermaidDiagram({ code, name: mermaidName(code, file?.basename) ?? undefined })),
+          );
+        }
         if (!file || !this.pairs.canAddInk(file)) return;
         const leaf = info instanceof MarkdownView ? info.leaf : undefined;
         menu.addItem((i) =>
@@ -683,6 +727,18 @@ export default class InkNotebookPlugin extends Plugin {
         }
         if (!(file instanceof TFile)) return;
         const ext = file.extension.toLowerCase();
+        if (ext === "mmd" || ext === "mermaid") {
+          menu.addItem((i) =>
+            i
+              .setTitle("Add to the ink object library")
+              .setIcon("workflow")
+              .onClick(async () => {
+                const code = await this.app.vault.cachedRead(file);
+                void this.addMermaidDiagram({ code, name: mermaidName(code, file.basename) ?? undefined });
+              }),
+          );
+          return;
+        }
         if (ext === "pdf") {
           menu.addItem((i) =>
             i

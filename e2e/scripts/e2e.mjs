@@ -1025,6 +1025,8 @@ steps.flowchart = async () => {
   await pen([[110, 480], [110, 480]], { m });
   await page.click(".workspace-leaf.mod-active .ink-sel-library");
   await page.waitForSelector(".modal input", { timeout: 3000 });
+  // the prompt focuses its field (and selects the name it suggests) a moment after it opens: type after that
+  await page.waitForFunction(() => document.activeElement?.matches(".modal input"), null, { timeout: 3000 });
   await page.keyboard.type("Yellow decision");
   await page.keyboard.press("Enter");
   const mine = await ev(async () =>
@@ -1062,6 +1064,153 @@ steps.flowchart = async () => {
   await page.click(`${panel} .ink-library-close`);
 };
 
+steps.mermaid = async () => {
+  console.log("\n▶ Mermaid diagrams in the object library");
+  await setWindow(1100, 1180);
+  // the diagram of the feature request, in a note; and a new ink page
+  const CODE = `flowchart TD
+    subgraph Notes
+        B["Board object<br/>2D array, n × n"]
+        P["Player object<br/>Lives on board, owns a logger"]
+    end
+
+    subgraph SU["Start up"]
+        M["main(): random(n)"] --> D
+        T["Tests: fixed(6, 6)"] --> D
+        D["Create dice shaker<br/>DiceRollerFactory"] --> CP(["Create player"])
+        CP --> AB["Add to board<br/>Place on start square"]
+        AB --> CL["Create logger<br/>One per player"]
+
+        subgraph LCF["Logger creation flow"]
+            LF(["Logger creation flow"]) --> PV["Pass player var<br/>Through an interface"]
+            PV --> AC["Assign log colour<br/>Unique per player"]
+            AC --> LR["Logger ready<br/>Prints player + dice roll"]
+        end
+
+        CL --> LF
+
+        LR --> MP{"More players?"}
+        MP -- yes --> CP
+    end
+
+    MP -- no --> SG["Start game<br/>Game(shaker, players)"]
+
+    classDef dice fill:#E1F5EE,stroke:#0F6E56,color:#085041
+    classDef logger fill:#EEEDFE,stroke:#534AB7,color:#3C3489
+    class M,T,D dice
+    class LF,PV,AC,LR logger`;
+  // (starting again: the diagrams of an earlier run go)
+  fs.rmSync(path.join(VAULT, "Ink libraries", "Mermaid"), { recursive: true, force: true });
+  fs.rmSync(path.join(VAULT, "Diagrams"), { recursive: true, force: true });
+  await sleep(500);
+  fs.mkdirSync(path.join(VAULT, "Games"), { recursive: true });
+  fs.writeFileSync(path.join(VAULT, "Games", "Snakes and ladders.md"), "# Snakes and ladders\n\nHow a game starts:\n\n```mermaid\n" + CODE + "\n```\n\nMore notes.\n");
+  fs.mkdirSync(path.join(VAULT, "Diagrams", "Attachments"), { recursive: true });
+  fs.writeFileSync(path.join(VAULT, "Diagrams", "Attachments", "Diagrams.ink.md"), "---\nink-notebook: 1\n---\n");
+  await sleep(1500);
+
+  // in a note: the diagram under the cursor fills the dialog
+  const note = "Games/Snakes and ladders.md";
+  await openFile(note, "markdown");
+  await waitView("markdown", note);
+  await ev(() => {
+    const ed = app.workspace.activeEditor.editor;
+    ed.setCursor(ed.offsetToPos(ed.getValue().indexOf("subgraph LCF")));
+  });
+  await ev(() => app.commands.executeCommandById("ink-notebook:add-mermaid"));
+  await page.waitForSelector(".ink-mermaid-modal .ink-mermaid-code", { timeout: 5000 });
+  await page.waitForFunction(() => /shapes/.test(document.querySelector(".ink-mermaid-status")?.textContent ?? ""), null, { timeout: 5000 });
+  const pre = await ev(() => ({
+    code: document.querySelector(".ink-mermaid-code").value,
+    name: document.querySelector(".ink-mermaid-name input").value,
+    status: document.querySelector(".ink-mermaid-status").textContent,
+    preview: document.querySelector(".ink-mermaid-canvas").width,
+  }));
+  check("the Mermaid block under the cursor of a note fills the dialog, named after the note", pre.code.startsWith("flowchart TD") && pre.code.includes("class LF,PV,AC,LR logger") && pre.name === "Snakes and ladders", JSON.stringify({ ...pre, code: pre.code.slice(0, 40) }));
+  check("the dialog shows it as ink, with what it holds", pre.status === "14 shapes, 12 arrows." && pre.preview > 100, JSON.stringify(pre.status));
+  await shot("13-mermaid-dialog.png");
+  await page.click(".ink-mermaid-modal button.mod-cta");
+  const kept = await ev(async () =>
+    __t.waitFor(async () => {
+      const f = app.vault.getAbstractFileByPath("Ink libraries/Mermaid/Snakes and ladders.md");
+      return f && (await app.vault.read(f));
+    }, 5000, "the Mermaid note").catch((e) => String(e)),
+  );
+  check("“Add to library” keeps it as a note with a ```mermaid block in the library's Mermaid folder", /^```mermaid\nflowchart TD\n[\s\S]*class LF,PV,AC,LR logger\n```\n$/.test(kept), String(kept).slice(0, 80));
+
+  // on an ink page: paste a diagram in the library panel, it is ready to be placed
+  const file = "Diagrams/Attachments/Diagrams.ink.md";
+  await openFile(file, "ink-notebook");
+  await waitView("ink-notebook", file);
+  await ev(() => app.commands.executeCommandById("ink-notebook:object-library"));
+  const panel = ".workspace-leaf.mod-active .ink-library-panel";
+  await page.click(`${panel} .ink-library-source[aria-label='Mermaid']`);
+  await page.waitForSelector(`${panel} .ink-library-tile[aria-label='Snakes and ladders']`, { timeout: 5000 });
+  await page.click(`${panel} button[aria-label='Add a Mermaid diagram…']`);
+  await page.waitForSelector(".ink-mermaid-modal .ink-mermaid-code", { timeout: 5000 });
+  await ev(() => {
+    const ta = document.querySelector(".ink-mermaid-code");
+    ta.value = "graph LR\n  A([Draft]) --> B{Review}\n  B -->|ok| C[(Publish)]\n  B -. changes .-> A";
+    ta.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await page.waitForFunction(() => /shapes/.test(document.querySelector(".ink-mermaid-status")?.textContent ?? ""), null, { timeout: 5000 });
+  await page.fill(".ink-mermaid-name input", "Review loop");
+  await page.click(".ink-mermaid-modal button.mod-cta");
+  await page.waitForSelector(`${panel} .ink-library-tile.is-active[aria-label='Review loop']`, { timeout: 5000, state: "attached" });
+  const armed = await ev(() => ({ tool: __t.surface().tools.tool, stamp: __t.surface().stamp?.name }));
+  check("a diagram added on an ink page is chosen to be placed right away", armed.tool === "stamp" && armed.stamp === "Review loop", JSON.stringify(armed));
+  const m = await mapping();
+  await pen([[500, 160], [500, 160]], { m });
+  const small = await ev(() => {
+    const p = __t.surface().page;
+    return { arrows: p.strokes.filter((s) => s.from && s.to).length, labels: p.texts.filter((t) => t.container).map((t) => t.text) };
+  });
+  check("a tap puts it on the page: shapes, their labels and attached arrows", small.arrows === 3 && ["Draft", "Review", "Publish"].every((t) => small.labels.includes(t)), JSON.stringify(small));
+
+  // the diagram of the note, on a page of its own, filling most of it
+  const unfold = () =>
+    ev((sel) => {
+      const p = document.querySelector(sel);
+      if (p?.classList.contains("is-folded")) p.querySelector(".ink-library-fold").click();
+    }, panel);
+  await ev(() => __t.surface().addPage("end"));
+  await sleep(300);
+  await unfold();
+  await page.click(`${panel} .ink-library-tile[aria-label='Snakes and ladders']`);
+  await pen([[500, 707], [500, 707]], { m: await mapping() });
+  const big = await ev(() => {
+    const p = __t.surface().page;
+    let minY = Infinity;
+    let maxY = -Infinity;
+    for (const s of p.strokes) for (let i = 1; i < s.pts.length; i += 3) (minY = Math.min(minY, s.pts[i])), (maxY = Math.max(maxY, s.pts[i]));
+    const fills = new Set(p.strokes.map((s) => s.fill).filter(Boolean));
+    return { strokes: p.strokes.length, arrows: p.strokes.filter((s) => s.from && s.to).length, labels: p.texts.filter((t) => t.container).length, h: maxY - minY, ph: p.h, dice: fills.has("#e1f5ee"), logger: fills.has("#eeedfe"), yes: p.texts.some((t) => t.text === "yes") };
+  });
+  check("the diagram of the request is placed whole: subgraphs, 14 shapes with labels, 12 attached arrows, its colours", big.strokes === 29 && big.arrows === 12 && big.labels === 14 && big.dice && big.logger && big.yes, JSON.stringify(big));
+  check("it fills most of the page", big.h > big.ph * 0.7 && big.h < big.ph, JSON.stringify(big));
+  await ev(() => __t.surface().setTools({ tool: "pen" }));
+  await unfold();
+  await ev(() => document.querySelectorAll(".notice").forEach((n) => n.remove()));
+  await shot("14-mermaid.png");
+  const saved = await ev(async (p) => {
+    await __t.waitFor(async () => /f:e1f5ee/.test(await __t.read(p)), 8000, "saved").catch(() => null);
+    const text = await __t.read(p);
+    return { dice: / f:e1f5ee/.test(text), arrows: (text.match(/ a:\S+ b:\S+/g) ?? []).length, labels: (text.match(/"container":/g) ?? []).length };
+  }, file);
+  check("the placed diagrams are saved with their arrows and labels", saved.dice && saved.arrows === 15 && saved.labels === 17, JSON.stringify(saved));
+
+  // the trash button takes a diagram out of the library (its note goes to the trash)
+  await page.click(`${panel} .ink-library-tile[aria-label='Review loop'] .ink-library-remove`);
+  const gone = await ev(async () =>
+    __t
+      .waitFor(() => !app.vault.getFiles().some((f) => f.path === "Ink libraries/Mermaid/Review loop.md") && !document.querySelector(".ink-library-tile[aria-label='Review loop']"), 5000, "removed")
+      .then(() => true)
+      .catch((e) => String(e)),
+  );
+  check("a diagram can be removed from the library", gone === true, String(gone));
+  await page.click(`${panel} .ink-library-close`);
+};
+
 steps.eink = async () => {
   console.log("\n▶ e-ink look on a Boox-sized window");
   await setSettings({ einkMode: "on" });
@@ -1091,7 +1240,7 @@ steps.eink = async () => {
   await setWindow(820, 1180);
 };
 
-const order = ["setup", "createPage", "write", "speed", "flipToText", "flipToInk", "tools", "pages", "typedNotes", "pdf", "papers", "reload", "asMarkdown", "notes", "migrate", "flowchart", "eink"];
+const order = ["setup", "createPage", "write", "speed", "flipToText", "flipToInk", "tools", "pages", "typedNotes", "pdf", "papers", "reload", "asMarkdown", "notes", "migrate", "flowchart", "mermaid", "eink"];
 const run = only ? ["setup", only] : order;
 for (const name of run) {
   try {
