@@ -25,11 +25,11 @@
   "author": "Stefan Mayer",
   "license": "AGPL-3.0-or-later",
   "devDependencies": {
-    "@codemirror/state": "6.5.2",
-    "@codemirror/view": "6.38.1",
+    "@codemirror/state": "6.7.6",
+    "@codemirror/view": "6.43.13",
     "@types/node": "^22.10.0",
     "esbuild": "^0.25.0",
-    "obsidian": "1.8.7",
+    "obsidian": "1.14.4",
     "tslib": "^2.8.1",
     "typescript": "~5.9.3",
     "vitest": "^3.2.7"
