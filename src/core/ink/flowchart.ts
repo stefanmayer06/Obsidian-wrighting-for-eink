@@ -1,6 +1,5 @@
 import type { Pt } from "../geometry";
-import type { LibraryItem } from "./excalidrawLib";
-import { makeStroke, q, type Items, type Stroke } from "./model";
+import { makeStroke, q, type Items, type LibraryItem, type Stroke } from "./model";
 import { ellipsePoints } from "./shapes";
 
 /**

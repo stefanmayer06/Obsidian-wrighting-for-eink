@@ -36,7 +36,6 @@ export interface SceneElement {
   fontSize?: number;
   containerId?: string | null;
   frameId?: string | null;
-  frameRole?: string | null;
   groupIds?: ReadonlyArray<string>;
   startBinding?: { elementId: string } | null;
   endBinding?: { elementId: string } | null;

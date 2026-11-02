@@ -1,4 +1,4 @@
-import type { LibraryItem } from "../../core/ink/excalidrawLib";
+import type { LibraryItem } from "../../core/ink/model";
 import { itemsBounds } from "../../core/ink/transform";
 import { drawItems } from "../render";
 import type { InkSurface } from "../surface";

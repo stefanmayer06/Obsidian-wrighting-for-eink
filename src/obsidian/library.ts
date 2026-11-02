@@ -9,12 +9,11 @@ import {
   libraryUrlFrom,
   parseExcalidrawLibrary,
   removeFromLibraryFile,
-  type LibraryItem,
 } from "../core/ink/excalidrawLib";
 import { FLOWCHART_LIBRARY_ID, flowchartLibrary } from "../core/ink/flowchart";
 import { mermaidToItems } from "../core/ink/fromMermaid";
 import { mermaidBlocks, mermaidNote, removeMermaidBlock } from "../core/ink/mermaid";
-import type { Items } from "../core/ink/model";
+import type { Items, LibraryItem } from "../core/ink/model";
 import { joinPath } from "../core/folders";
 import { inkTextMeasure, measuringContext, wrapText } from "../ink/render";
 import type { LibrarySource } from "../ink/ui/libraryPanel";

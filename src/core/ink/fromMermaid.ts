@@ -1,6 +1,6 @@
 import type { Pt, Rect } from "../geometry";
 import { attachPoint, labelBox, makeConnector, shapeCenter } from "./connectors";
-import { exColor } from "./excalidrawLib";
+import { parseColor } from "./pens";
 import { strokePointBounds } from "./geom";
 import { layoutGraph, type EdgeRoute, type FlowDirection, type Size } from "./layered";
 import { parseMermaid, type MermaidFlowchart, type MermaidStyle, type NodeShape } from "./mermaid";
@@ -146,10 +146,10 @@ export function cssColor(value: string | undefined): string | null | undefined {
     const ch = (v: string) => Math.max(0, Math.min(255, Math.round(v.endsWith("%") ? (parseFloat(v) * 255) / 100 : parseFloat(v))));
     const a = m[4] === undefined ? 1 : m[4].endsWith("%") ? parseFloat(m[4]) / 100 : parseFloat(m[4]);
     const hex = (n: number) => n.toString(16).padStart(2, "0");
-    return exColor(`#${hex(ch(m[1]))}${hex(ch(m[2]))}${hex(ch(m[3]))}`, Math.max(0, Math.min(1, a)) * 100);
+    return parseColor(`#${hex(ch(m[1]))}${hex(ch(m[2]))}${hex(ch(m[3]))}`, Math.max(0, Math.min(1, a)) * 100);
   }
   if (!t.startsWith("#")) return undefined;
-  return exColor(t) ?? undefined;
+  return parseColor(t) ?? undefined;
 }
 
 interface Look {

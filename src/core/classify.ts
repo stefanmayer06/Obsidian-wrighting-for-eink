@@ -104,7 +104,6 @@ export interface ClassifiedScene {
   noiseStrokeIds: string[];
 }
 
-const FRAME_TYPES = new Set(["frame", "magicframe"]);
 const DIAGRAM_FRAME_RE = /^\s*(diagram|figure|fig\.?|sketch|drawing|chart|flow ?chart|skizze|zeichnung|abbildung|grafik)\b/i;
 
 export function isDiagramFrameName(name: string | null | undefined): boolean {
@@ -115,12 +114,6 @@ function frameTitle(name: string | null | undefined): string | undefined {
   const n = (name ?? "").trim();
   if (!n || /^frame(\s*\d+)?$/i.test(n)) return undefined;
   return n;
-}
-
-function parsePdfLink(link: string | null | undefined): { path: string; page: number } | null {
-  if (!link) return null;
-  const m = /^\[*([^\]#|]+\.pdf)#page=(\d+)/i.exec(link.trim());
-  return m ? { path: m[1], page: parseInt(m[2], 10) } : null;
 }
 
 interface WordRef {
@@ -200,13 +193,7 @@ export function classifyScene(
       });
       continue;
     }
-    if (FRAME_TYPES.has(el.type)) {
-      if (el.frameRole === "marker") {
-        // Excalidraw's own "Import PDF" marks each page with a marker frame linking to the page.
-        const pdf = parsePdfLink(el.link);
-        if (pdf) pages.push({ id: el.id, kind: "pdf", rect: elementRect(el), pdfPath: pdf.path, pdfPage: pdf.page });
-        continue;
-      }
+    if (el.type === "frame") {
       if (isDiagramFrameName(el.name)) diagramFrames.push({ el, rect: elementRect(el) });
       else pages.push({ id: el.id, kind: "frame", rect: elementRect(el), title: frameTitle(el.name) });
       continue;
@@ -230,7 +217,7 @@ export function classifyScene(
     shapes.push(el);
   }
 
-  // Locked shapes/images that fill a page are page backgrounds (e.g. Excalidraw's PDF import box).
+  // Shapes and pictures that fill a page (e.g. a picture inserted to cover it) and big locked pictures are page backgrounds.
   const isPageBackground = (el: SceneElement, r: Rect): boolean => {
     for (const p of pages) {
       const inter = intersection(p.rect, r);

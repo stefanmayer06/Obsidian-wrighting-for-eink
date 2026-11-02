@@ -1,9 +1,9 @@
 import type { Pt } from "../geometry";
 import { closedOutline } from "./fill";
-import { lighten } from "./pens";
+import { parseColor } from "./pens";
 import { ellipsePoints } from "./shapes";
 import { itemsBounds, transformItems, translation } from "./transform";
-import { makeStroke, newId, q, qp, type FillStyle, type Items, type Stroke, type TextAlign, type TextBox } from "./model";
+import { makeStroke, newId, q, qp, type FillStyle, type Items, type LibraryItem, type Stroke, type TextAlign, type TextBox } from "./model";
 import { isConnectable } from "./connectors";
 
 /**
@@ -14,17 +14,6 @@ import { isConnectable } from "./connectors";
  * attached to shapes. The other way round, items from an ink page are saved
  * as a library item Excalidraw can open.
  */
-
-/** An item of an object library, as ink. */
-export interface LibraryItem {
-  id: string;
-  name: string;
-  items: Items;
-  /** Drawn in the current pen colour and thickness when placed (the built-in shapes). */
-  restyle?: boolean;
-  /** A whole diagram: it may fill most of the page when placed (other items are made smaller sooner). */
-  fitPage?: boolean;
-}
 
 /** An Excalidraw element (only what is read is typed; everything is checked). */
 type ExEl = Record<string, unknown>;
@@ -91,35 +80,6 @@ export function parseExcalidrawLibrary(data: unknown): RawLibraryItem[] {
 }
 
 // ------------------------------------------------------------------ Excalidraw → ink
-
-const NAMED: Record<string, string> = {
-  black: "#000000",
-  white: "#ffffff",
-  red: "#ff0000",
-  green: "#008000",
-  blue: "#0000ff",
-  yellow: "#ffff00",
-  orange: "#ffa500",
-  purple: "#800080",
-  gray: "#808080",
-  grey: "#808080",
-};
-
-/** An Excalidraw colour as #rrggbb (transparency mixed with white); null for "transparent". */
-export function exColor(v: unknown, opacity = 100): string | null {
-  if (typeof v !== "string") return null;
-  let c = v.trim().toLowerCase();
-  if (!c || c === "transparent" || c === "none") return null;
-  c = NAMED[c] ?? c;
-  let m = /^#([0-9a-f])([0-9a-f])([0-9a-f])([0-9a-f])?$/.exec(c);
-  if (m) c = `#${m[1]}${m[1]}${m[2]}${m[2]}${m[3]}${m[3]}${m[4] ? m[4] + m[4] : ""}`;
-  m = /^#([0-9a-f]{6})([0-9a-f]{2})?$/.exec(c);
-  if (!m) return null;
-  let alpha = m[2] ? parseInt(m[2], 16) / 255 : 1;
-  alpha *= Math.min(1, Math.max(0, opacity / 100));
-  if (alpha <= 0.02) return null;
-  return lighten(`#${m[1]}`, 1 - alpha);
-}
 
 function fillStyleOf(v: unknown): FillStyle {
   if (v === "solid") return "solid";
@@ -246,8 +206,8 @@ export function excalidrawToItems(elements: ReadonlyArray<ExEl>): Items & { skip
   for (const el of elements) {
     const type = el.type as string;
     const opacity = num(el.opacity, 100);
-    const line = exColor(el.strokeColor ?? "#1e1e1e", opacity);
-    const fill = exColor(el.backgroundColor, opacity);
+    const line = parseColor(el.strokeColor ?? "#1e1e1e", opacity);
+    const fill = parseColor(el.backgroundColor, opacity);
     const fillStyle = fillStyleOf(el.fillStyle);
     const exId = str(el.id) ?? newId();
     const id = newId();
@@ -372,7 +332,7 @@ export function excalidrawToItems(elements: ReadonlyArray<ExEl>): Items & { skip
     if (el.type !== "text") continue;
     const text = (str(el.originalText) ?? str(el.text) ?? str(el.rawText) ?? "").replace(/\r\n/g, "\n");
     if (!text.trim()) continue;
-    const color = exColor(el.strokeColor ?? "#1e1e1e", num(el.opacity, 100)) ?? "#000000";
+    const color = parseColor(el.strokeColor ?? "#1e1e1e", num(el.opacity, 100)) ?? "#000000";
     const size = Math.max(4, num(el.fontSize, 20));
     const align: TextAlign = el.textAlign === "center" || el.textAlign === "right" ? el.textAlign : "left";
     const x = num(el.x);

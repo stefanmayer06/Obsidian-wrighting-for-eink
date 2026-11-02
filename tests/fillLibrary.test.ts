@@ -5,13 +5,12 @@ import { areaStroke, closedOutline, enclosedArea, fillGeometry, fillTargetAt, ha
 import { eraseFromStroke, strokeErase } from "../src/core/ink/erase";
 import { pointInPolygon, StrokeIndex, strokePointBounds } from "../src/core/ink/geom";
 import { shapeFromDrag } from "../src/core/ink/shapes";
-import { arrowHead, strokeSegments } from "../src/core/ink/pens";
+import { arrowHead, parseColor, strokeSegments } from "../src/core/ink/pens";
 import { connectorPath, elbowPath, followMoves, labelBox, makeConnector, shapeAt, withLabels } from "../src/core/ink/connectors";
 import { itemsBounds, transformItems, translation } from "../src/core/ink/transform";
 import {
   addToLibraryFile,
   curveThrough,
-  exColor,
   excalidrawToItems,
   itemsToExcalidraw,
   LibraryError,
@@ -391,13 +390,13 @@ describe("Excalidraw libraries", () => {
   });
 
   it("reads colours with transparency", () => {
-    expect(exColor("#1e1e1e")).toBe("#1e1e1e");
-    expect(exColor("#f00")).toBe("#ff0000");
-    expect(exColor("transparent")).toBeNull();
-    expect(exColor("#000000", 50)).toBe("#808080");
-    expect(exColor("#00000080")).toBe("#7f7f7f");
-    expect(exColor("red")).toBe("#ff0000");
-    expect(exColor("hsl(0, 0%, 0%)")).toBeNull();
+    expect(parseColor("#1e1e1e")).toBe("#1e1e1e");
+    expect(parseColor("#f00")).toBe("#ff0000");
+    expect(parseColor("transparent")).toBeNull();
+    expect(parseColor("#000000", 50)).toBe("#808080");
+    expect(parseColor("#00000080")).toBe("#7f7f7f");
+    expect(parseColor("red")).toBe("#ff0000");
+    expect(parseColor("hsl(0, 0%, 0%)")).toBeNull();
   });
 
   it("turns library items into ink", () => {
