@@ -1,4 +1,4 @@
-import { App, FuzzySuggestModal, Modal, Setting, SuggestModal, TFile, TFolder } from "obsidian";
+import { App, FuzzySuggestModal, Modal, requireApiVersion, Setting, SuggestModal, TFile, TFolder } from "obsidian";
 import { cleanSubfolder } from "../core/folders";
 
 /** Simple text prompt that resolves to the entered text (or null when cancelled). */
@@ -292,8 +292,10 @@ export class ConfirmModal extends Modal {
       .addButton((b) => b.setButtonText("Cancel").onClick(() => this.finish(false)))
       .addButton((b) => {
         b.setButtonText(this.opts.confirm).onClick(() => this.finish(true));
-        if (this.opts.danger) b.setWarning();
-        else b.setCta();
+        if (!this.opts.danger) b.setCta();
+        // a destructive button: setDestructive() from Obsidian 1.13, the warning style before
+        else if (requireApiVersion("1.13.0")) b.setDestructive().setCta();
+        else b.buttonEl.addClass("mod-warning");
       });
   }
 

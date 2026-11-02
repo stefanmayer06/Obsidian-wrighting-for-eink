@@ -792,7 +792,10 @@
   font-weight: 600;
   line-height: 1;
   cursor: pointer;
-  /* ribbon with a swallowtail notch pointing into the page */
+  /* ribbon with a swallowtail notch pointing into the page. (caniuse lists
+     clip-path as "partially supported" in Chromium only because it cannot
+     clip to a shape in an external SVG file; shapes like this polygon() work
+     in every Chromium – and every Obsidian – version.) */
   clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%, var(--ink-notch) 50%);
   transition: padding-left 120ms ease;
 }
