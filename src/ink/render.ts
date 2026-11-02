@@ -242,8 +242,9 @@ let measureCtx: Ctx | null = null;
 /** A context for measuring text when no canvas is at hand. */
 export function measuringContext(): Ctx {
   if (!measureCtx) {
-    const c = typeof OffscreenCanvas !== "undefined" ? new OffscreenCanvas(4, 4) : createEl("canvas");
-    measureCtx = c.getContext("2d") as Ctx;
+    const ctx = typeof OffscreenCanvas !== "undefined" ? new OffscreenCanvas(4, 4).getContext("2d") : createEl("canvas").getContext("2d");
+    if (!ctx) throw new Error("Canvas is not available");
+    measureCtx = ctx;
   }
   return measureCtx;
 }
