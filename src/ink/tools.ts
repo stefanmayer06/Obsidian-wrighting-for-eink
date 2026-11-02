@@ -6,7 +6,7 @@ import { StrokeBuilder, type Segment } from "../core/ink/pens";
 import { isConnectorKind, recognizeShape, shapeFromDrag } from "../core/ink/shapes";
 import { connectorsOf, followMoves, makeConnector, rerouted, shapeAt } from "../core/ink/connectors";
 import { closedOutline, fillOutline } from "../core/ink/fill";
-import { apply, canRotate, IDENTITY, isIdentity, itemsBounds, rotation, scaling, transformItems, translation, type Matrix } from "../core/ink/transform";
+import { IDENTITY, isIdentity, itemsBounds, rotation, scaling, transformItems, translation, type Matrix } from "../core/ink/transform";
 import { drawFigure, drawImageItem, drawItems, drawLink, drawStroke, drawText, segmentPath } from "./render";
 import type { InkSurface } from "./surface";
 import type { ToolId } from "./types";

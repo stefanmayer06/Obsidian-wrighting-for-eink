@@ -17,7 +17,3 @@ export function shortHash(input: string, length = 8): string {
 export function normalizeForHash(text: string): string {
   return text.replace(/\r\n/g, "\n").replace(/[ \t]+$/gm, "").trim();
 }
-
-export function contentHash(text: string): string {
-  return shortHash(normalizeForHash(text), 8);
-}

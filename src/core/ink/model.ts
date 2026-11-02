@@ -150,9 +150,6 @@ export interface InkFile {
 
 export const EMPTY_META: InkMeta = { regions: [], handLinks: {} };
 
-/** Items on a page that can be selected with the lasso. */
-export type ItemKind = "stroke" | "text" | "image" | "link" | "figure";
-
 // ------------------------------------------------------------------ ids
 
 const ID_CHARS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
@@ -236,13 +233,6 @@ export function replacePage(doc: InkDoc, page: Page): InkDoc {
   const pages = doc.pages.slice();
   pages[i] = page;
   return { ...doc, pages };
-}
-
-export function updatePage(doc: InkDoc, pageId: string, fn: (p: Page) => Page): InkDoc {
-  const page = getPage(doc, pageId);
-  if (!page) return doc;
-  const next = fn(page);
-  return next === page ? doc : replacePage(doc, next);
 }
 
 export function insertPage(doc: InkDoc, page: Page, index: number): InkDoc {

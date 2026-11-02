@@ -119,7 +119,7 @@ export class StrokeBuilder {
   private first = { x: 0, y: 0 };
 
   constructor(
-    private pen: PenType,
+    pen: PenType,
     color: string,
     private base: number,
     private poly = false,

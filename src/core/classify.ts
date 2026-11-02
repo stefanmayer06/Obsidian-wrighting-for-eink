@@ -532,8 +532,3 @@ export function pageIndexFor(pages: ReadonlyArray<PageInfo>, r: Rect): number {
   });
   return best;
 }
-
-/** Bottom-most y of the given rects (used to place new content below existing content). */
-export function contentBottom(rects: ReadonlyArray<Rect>): number {
-  return rects.reduce((acc, r) => Math.max(acc, bottom(r)), -Infinity);
-}

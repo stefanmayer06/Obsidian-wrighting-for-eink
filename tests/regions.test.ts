@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { planRegions, REGION_PADDING } from "../src/core/regions";
 import type { DiagramItem } from "../src/core/classify";
-import { shape, stroke } from "./helpers";
 
 const diagram = (x: number, y: number, w: number, h: number, extra: Partial<DiagramItem> = {}): DiagramItem => ({
   rect: { x, y, w, h },

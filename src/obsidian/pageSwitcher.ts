@@ -240,7 +240,7 @@ export class PageSwitcher {
     const doc = opts.doc ?? newDoc(paper ?? settings.paper);
     const fm = withInkFrontmatter("", { [FM_DRAWING_TO_TEXT]: JSON.stringify(`[[${textPath.replace(/\.md$/, "")}]]`) });
     const drawing = await this.app.vault.create(drawingPath, serializeInkFile(fm, { doc, meta: EMPTY_META }));
-    const text = await this.app.vault.create(textPath, this.plugin.pairs.textPageContent(drawing, textPath, opts.extraTextFrontmatter, opts.textBody));
+    const text = await this.app.vault.create(textPath, this.plugin.pairs.textPageContent(drawing, opts.extraTextFrontmatter, opts.textBody));
     if (opts.open !== false) {
       const leaf = opts.leaf ?? this.app.workspace.getLeaf(false);
       await leaf.setViewState({ type: INK_VIEW_TYPE, state: { file: drawing.path }, active: true });

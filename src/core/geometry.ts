@@ -13,8 +13,6 @@ export interface Pt {
   y: number;
 }
 
-export const EMPTY_RECT: Rect = { x: 0, y: 0, w: 0, h: 0 };
-
 export function right(r: Rect): number {
   return r.x + r.w;
 }

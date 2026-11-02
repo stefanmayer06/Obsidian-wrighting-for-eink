@@ -29,9 +29,6 @@ export class AzureHttpError extends Error {
   constructor(
     message: string,
     public status: number,
-    public retryAfterMs: number | null,
-    /** Errors that will not go away by retrying (bad key, bad endpoint …). */
-    public permanent: boolean,
   ) {
     super(message);
     this.name = "AzureHttpError";
@@ -44,14 +41,14 @@ export function isOnline(): boolean {
   return typeof navigator === "undefined" || navigator.onLine !== false;
 }
 
-export function header(res: RequestUrlResponse, name: string): string | null {
+function header(res: RequestUrlResponse, name: string): string | null {
   const headers = res.headers ?? {};
   const want = name.toLowerCase();
   for (const k of Object.keys(headers)) if (k.toLowerCase() === want) return headers[k];
   return null;
 }
 
-export function safeJson(res: RequestUrlResponse): unknown {
+function safeJson(res: RequestUrlResponse): unknown {
   try {
     return res.json;
   } catch {
@@ -88,16 +85,12 @@ export async function send(params: Parameters<typeof requestUrl>[0], timeoutMs: 
     if (e instanceof OfflineError) throw e;
     const msg = e instanceof Error ? e.message : String(e);
     if (!isOnline() || NETWORK_ERROR_RE.test(msg)) throw new OfflineError(msg);
-    throw new AzureHttpError(msg, 0, null, false);
+    throw new AzureHttpError(msg, 0);
   }
 }
 
 function errorFor(res: RequestUrlResponse): AzureHttpError {
-  const json = safeJson(res);
-  const retryAfter = header(res, "retry-after");
-  const retryMs = retryAfter && /^\d+$/.test(retryAfter) ? parseInt(retryAfter, 10) * 1000 : null;
-  const permanent = res.status === 400 || res.status === 401 || res.status === 403 || res.status === 404 || res.status === 415;
-  return new AzureHttpError(azureErrorMessage(json, res.status), res.status, retryMs, permanent);
+  return new AzureHttpError(azureErrorMessage(safeJson(res), res.status), res.status);
 }
 
 async function recognizeV4(png: ArrayBuffer, cfg: AzureConfig): Promise<OcrResult> {
@@ -134,7 +127,7 @@ async function recognizeV3(png: ArrayBuffer, cfg: AzureConfig): Promise<OcrResul
   );
   if (res.status !== 202 && (res.status < 200 || res.status >= 300)) throw errorFor(res);
   const op = header(res, "operation-location");
-  if (!op) throw new AzureHttpError("Azure did not return an operation location", res.status, null, false);
+  if (!op) throw new AzureHttpError("Azure did not return an operation location", res.status);
   let delay = 500;
   while (Date.now() - started < cfg.timeoutMs) {
     await sleep(delay);
@@ -148,13 +141,13 @@ async function recognizeV3(png: ArrayBuffer, cfg: AzureConfig): Promise<OcrResul
     const json = safeJson(poll);
     const status = readV3Status(json);
     if (status === "succeeded") return parseAzureV3(json);
-    if (status === "failed") throw new AzureHttpError("Azure could not read the image", poll.status, null, false);
+    if (status === "failed") throw new AzureHttpError("Azure could not read the image", poll.status);
   }
   throw new OfflineError("Azure took too long to answer");
 }
 
 export async function recognize(png: ArrayBuffer, cfg: AzureConfig): Promise<OcrResult> {
-  if (!cfg.endpoint || !cfg.key) throw new AzureHttpError("Handwriting recognition is not set up", 0, null, true);
+  if (!cfg.endpoint || !cfg.key) throw new AzureHttpError("Handwriting recognition is not set up", 0);
   return cfg.api === "v4" ? recognizeV4(png, cfg) : recognizeV3(png, cfg);
 }
 
