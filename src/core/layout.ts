@@ -115,7 +115,6 @@ function sectionHeading(page: PageInfo, opts: LayoutOptions): string | null {
   if (page.kind === "pdf" && page.pdfPath && page.pdfPage) {
     return `### [[${opts.linkFor(page.pdfPath)}#page=${page.pdfPage}|Page ${page.pdfPage}]]`;
   }
-  if (page.kind === "frame" && page.title) return `### ${page.title}`;
   return null;
 }
 
