@@ -4,16 +4,6 @@
 
 Ink Notebook has its own pen engine. It draws every stroke the moment the pen moves – nothing is redrawn while you write – so it stays fast on e‑ink screens and on pages full of writing. There is nothing else to install.
 
-```
- ┌───────────────────────────────────────────┐     ┌──────────────────────────────┐
- │ ✒ ▁ ⌫ ◌ □ ◍ T ▥ ⊕ │ ↶ ↷ │ ‹ 3/12 › + │ Text ⋮│     │  Text page (Markdown)    Ink │
- ├───────────────────────────────────────────┤     │                         Text │
- │   Meeting with [[Anna]] ↗                  │  ⇄  │  Meeting with [[Anna]]       │
- │   – budget                                 │     │  - budget                    │
- │    ┌─────┐                                 │     │  [live drawing of the box]   │
- │    │Start│──▶ …                            │     │                              │
- └───────────────────────────────────────────┘     └──────────────────────────────┘
-```
 
 ## Screenshots
 
