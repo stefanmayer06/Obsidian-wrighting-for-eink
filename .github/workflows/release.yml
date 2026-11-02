@@ -4,7 +4,8 @@ name: Build & release
 # styles.css attached, as needed by BRAT and manual installs) is created when a
 # version tag is pushed (e.g. 1.3.1 – the release then gets that version, see
 # scripts/set-version.mjs), or manually via "Run workflow" (version from
-# manifest.json).
+# manifest.json). Releases are made only from commits that are on main: a tag
+# on another commit, or "Run workflow" on another branch, fails the release job.
 on:
   push:
     branches: ["**"]
@@ -17,8 +18,9 @@ on:
         type: boolean
         default: true
 
+# read-only by default; only the release job may write
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
@@ -44,13 +46,32 @@ jobs:
             manifest.json
             styles.css
 
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.release)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Only release commits that are on main
+        run: |
+          git fetch --no-tags origin main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::Releases are made from main only. $GITHUB_SHA ($GITHUB_REF) is not on main – merge it into main first, then tag the commit on main."
+            exit 1
+          fi
+      - uses: actions/download-artifact@v4
+        with:
+          name: ink-notebook
+
       - name: Read version
         id: version
-        if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.release)
         run: echo "version=$(node -p "require('./manifest.json').version")" >> "$GITHUB_OUTPUT"
 
       - name: Release
-        if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.release)
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || steps.version.outputs.version }}
