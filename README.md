@@ -6,7 +6,7 @@ Ink Notebook has its own pen engine. It draws every stroke the moment the pen mo
 
 ```
  ┌───────────────────────────────────────────┐     ┌──────────────────────────────┐
- │ ✒ ▁ ⌫ ◌ □ T ⊕ │ ↶ ↷ │  ‹ 3 / 12 ›  + │ Text ⋮│     │  Text page (Markdown)    Ink │
+ │ ✒ ▁ ⌫ ◌ □ ◍ T ▥ ⊕ │ ↶ ↷ │ ‹ 3/12 › + │ Text ⋮│     │  Text page (Markdown)    Ink │
  ├───────────────────────────────────────────┤     │                         Text │
  │   Meeting with [[Anna]] ↗                  │  ⇄  │  Meeting with [[Anna]]       │
  │   – budget                                 │     │  - budget                    │
@@ -45,7 +45,7 @@ The toolbar sits at the top (or bottom, left, right – see *More → View*). Ta
 | **Fill** | Tap inside a shape – or inside any area closed by lines, like a box drawn with four strokes or a circle drawn with the pen – to fill it. Twelve colours, solid, hatched or cross-hatched; *Remove fills* takes a fill away. Fills stay underneath your writing |
 | **Text** | Tap the page and type; tap a text to change it. Tap inside a shape to give it a **label**, centred in the shape, that moves with it. Four sizes |
 | **Object library** | Flowchart shapes, **Mermaid diagrams** and the objects of **Excalidraw libraries**: tap one, then tap the page to put it there (see *Flowcharts and object libraries*) |
-| **Insert** | Images (from the vault or the device), a link to a note (a tappable chip on the page), objects from the library, a Mermaid diagram, pages from a PDF |
+| **Insert** | Images (from the vault or the device), a link to a note (a tappable chip on the page), a text box, objects from the library, a Mermaid diagram, pages from a PDF, the pages of a paper from arXiv |
 | **Undo / Redo** | Unlimited while the page is open |
 
 Smart pen features (each can be turned off):
@@ -59,7 +59,7 @@ Fingers never draw (unless you turn on *Draw with a finger*), so your palm can r
 - **two-finger tap** = undo, **three-finger tap** = redo,
 - touches while the pen is near the screen are ignored (palm rejection).
 
-With a keyboard: `Ctrl/Cmd+Z` / `Ctrl/Cmd+Shift+Z`, `Delete`, `Ctrl/Cmd+C/X/V/D/A`, `PageUp`/`PageDown` or arrow keys to turn pages, `P` pen, `H` highlighter, `E` eraser, `L` lasso, `S` shapes, `F` fill, `T` text, `Ctrl/Cmd` + `=` / `-` / `0` to zoom. All tools and page actions are also commands, so you can give them hotkeys.
+With a keyboard: `Ctrl/Cmd+Z` / `Ctrl/Cmd+Shift+Z` (or `Ctrl/Cmd+Y`), `Delete` or `Backspace`, `Ctrl/Cmd+C/X/V/D/A`, `PageUp`/`PageDown` or arrow keys to turn pages, `P` pen, `H` highlighter, `E` eraser, `L` lasso, `S` shapes, `F` fill, `T` text, `Ctrl/Cmd` + `=` / `-` / `0` to zoom. All tools and page actions are also commands, so you can give them hotkeys.
 
 ### Pages and paper
 
@@ -135,6 +135,7 @@ Each ink page is two normal files:
 - Both files have the same name: `Week 1.md` and `Week 1.ink.md`. A note that is an ink page itself (`Week 1.md` with the `ink-notebook` property) moves into the ink subfolder as `Week 1.ink.md` when its text page is made, so the text page gets its name; **Match up the names of ink and text pages** does the same for pages made before.
 - New pages go into the folder of the note you're in, a fixed folder, or the one you choose each time; the ink file goes into a subfolder (`Attachments` by default), so your folders only show your notes.
 - Any note can get an ink page later (**Add an ink page to this note**): `Note.md` stays as it is, `Attachments/Note.ink.md` is added.
+- An ink page without a text page (e.g. one copied in from another vault) gets one with a right-click → *Create text page (Ink Notebook)*.
 - Object libraries live in `Ink libraries/` (see Settings): imported Excalidraw libraries, `My library.excalidrawlib`, and `Mermaid/` with one note per Mermaid diagram.
 
 ## Installation
@@ -155,12 +156,12 @@ When Ink Notebook starts the first time, a **setup assistant** opens (reopen it 
 
 ### Coming from an earlier version?
 
-Earlier versions of Ink Notebook (up to 1.3) were built on Excalidraw. Run the command **Convert ink pages made with Excalidraw (earlier versions)**: every old ink page gets an ink notebook (`Name.ink.md`) next to it with the same pages, writing, shapes, text and pictures, and its text page is pointed at it (the next transcription updates the pictures on the text page). The old `.excalidraw.md` files are left as they are – delete them when you're happy.
+Earlier versions of Ink Notebook (up to 1.4) were built on Excalidraw. Run the command **Convert ink pages made with Excalidraw (earlier versions)**: every old ink page gets an ink notebook (`Name.ink.md`) next to it with the same pages, writing, shapes, text and pictures, and its text page is pointed at it (the next transcription updates the pictures on the text page). The old `.excalidraw.md` files are left as they are – delete them when you're happy.
 
 ## Using it on a Boox (Note Air, Tab Ultra, Go, …)
 
 1. Install **Obsidian** from the Play Store (enable Google Play in the Boox settings if needed), open your vault and install Ink Notebook as above.
-2. In Boox's **E-Ink Center** (long-press the Obsidian icon → *Optimize*): refresh mode **Fast** or **Balanced** for writing (**HD** if you mostly read). Ink Notebook's e‑ink mode (on automatically on Boox) makes Obsidian pure black on white, without animations.
+2. In Boox's **E-Ink Center** (long-press the Obsidian icon → *Optimize*): refresh mode **Fast** or **Balanced** for writing (**HD** if you mostly read). Ink Notebook's e‑ink optimisations (on automatically on Boox) make Obsidian pure black on white, without animations.
 3. Keep *Draw with a finger* off: then only the pen writes and your hand can rest on the screen.
 4. Write on ruled paper with normal letter size; recognition works best with words that don't touch the lines above and below.
 5. On colour screens (Note Air C, Tab Ultra C, Go Color) the ink colours and highlighters show in colour.
@@ -223,11 +224,13 @@ The two `%% … %%` lines mark the transcript; in Live Preview they are shown as
 ## Settings
 
 - **Writing** – pen side button (erase, lasso, nothing), draw with a finger, pressure sensitivity, scribble to erase, snap shapes, swipe to turn pages, two/three-finger taps, whole page or page width, toolbar position, low-latency drawing (automatic: off on e-ink screens).
-- **Pages** – where new pages go (folder of the current note, a fixed folder, or ask every time), the subfolder for ink files (`Attachments` by default; empty = next to the text page), paper for new pages and whether to choose it every time, ask for a name (on by default; off names pages with the date and time), open the text page in reading or editing view, daily notes with an ink page (off / with an ink page / with an ink page opened to write on), match up the names of ink and text pages, keep names in sync on rename/move.
+- **Pages** – where new pages go (folder of the current note, a fixed folder, or ask every time), the subfolder for ink files (`Attachments` by default; empty = next to the text page), paper for new pages and whether to choose it every time, ask for a name (on by default; off names pages with the date and time), open the text page in reading or editing view (or Obsidian's default), daily notes with an ink page (off / with an ink page / with an ink page opened to write on), match up the names of ink and text pages, keep names in sync on rename/move.
 - **Handwriting recognition** – Azure endpoint and key, API version, language hint, highlight uncertain words, transcribe while writing, how long to wait when flipping, requests per minute, clickable handwritten links, diagram detection sensitivity, offline queue and cache.
-- **Display & e‑ink** – e‑ink mode (automatic / on / off), large touch targets, position of the bookmarks on the text page.
+- **Display & e‑ink** – e‑ink optimisations (automatic / always on / off), large touch targets, position of the bookmarks on the text page.
 - **PDF annotation** – how many pages to import without asking, the folder for papers from arXiv (`Papers` by default).
 - **Object libraries** – the folder for imported libraries and *My library* (`Ink libraries` by default).
+
+From Obsidian 1.13 on, Obsidian's settings search finds Ink Notebook's settings too.
 
 ## Troubleshooting
 
@@ -266,7 +269,7 @@ npm run harness   # the pen engine in a plain browser page, driven with real pen
 
 The pure logic (the ink model, file format, pens, erasers, shapes, OCR parsing, classification, layout, transcript merging, PDF maths) lives in `src/core` and is covered by unit tests; the pen engine and its toolbar (DOM only) are in `src/ink`; the Obsidian integration is in `src/obsidian`.
 
-**Releasing:** run `npm run set-version -- 1.3.1` (it updates `manifest.json`, `package.json`, `package-lock.json` and `versions.json`) and merge it into `main`, then on GitHub create a release with the tag `1.3.1` – just the version, without a "v" – on `main`, or open *Actions → Build & release → Run workflow* on `main`. Releases are made from `main` only: the release job stops if the tagged commit (or the branch it was run on) is not on `main`. The workflow runs the tests, builds and publishes the release with `main.js`, `manifest.json` and `styles.css` – which is what BRAT and manual installs download – each with a build provenance attestation (check one with `gh attestation verify main.js --repo stefanmayer06/Obsidian-writing-for-eink`). It publishes the `manifest.json` of the repository and stops if the tag is not its version, so a release always matches both its tag and the repository.
+**Releasing:** run `npm run set-version -- 2.4.0` (it updates `manifest.json`, `package.json`, `package-lock.json` and `versions.json`) and merge it into `main`, then on GitHub create a release with the tag `2.4.0` – just the version, without a "v" – on `main`, or open *Actions → Build & release → Run workflow* on `main`. Releases are made from `main` only: the release job stops if the tagged commit (or the branch it was run on) is not on `main`. The workflow runs the tests, builds and publishes the release with `main.js`, `manifest.json` and `styles.css` – which is what BRAT and manual installs download – each with a build provenance attestation (check one with `gh attestation verify main.js --repo stefanmayer06/Obsidian-writing-for-eink`). It publishes the `manifest.json` of the repository and stops if the tag is not its version, so a release always matches both its tag and the repository.
 
 `e2e/` contains end-to-end tests that run the plugin inside the real Obsidian desktop app, write on ink pages with real pen events and use a fake Azure server (see `e2e/README.md`).
 
@@ -274,7 +277,7 @@ The pure logic (the ink model, file format, pens, erasers, shapes, OCR parsing, 
 
 - **Payment:** none – Ink Notebook is free.
 - **Account:** none. Handwriting recognition uses your own Azure AI Vision resource (a free Azure account is enough).
-- **Network use:** Ink Notebook works offline. It connects to the internet only for handwriting recognition and, when you use *Papers from arXiv*, to find and download papers: it sends handwriting images to *your* Azure AI Vision resource. *Papers from arXiv* sends your search words to the arXiv API (export.arxiv.org), loads the list of popular papers from Hugging Face (huggingface.co) and downloads the PDF of a paper you import from arxiv.org – only when you open it or search. *Import from a link…* in the object library downloads the library from the link you paste (usually libraries.excalidraw.com); *Find libraries* opens libraries.excalidraw.com in your browser. There is no telemetry and no ads.
+- **Network use:** Ink Notebook works offline. It connects to the internet only for handwriting recognition and, when you use *Papers from arXiv*, to find and download papers: it sends handwriting images to *your* Azure AI Vision resource. *Papers from arXiv* sends your search words to the arXiv API (export.arxiv.org), loads the list of popular papers from Hugging Face (huggingface.co) and downloads the PDF of a paper you import from arxiv.org – only when you open it or search; tapping a paper's arXiv id opens its page on arxiv.org in your browser. *Import from a link…* in the object library downloads the library from the link you paste (usually libraries.excalidraw.com); *Find libraries* opens libraries.excalidraw.com in your browser. There is no telemetry and no ads.
 - **Files in your vault:** Ink Notebook reads and writes files only in your vault, through Obsidian. It goes through the list of the vault's files to offer pictures, PDFs, notes and folders when you choose one; to find the ink pages (when a picture or PDF on them is renamed, for **Match up the names of ink and text pages** and for **Convert ink pages made with Excalidraw**); to find the `.excalidrawlib` libraries and the notes in the Mermaid folder of the object library; and to know which arXiv papers you imported before. Nothing of this leaves your device.
 - **Clipboard:** Ink Notebook reads the clipboard only when you tap **Paste** in *Add a Mermaid diagram*. Copy, cut and paste with the lasso on an ink page use its own clipboard, not the system's.
 
