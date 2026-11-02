@@ -3,8 +3,10 @@
 //
 //   npm run set-version -- 1.3.1
 //
-// The release workflow runs it with the pushed tag, so a release's
-// manifest.json always matches its tag (BRAT and Obsidian compare the two).
+// Run it and merge the result into main before tagging a release: the release
+// workflow publishes the repository's manifest.json and stops if the tag is not
+// its version (BRAT and Obsidian compare the release with the tag and with the
+// repository).
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
