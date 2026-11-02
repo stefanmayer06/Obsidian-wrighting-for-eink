@@ -216,7 +216,7 @@ function drawStrokes(out: PDFPage, page: Page, p: Placement): number {
 /** A picture of a text box (for text the PDF standard fonts cannot write). */
 async function textImage(doc: PDFDocument, t: TextBox): Promise<{ png: Awaited<ReturnType<PDFDocument["embedPng"]>>; w: number; h: number }> {
   const k = 3;
-  const canvas = document.createElement("canvas");
+  const canvas = createEl("canvas");
   canvas.width = Math.ceil(t.w * k);
   canvas.height = Math.ceil(t.h * k);
   const ctx = canvas.getContext("2d");
@@ -267,7 +267,7 @@ async function drawImages(plugin: InkNotebookPlugin, doc: PDFDocument, out: PDFP
       // other formats: through a canvas
       const img = plugin.images.image(it.src);
       if (!img) continue;
-      const c = document.createElement("canvas");
+      const c = createEl("canvas");
       c.width = Math.max(1, Math.round(it.w * 2));
       c.height = Math.max(1, Math.round(it.h * 2));
       c.getContext("2d")?.drawImage(img, 0, 0, c.width, c.height);

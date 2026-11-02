@@ -26,13 +26,7 @@ export class SelectionOverlay {
   private paletteKind: "color" | "fill" = "color";
 
   constructor(private s: InkSurface) {
-    const doc = s.el.ownerDocument;
-    const make = (cls: string, parent: HTMLElement = s.overlay) => {
-      const d = doc.createElement("div");
-      d.className = cls;
-      parent.appendChild(d);
-      return d;
-    };
+    const make = (cls: string, parent: HTMLElement = s.overlay) => parent.createDiv({ cls });
     this.box = make("ink-selection");
     this.scaleHandle = make("ink-handle ink-handle-scale");
     this.rotateHandle = make("ink-handle ink-handle-rotate");
@@ -133,31 +127,23 @@ export class SelectionOverlay {
       { id: "done", icon: "x", label: "Done", run: () => s.setSelection({ strokes: new Set(), texts: new Set(), images: new Set(), links: new Set(), figures: new Set() }) },
     ];
     for (const a of actions) {
-      const b = this.bar.ownerDocument.createElement("button");
-      b.className = `ink-sel-btn ink-sel-${a.id}`;
+      const b = this.bar.createEl("button", { cls: `ink-sel-btn ink-sel-${a.id}` });
       b.type = "button";
       b.setAttribute("aria-label", a.label);
       b.title = a.label;
-      const icon = this.bar.ownerDocument.createElement("span");
-      icon.className = "ink-sel-icon";
-      s.host.icon(icon, a.icon);
-      const label = this.bar.ownerDocument.createElement("span");
-      label.className = "ink-sel-label";
-      label.textContent = a.label;
-      b.append(icon, label);
+      s.host.icon(b.createSpan({ cls: "ink-sel-icon" }), a.icon);
+      b.createSpan({ cls: "ink-sel-label", text: a.label });
       b.addEventListener("click", (e) => {
         e.preventDefault();
         e.stopPropagation();
         a.run();
         this.update();
       });
-      this.bar.appendChild(b);
     }
   }
 
   private swatch(color: string, label: string, onPick: () => void, cls = ""): HTMLButtonElement {
-    const b = this.palette.ownerDocument.createElement("button");
-    b.className = `ink-swatch-btn ${cls}`.trim();
+    const b = this.palette.createEl("button", { cls: `ink-swatch-btn ${cls}`.trim() });
     b.type = "button";
     b.title = label;
     b.setAttribute("aria-label", label);
@@ -167,7 +153,6 @@ export class SelectionOverlay {
       e.stopPropagation();
       onPick();
     });
-    this.palette.appendChild(b);
     return b;
   }
 
@@ -192,8 +177,7 @@ export class SelectionOverlay {
     } else {
       const t = this.s.tools;
       for (const st of FILL_STYLES) {
-        const b = this.palette.ownerDocument.createElement("button");
-        b.className = `ink-sel-style${t.fillStyle === st ? " is-active" : ""}`;
+        const b = this.palette.createEl("button", { cls: `ink-sel-style${t.fillStyle === st ? " is-active" : ""}` });
         b.type = "button";
         b.title = FILL_STYLE_INFO[st].label;
         b.setAttribute("aria-label", FILL_STYLE_INFO[st].label);
@@ -204,7 +188,6 @@ export class SelectionOverlay {
           this.s.setTools({ fillStyle: st });
           this.showPalette("fill");
         });
-        this.palette.appendChild(b);
       }
       this.swatch("", "No fill", () => (this.s.fillSelection("", t.fillStyle), done()), "is-none");
       for (const c of FILL_COLORS) this.swatch(c.color, c.label, () => (this.s.fillSelection(c.color, this.s.tools.fillStyle), done()));

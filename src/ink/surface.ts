@@ -137,10 +137,8 @@ export class InkSurface {
     parent: HTMLElement,
     readonly host: SurfaceHost,
   ) {
-    this.el = parent.ownerDocument.createElement("div");
-    this.el.className = "ink-surface";
+    this.el = parent.createDiv({ cls: "ink-surface" });
     this.el.tabIndex = -1;
-    parent.appendChild(this.el);
     this.stage = this.div(this.el, "ink-stage");
     this.base = this.canvas("ink-base");
     this.wet = this.canvas("ink-wet");
@@ -159,17 +157,11 @@ export class InkSurface {
   }
 
   private div(parent: HTMLElement, cls: string): HTMLElement {
-    const d = parent.ownerDocument.createElement("div");
-    d.className = cls;
-    parent.appendChild(d);
-    return d;
+    return parent.createDiv({ cls });
   }
 
   private canvas(cls: string): HTMLCanvasElement {
-    const c = this.el.ownerDocument.createElement("canvas");
-    c.className = cls;
-    this.stage.appendChild(c);
-    return c;
+    return this.stage.createEl("canvas", { cls });
   }
 
   private context(c: HTMLCanvasElement, opaque: boolean): CanvasRenderingContext2D {
@@ -576,7 +568,7 @@ export class InkSurface {
       this.wetUsed = false;
     }
     if (this.wetShown) {
-      this.wet.style.display = "none";
+      this.wet.hidden = true;
       this.wetShown = false;
     }
   }
@@ -588,7 +580,7 @@ export class InkSurface {
       this.wctx.clearRect(0, 0, this.wet.width, this.wet.height);
     }
     if (!this.wetShown) {
-      this.wet.style.display = "";
+      this.wet.hidden = false;
       this.wetShown = true;
     }
     this.wetUsed = true;
@@ -612,7 +604,7 @@ export class InkSurface {
         const key = this.renderKey(page);
         const hit = this.cache.get(page.id);
         if (!hit || hit.page !== page || hit.key !== key) {
-          const canvas = hit?.canvas ?? this.el.ownerDocument.createElement("canvas");
+          const canvas = hit?.canvas ?? createEl("canvas");
           canvas.width = this.base.width;
           canvas.height = this.base.height;
           const ctx = canvas.getContext("2d");
@@ -650,7 +642,7 @@ export class InkSurface {
     // keep the page we leave, for turning back quickly
     const leaving = this.page;
     if (!this.zoomed && this.hidden.size === 0) {
-      const canvas = this.cache.get(leaving.id)?.canvas ?? this.el.ownerDocument.createElement("canvas");
+      const canvas = this.cache.get(leaving.id)?.canvas ?? createEl("canvas");
       canvas.width = this.base.width;
       canvas.height = this.base.height;
       canvas.getContext("2d")?.drawImage(this.base, 0, 0);
@@ -858,8 +850,7 @@ export class InkSurface {
     this.settings = { ...this.settings, ...patch };
     if (latencyChanged) {
       // a canvas cannot change its mode: put a new one in its place
-      const fresh = this.el.ownerDocument.createElement("canvas");
-      fresh.className = this.base.className;
+      const fresh = createEl("canvas", { cls: this.base.className });
       fresh.width = this.base.width;
       fresh.height = this.base.height;
       fresh.style.cssText = this.base.style.cssText;

@@ -3,7 +3,7 @@ import process from "process";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
-import builtins from "builtin-modules";
+import { builtinModules } from "module";
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 
@@ -63,7 +63,7 @@ const context = await esbuild.context({
     "@lezer/common",
     "@lezer/highlight",
     "@lezer/lr",
-    ...builtins,
+    ...builtinModules,
   ],
   format: "cjs",
   target: "es2020",

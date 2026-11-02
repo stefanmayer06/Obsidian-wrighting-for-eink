@@ -35,8 +35,8 @@ function polygonFromFlat(box: unknown): Rect | null {
   if (!Array.isArray(box) || box.length < 4) return null;
   const pts: Pt[] = [];
   for (let i = 0; i + 1 < box.length; i += 2) {
-    const x = box[i];
-    const y = box[i + 1];
+    const x: unknown = box[i];
+    const y: unknown = box[i + 1];
     if (typeof x === "number" && typeof y === "number") pts.push({ x, y });
   }
   return rectFromPoints(pts);

@@ -3,6 +3,7 @@
  * (dev/harness.html), for fast checks of drawing, tools and speed.
  * Build: node dev/build-harness.mjs
  */
+import "./obsidianDom";
 import { InkSurface } from "../src/ink/surface";
 import { Toolbar } from "../src/ink/ui/toolbar";
 import { newDoc, EMPTY_META } from "../src/core/ink/model";

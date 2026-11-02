@@ -19,7 +19,7 @@ function oldPairs(plugin: InkNotebookPlugin): Array<{ text: TFile; drawing: TFil
   const { metadataCache } = plugin.app;
   for (const text of plugin.app.vault.getMarkdownFiles()) {
     const fm = metadataCache.getFileCache(text)?.frontmatter;
-    const raw = fm?.[FM_TEXT_TO_DRAWING];
+    const raw: unknown = fm?.[FM_TEXT_TO_DRAWING];
     const link = typeof raw === "string" ? /\[\[([^\]|#]+)/.exec(raw)?.[1] ?? raw : null;
     if (!link || !/\.excalidraw(\.md)?$/i.test(link.trim())) continue;
     const drawing = metadataCache.getFirstLinkpathDest(link.trim(), text.path);
@@ -54,7 +54,7 @@ export async function migrateExcalidrawPages(plugin: InkNotebookPlugin): Promise
       for (let n = 2; plugin.app.vault.getAbstractFileByPath(path); n++) path = normalizePath(joinPath(folder, `${base} ${n}${INK_SUFFIX}`));
       const fm = withInkFrontmatter("", { [FM_DRAWING_TO_TEXT]: JSON.stringify(`[[${pairLink(text)}]]`) });
       const created = await plugin.app.vault.create(path, serializeInkFile(fm, ink));
-      await plugin.app.fileManager.processFrontMatter(text, (f) => {
+      await plugin.app.fileManager.processFrontMatter(text, (f: Record<string, unknown>) => {
         f[FM_TEXT_TO_DRAWING] = `[[${pairLink(created)}]]`;
       });
       done++;

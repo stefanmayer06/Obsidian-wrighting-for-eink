@@ -618,7 +618,7 @@ export function addToLibraryFile(existing: string | null, item: { name: string; 
       throw new LibraryError("The library file could not be read, so nothing was added to it.");
     }
     if (isObj(v) && Array.isArray(v.libraryItems)) libraryItems = v.libraryItems;
-    else if (isObj(v) && Array.isArray(v.library)) libraryItems = v.library.map((els) => ({ id: newId(), status: "unpublished", elements: els, created: Date.now() }));
+    else if (isObj(v) && Array.isArray(v.library)) libraryItems = v.library.map((els: unknown) => ({ id: newId(), status: "unpublished", elements: els, created: Date.now() }));
     else throw new LibraryError("The library file could not be read, so nothing was added to it.");
   }
   libraryItems = [...libraryItems, { id: item.id ?? newId(), status: "unpublished", elements: item.elements, name: item.name, created: item.created ?? Date.now() }];

@@ -61,19 +61,11 @@ function safeJson(res: RequestUrlResponse): unknown {
 }
 
 function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const t = window.setTimeout(() => reject(new OfflineError("The request timed out")), ms);
-    p.then(
-      (v) => {
-        window.clearTimeout(t);
-        resolve(v);
-      },
-      (e) => {
-        window.clearTimeout(t);
-        reject(e);
-      },
-    );
+  let t = 0;
+  const timeout = new Promise<never>((_, reject) => {
+    t = window.setTimeout(() => reject(new OfflineError("The request timed out")), ms);
   });
+  return Promise.race([p, timeout]).finally(() => window.clearTimeout(t));
 }
 
 export async function send(params: Parameters<typeof requestUrl>[0], timeoutMs: number): Promise<RequestUrlResponse> {
@@ -160,7 +152,7 @@ export function isApiUnavailable(e: unknown): boolean {
 
 /** A tiny white PNG with the word "Test" drawn in black, used for the connection test. */
 export async function testImagePng(): Promise<ArrayBuffer> {
-  const canvas = document.createElement("canvas");
+  const canvas = createEl("canvas");
   canvas.width = 320;
   canvas.height = 120;
   const ctx = canvas.getContext("2d");

@@ -73,18 +73,18 @@ function renderAzureSettings(container: HTMLElement, plugin: InkNotebookPlugin):
           await plugin.saveSettings();
         });
       t.inputEl.addClass("ink-wide-input");
-      t.inputEl.addEventListener("blur", async () => {
+      t.inputEl.addEventListener("blur", () => {
         const n = normalizeEndpoint(t.getValue());
         if (n && n !== t.getValue()) {
           t.setValue(n);
           s.azureEndpoint = n;
-          await plugin.saveSettings();
+          void plugin.saveSettings();
         }
       });
     });
   new Setting(container)
     .setName("Azure key")
-    .setDesc("KEY 1 or KEY 2 of the same resource. It is stored in this vault's plugin settings (.obsidian/plugins/ink-notebook/data.json).")
+    .setDesc(`KEY 1 or KEY 2 of the same resource. It is stored in this vault's plugin settings (${plugin.manifest.dir ?? `${plugin.app.vault.configDir}/plugins/${plugin.manifest.id}`}/data.json).`)
     .addText((t) => {
       t.setPlaceholder("Paste your key")
         .setValue(s.azureKey)

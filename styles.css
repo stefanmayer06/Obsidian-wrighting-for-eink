@@ -69,6 +69,7 @@
 }
 
 /* our display rules must not beat the hidden attribute */
+.ink-stage [hidden],
 .ink-overlay [hidden],
 .ink-popover [hidden],
 .ink-toolbar [hidden],

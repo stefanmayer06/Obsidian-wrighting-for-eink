@@ -242,7 +242,7 @@ let measureCtx: Ctx | null = null;
 /** A context for measuring text when no canvas is at hand. */
 export function measuringContext(): Ctx {
   if (!measureCtx) {
-    const c = typeof OffscreenCanvas !== "undefined" ? new OffscreenCanvas(4, 4) : document.createElement("canvas");
+    const c = typeof OffscreenCanvas !== "undefined" ? new OffscreenCanvas(4, 4) : createEl("canvas");
     measureCtx = c.getContext("2d") as Ctx;
   }
   return measureCtx;
@@ -428,7 +428,7 @@ export function drawItems(ctx: Ctx, items: Pick<Items, "strokes" | "texts">): vo
 /** Render a page into a new canvas `pixelWidth` wide (thumbnails, exports). */
 export function renderPageCanvas(page: Page, pixelWidth: number, opts: Omit<PageRenderOptions, "pixelScale">): HTMLCanvasElement {
   const k = pixelWidth / page.w;
-  const canvas = document.createElement("canvas");
+  const canvas = createEl("canvas");
   canvas.width = Math.max(1, Math.round(page.w * k));
   canvas.height = Math.max(1, Math.round(page.h * k));
   const ctx = canvas.getContext("2d");

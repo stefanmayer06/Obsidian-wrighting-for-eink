@@ -510,7 +510,7 @@ export class InkView extends TextFileView {
 
   /** Called when the text page changed (typed notes). */
   textChanged(): void {
-    this.notes?.refresh();
+    void this.notes?.refresh();
   }
 
   private selectionActions(): SelectionAction[] {
@@ -660,26 +660,31 @@ export class InkView extends TextFileView {
   }
 
   private insertDeviceImage(): void {
-    const input = document.createElement("input");
+    const input = createEl("input");
     input.type = "file";
     input.accept = "image/*";
-    input.addEventListener("change", async () => {
+    input.addEventListener("change", () => {
       const f = input.files?.[0];
-      if (!f || !this.file) return;
-      try {
-        const ext = (/\.([a-z0-9]+)$/i.exec(f.name)?.[1] ?? "png").toLowerCase();
-        const folder = this.file.parent?.path ?? "";
-        const stamp = (moment as unknown as () => { format(f: string): string })().format("YYYYMMDDHHmmss");
-        let path = normalizePath(joinPath(folder, `Image ${stamp}.${ext}`));
-        for (let n = 2; this.app.vault.getAbstractFileByPath(path); n++) path = normalizePath(joinPath(folder, `Image ${stamp} ${n}.${ext}`));
-        const created = await this.app.vault.createBinary(path, await f.arrayBuffer());
-        const size = await this.plugin.images.imageSize(created.path);
-        this.surface.insertImage(created.path, size?.w ?? 400, size?.h ?? 300);
-      } catch (e) {
-        this.plugin.switcher.reportError("Could not insert the image", e);
-      }
+      if (f) void this.addDeviceImage(f);
     });
     input.click();
+  }
+
+  /** Save a picture from the device next to the ink page and put it on the page. */
+  private async addDeviceImage(f: File): Promise<void> {
+    if (!this.file) return;
+    try {
+      const ext = (/\.([a-z0-9]+)$/i.exec(f.name)?.[1] ?? "png").toLowerCase();
+      const folder = this.file.parent?.path ?? "";
+      const stamp = (moment as unknown as () => { format(f: string): string })().format("YYYYMMDDHHmmss");
+      let path = normalizePath(joinPath(folder, `Image ${stamp}.${ext}`));
+      for (let n = 2; this.app.vault.getAbstractFileByPath(path); n++) path = normalizePath(joinPath(folder, `Image ${stamp} ${n}.${ext}`));
+      const created = await this.app.vault.createBinary(path, await f.arrayBuffer());
+      const size = await this.plugin.images.imageSize(created.path);
+      this.surface.insertImage(created.path, size?.w ?? 400, size?.h ?? 300);
+    } catch (e) {
+      this.plugin.switcher.reportError("Could not insert the image", e);
+    }
   }
 
   private async insertLink(): Promise<void> {
@@ -709,7 +714,7 @@ export class InkView extends TextFileView {
 
 /** The frontmatter of a file (without parsing the ink data). */
 function parseFrontmatterOnly(data: string, fallback: string): string {
-  const m = /^(?:﻿)?---\r?\n[\s\S]*?\r?\n(?:---|\.\.\.)\s*(?:\r?\n|$)/.exec(data);
+  const m = /^(?:\uFEFF)?---\r?\n[\s\S]*?\r?\n(?:---|\.\.\.)\s*(?:\r?\n|$)/.exec(data);
   return m ? m[0].replace(/\r\n/g, "\n").replace(/\n?$/, "\n") : fallback;
 }
 

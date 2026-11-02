@@ -167,7 +167,7 @@ export class PaperPickerModal extends Modal {
     }
     this.segments.orientation = this.segmented("Orientation", PAPER_ORIENTATIONS, (v) => (this.spec = normalizePaperSpec({ ...this.spec, orientation: v })));
     if (opts.mode === "add" && opts.canInsert) {
-      this.segments.position = this.segmented("Where", POSITIONS, (v) => (this.position = v as PagePosition));
+      this.segments.position = this.segmented("Where", POSITIONS, (v) => (this.position = v));
     }
     if (opts.mode !== "default") {
       new Setting(contentEl)

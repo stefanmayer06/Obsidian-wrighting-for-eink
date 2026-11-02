@@ -201,7 +201,7 @@ export class LibraryService {
   /** Import a library file chosen on the device. Resolves to the new source (null: nothing chosen). */
   importFile(): Promise<string | null> {
     return new Promise((resolve, reject) => {
-      const input = document.createElement("input");
+      const input = createEl("input");
       input.type = "file";
       input.accept = ".excalidrawlib,.json,application/json";
       input.addEventListener("change", () => {

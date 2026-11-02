@@ -18,7 +18,7 @@ import { itemsBounds, transformItems, translation } from "./transform";
 
 export interface TextMeasure {
   /** Width of one line of text at a font size (page units). */
-  measure(text: string, size: number): number;
+  measure: (text: string, size: number) => number;
   /** Break text into the lines it shows at a width (as the ink page does); a simple word wrap when not given. */
   wrap?(text: string, width: number, size: number): string[];
   /** Line height as a factor of the font size (1.3 on the ink page). */
