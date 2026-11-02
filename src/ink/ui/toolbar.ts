@@ -63,7 +63,6 @@ export class Toolbar {
   private nextBtn!: HTMLButtonElement;
   private pageLabel!: HTMLButtonElement;
   private endEl!: HTMLElement;
-  private insertBtn!: HTMLButtonElement;
   private libraryBtn: HTMLButtonElement | null = null;
   private moreBtn: HTMLButtonElement | null = null;
   private resizeObserver: ResizeObserver | null = null;
@@ -133,7 +132,6 @@ export class Toolbar {
       this.libraryBtn = button(tools, this.icon, { icon: "library", label: "Object library", cls: "ink-tb-btn ink-tb-library", onClick: () => (Popover.closeAll(), openLibrary()) });
     }
     const ins = button(tools, this.icon, { icon: "image-plus", label: "Insert", cls: "ink-tb-btn ink-tb-insert", onClick: () => this.openMenu(ins, this.host.insertMenu()) });
-    this.insertBtn = ins;
 
     const favs = el(this.el, "div", "ink-tb-group ink-tb-favs");
     for (let i = 0; i < 2; i++) {

@@ -271,8 +271,8 @@ function renderLineRun(run: SceneLine[], medianH: number, headingsAllowed: boole
   if (first.kind !== "plain") {
     // A list: list lines start items, other lines continue the previous item.
     const items: string[] = [];
-    run.forEach((line, idx) => {
-      const kind = classifyLine(texts[idx]);
+    texts.forEach((text) => {
+      const kind = classifyLine(text);
       if (kind.kind !== "plain" || items.length === 0) items.push(formatLine(kind));
       else items[items.length - 1] = joinParagraphLines([items[items.length - 1], kind.text]);
     });

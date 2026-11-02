@@ -72,19 +72,19 @@ export function transformStroke(s: Stroke, m: Matrix): Stroke {
  */
 export function transformItems(items: Items, m: Matrix): Items {
   const k = scaleOf(m);
-  const box = <T extends { x: number; y: number }>(it: T, center: Pt, w: number, h: number): Pt => {
+  const box = (r: { x: number; y: number; w: number; h: number }): Pt => {
     // keep the box centred on its transformed centre
-    const c = apply(m, center);
-    return { x: q(c.x - (w * k) / 2), y: q(c.y - (h * k) / 2) };
+    const c = apply(m, { x: r.x + r.w / 2, y: r.y + r.h / 2 });
+    return { x: q(c.x - (r.w * k) / 2), y: q(c.y - (r.h * k) / 2) };
   };
   return {
     strokes: items.strokes.map((s) => transformStroke(s, m)),
     texts: items.texts.map((t) => {
-      const p = box(t, { x: t.x + t.w / 2, y: t.y + t.h / 2 }, t.w, t.h);
+      const p = box(t);
       return { ...t, ...p, w: q(t.w * k), h: q(t.h * k), size: Math.max(4, Math.round(t.size * k * 10) / 10) };
     }),
     images: items.images.map((i) => {
-      const p = box(i, { x: i.x + i.w / 2, y: i.y + i.h / 2 }, i.w, i.h);
+      const p = box(i);
       return { ...i, ...p, w: q(i.w * k), h: q(i.h * k) };
     }),
     links: items.links.map((l) => {
@@ -94,7 +94,7 @@ export function transformItems(items: Items, m: Matrix): Items {
       return { ...l, x: q(c.x - r.w / 2), y: q(c.y - r.h / 2) };
     }),
     figures: items.figures.map((f) => {
-      const p = box(f, { x: f.x + f.w / 2, y: f.y + f.h / 2 }, f.w, f.h);
+      const p = box(f);
       return { ...f, ...p, w: q(f.w * k), h: q(f.h * k) };
     }),
   };

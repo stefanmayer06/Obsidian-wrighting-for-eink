@@ -90,7 +90,7 @@ Flowcharts written in [Mermaid](https://mermaid.js.org/syntax/flowchart.html) �
 
 ## The text page
 
-- **Handwriting → text with Azure AI Vision** – with your own free Azure key, or with the optional *Ink Notebook Cloud* subscription. Lines become paragraphs, `-`/`•` lines become lists, a box drawn in front of a line (or a written `[ ]`) becomes a task – `- [x]` if you ticked or crossed it –, bigger writing becomes a heading, handwritten `[[links]]` become real Obsidian links on the text page and a tappable link button on the ink page.
+- **Handwriting → text with Azure AI Vision** – with your own free Azure key. Lines become paragraphs, `-`/`•` lines become lists, a box drawn in front of a line (or a written `[ ]`) becomes a task – `- [x]` if you ticked or crossed it –, bigger writing becomes a heading, handwritten `[[links]]` become real Obsidian links on the text page and a tappable link button on the ink page.
 - **Hand-drawn tables become Markdown tables** – draw a line under the headings and lines between the columns, write in the cells.
 - **Drawings shown live** – flowcharts, boxes, arrows and sketches are detected and shown on the text page with an `ink-figure` block that draws that part of the ink page – change the drawing and the text page follows. Tap the figure to jump to the ink page. To force a picture, select it with the lasso and tap *Figure*.
 - **Your edits are kept** – fix a recognition mistake directly on the text page; the correction stays until you change that handwriting.
@@ -165,24 +165,18 @@ Earlier versions of Ink Notebook (up to 1.3) were built on Excalidraw. Run the c
 
 ## Setting up handwriting recognition
 
-Handwriting recognition is optional. Without it, the text page shows your handwriting as a picture (still with typed notes, links and drawings). Choose under *Settings → Ink Notebook → Handwriting recognition → Service* (or in the setup assistant):
-
-### Ink Notebook Cloud (subscription)
-
-No Azure account needed: subscribe, paste the license key from your purchase e-mail, press **Check** – done. The subscription includes a monthly allowance of recognitions (each changed writing area of a page counts as one); *Check* shows how much is used. Subscriptions are sold through [Polar](https://polar.sh), which also handles invoices and taxes; you manage or cancel yours in Polar's customer portal (linked in the settings). The option appears in the plugin while the service is open for subscriptions.
-
-### Your own Azure key (free tier)
+Handwriting recognition is optional. Without it, the text page shows your handwriting as a picture (still with typed notes, links and drawings). It uses Azure AI Vision with your own key – the free tier is enough:
 
 1. Sign in at the [Azure portal](https://portal.azure.com) (a free account is enough).
 2. Open [**Create Computer Vision**](https://portal.azure.com/#create/Microsoft.CognitiveServicesComputerVision).
    - *Region*: one close to you, e.g. **West Europe** or **East US**. (Image Analysis 4.0 is only offered in some regions; Ink Notebook falls back to Read 3.2 automatically.)
    - *Pricing tier*: **Free F0** – 5,000 images per month, 20 per minute.
 3. After deployment open the resource → **Keys and Endpoint**. Copy the **Endpoint** and **KEY 1**.
-4. In Obsidian: *Settings → Ink Notebook → Handwriting recognition*, paste both and press **Test**.
+4. In Obsidian: *Settings → Ink Notebook → Handwriting recognition* (or the setup assistant), paste both and press **Test**.
 
 How many requests are used? One per *writing area* that changed since the last time (a page is split into areas so that writing in one corner does not re-send the whole page). Results are cached, so flipping back and forth costs nothing.
 
-Privacy: only your handwriting strokes are rendered and sent (black on white – never the PDF or paper background, never your typed text) – with your own key to the Azure region you picked, with Ink Notebook Cloud to the Ink Notebook server (EU), which passes them to Azure AI Vision and keeps nothing; Azure deletes them within 24 hours. The key (Azure key or license key) is stored in `.obsidian/plugins/ink-notebook/data.json` inside your vault – keep that in mind if you share your vault.
+Privacy: only your handwriting strokes are rendered and sent (black on white – never the PDF or paper background, never your typed text) to the Azure region you picked; Azure deletes them within 24 hours. The Azure key is stored in `.obsidian/plugins/ink-notebook/data.json` inside your vault – keep that in mind if you share your vault.
 
 ## Daily use
 
@@ -228,7 +222,7 @@ The two `%% … %%` lines mark the transcript; in Live Preview they are shown as
 
 - **Writing** – pen side button (erase, lasso, nothing), draw with a finger, pressure sensitivity, scribble to erase, snap shapes, swipe to turn pages, two/three-finger taps, whole page or page width, toolbar position, low-latency drawing (automatic: off on e-ink screens).
 - **Pages** – where new pages go (folder of the current note, a fixed folder, or ask every time), the subfolder for ink files (`Attachments` by default; empty = next to the text page), paper for new pages and whether to choose it every time, ask for a name (on by default; off names pages with the date and time), open the text page in reading or editing view, daily notes with an ink page (off / with an ink page / with an ink page opened to write on), match up the names of ink and text pages, keep names in sync on rename/move.
-- **Handwriting recognition** – service (Ink Notebook Cloud or your own Azure key), license key or endpoint and key, API version, language hint, highlight uncertain words, transcribe while writing, how long to wait when flipping, requests per minute, clickable handwritten links, diagram detection sensitivity, offline queue and cache.
+- **Handwriting recognition** – Azure endpoint and key, API version, language hint, highlight uncertain words, transcribe while writing, how long to wait when flipping, requests per minute, clickable handwritten links, diagram detection sensitivity, offline queue and cache.
 - **Display & e‑ink** – e‑ink mode (automatic / on / off), large touch targets, position of the bookmarks on the text page.
 - **PDF annotation** – how many pages to import without asking, the folder for papers from arXiv (`Papers` by default).
 - **Object libraries** – the folder for imported libraries and *My library* (`Ink libraries` by default).
@@ -238,8 +232,6 @@ The two `%% … %%` lines mark the transcript; in Live Preview they are shown as
 - **The page flickers while writing** – set *Settings → Ink Notebook → Low-latency drawing* to *Off*.
 - **Colours and the highlighter have a stripy pattern on a colour e-ink screen** (and look right while the side panel is open) – set *Low-latency drawing* to *Automatic* (it is then off on e-ink screens) or *Off*. If the device is not recognised as e-ink, set *E-ink optimisations* to *Always on* as well.
 - **Writing feels slow on the Boox** – set Obsidian's refresh mode to *Fast* or *Balanced* in the Boox E-Ink Center; avoid *HD* / *Regal* while writing.
-- **"This license key is not active"** (Ink Notebook Cloud) – check the key in the settings (press *Check*), or renew the subscription in Polar's customer portal. Pages are transcribed automatically once the key works again.
-- **"You have used all … recognitions for this month"** – the allowance renews on the first of the month; until then pages are kept as pictures and queued.
 - **Test connection fails** – 401 means a wrong key; 404 a wrong endpoint (copy it exactly from *Keys and Endpoint*); 429 means the free tier's 20 requests/minute were reached (it retries automatically).
 - **Something was shown as a picture instead of text** – that area was recognised as a drawing. Change *Diagram detection* to *Only clear drawings*, or write a little larger. Unrecognised handwriting is always shown as a picture rather than lost.
 - **A table is shown as a picture** – the lines of a table have to be long and fairly straight and cross each other (or nearly touch), and the writing in at least two cells has to be readable.
@@ -276,18 +268,16 @@ The pure logic (the ink model, file format, pens, erasers, shapes, OCR parsing, 
 
 `e2e/` contains end-to-end tests that run the plugin inside the real Obsidian desktop app, write on ink pages with real pen events and use a fake Azure server (see `e2e/README.md`).
 
-`supabase/` is the Ink Notebook Cloud server (a Supabase Edge Function and its database migrations).
-
 ## Payments, accounts and network use
 
-- **Payment:** Ink Notebook Cloud is an optional paid subscription. Everything else – including handwriting recognition with your own Azure key – is free.
-- **Account:** Ink Notebook Cloud needs a license key from a purchase (sold through Polar). Nothing else needs an account.
-- **Network use:** Ink Notebook works offline. It connects to the internet only for handwriting recognition and, when you use *Papers from arXiv*, to find and download papers: with your own key it sends handwriting images to *your* Azure AI Vision resource; with Ink Notebook Cloud it sends handwriting images and your license key to the Ink Notebook server (Supabase, Frankfurt), which checks the key with Polar and passes the images to Azure AI Vision. When you open the handwriting recognition settings or the setup assistant, the plugin asks the Ink Notebook server whether the subscription is offered (no personal data is sent). *Papers from arXiv* sends your search words to the arXiv API (export.arxiv.org), loads the list of popular papers from Hugging Face (huggingface.co) and downloads the PDF of a paper you import from arxiv.org – only when you open it or search. *Import from a link…* in the object library downloads the library from the link you paste (usually libraries.excalidraw.com); *Find libraries* opens libraries.excalidraw.com in your browser. There is no telemetry and no ads.
+- **Payment:** none – Ink Notebook is free.
+- **Account:** none. Handwriting recognition uses your own Azure AI Vision resource (a free Azure account is enough).
+- **Network use:** Ink Notebook works offline. It connects to the internet only for handwriting recognition and, when you use *Papers from arXiv*, to find and download papers: it sends handwriting images to *your* Azure AI Vision resource. *Papers from arXiv* sends your search words to the arXiv API (export.arxiv.org), loads the list of popular papers from Hugging Face (huggingface.co) and downloads the PDF of a paper you import from arxiv.org – only when you open it or search. *Import from a link…* in the object library downloads the library from the link you paste (usually libraries.excalidraw.com); *Find libraries* opens libraries.excalidraw.com in your browser. There is no telemetry and no ads.
 
 ## License
 
 Copyright (C) 2026 Stefan Mayer
 
-Ink Notebook – the plugin and the Ink Notebook Cloud server in `supabase/` – is free software: you can redistribute it and/or modify it under the terms of the **GNU Affero General Public License** as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version (`AGPL-3.0-or-later`, see [`LICENSE`](LICENSE)). It is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the license for details.
+Ink Notebook is free software: you can redistribute it and/or modify it under the terms of the **GNU Affero General Public License** as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version (`AGPL-3.0-or-later`, see [`LICENSE`](LICENSE)). It is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the license for details.
 
 Releases up to and including 1.1.0 were published under the MIT license and remain available under it. The license texts of Ink Notebook and of all third-party code in the released `main.js` (pdf-lib and the libraries it uses, lz-string) are appended to the end of that file.

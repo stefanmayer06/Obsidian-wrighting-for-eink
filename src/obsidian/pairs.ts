@@ -176,9 +176,8 @@ export class PairManager {
     return name;
   }
 
-  /** Initial content of a text page. */
-  /** `body` (typed notes) goes above the handwriting transcript. */
-  textPageContent(drawing: TFile, textPath: string, extraFrontmatter: Record<string, string | string[]> = {}, body = ""): string {
+  /** Initial content of a text page. `body` (typed notes) goes above the handwriting transcript. */
+  textPageContent(drawing: TFile, extraFrontmatter: Record<string, string | string[]> = {}, body = ""): string {
     const link = pairLink(drawing);
     // JSON is valid YAML: strings stay strings, arrays become list properties
     const extra = Object.entries(extraFrontmatter)
@@ -226,7 +225,7 @@ export class PairManager {
       path = normalizePath(joinPath(folder, `${name} (text${n > 2 ? " " + n : ""}).md`));
       n++;
     }
-    const text = await this.app.vault.create(path, this.textPageContent(drawing, path, extraFrontmatter));
+    const text = await this.app.vault.create(path, this.textPageContent(drawing, extraFrontmatter));
     await this.linkDrawingToText(drawing, text);
     return text;
   }

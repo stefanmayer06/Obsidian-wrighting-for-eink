@@ -45,10 +45,6 @@ export function classifyLine(text: string): LineKind {
   return { kind: "plain", text: t };
 }
 
-export function isListLike(text: string): boolean {
-  return classifyLine(text).kind !== "plain";
-}
-
 /**
  * Escape characters that would unintentionally change the meaning of a
  * recognised plain line in Markdown (e.g. a line starting with "1." or "#"

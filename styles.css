@@ -872,16 +872,6 @@
   cursor: progress;
 }
 
-/* "+ Page": a slimmer ribbon below the two tabs */
-.ink-bookmarks .ink-bookmark.ink-bookmark-add {
-  height: calc(var(--ink-ribbon-height) - 8px);
-  font-weight: 500;
-}
-
-.ink-bookmarks .ink-bookmark.ink-bookmark-add::before {
-  background: var(--ink-ribbon-paper);
-}
-
 .ink-bookmarks .ink-bookmark.is-hidden {
   display: none;
 }
@@ -1494,14 +1484,6 @@ canvas.ink-preview-page {
   font-size: 13px;
 }
 
-.ink-ok {
-  color: var(--text-success);
-}
-
-.ink-warn {
-  color: var(--text-warning);
-}
-
 .ink-test-status {
   font-size: var(--font-ui-small);
   min-height: 1.2em;
@@ -1517,10 +1499,6 @@ canvas.ink-preview-page {
 
 .ink-wide-input {
   width: min(360px, 60vw);
-}
-
-.ink-links {
-  margin-bottom: 6px;
 }
 
 .ink-block-desc {
