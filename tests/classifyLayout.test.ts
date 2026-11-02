@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classifyScene, DEFAULT_CLASSIFY_OPTIONS, isDiagramFrameName } from "../src/core/classify";
+import { classifyScene, DEFAULT_CLASSIFY_OPTIONS } from "../src/core/classify";
 import { DEFAULT_LAYOUT_OPTIONS, layoutTranscript, type LayoutOptions } from "../src/core/layout";
 import type { SceneElement } from "../src/core/scene";
 import { boxStroke, line, shape, stroke, textEl } from "./helpers";
@@ -89,8 +89,7 @@ describe("classifyScene", () => {
     const els: SceneElement[] = [
       shape("paper", "image", 0, 0, 1000, 1414, { locked: true, customData: { inkNotebook: { role: "paper" } } }),
       shape("pdfimg", "image", 0, 1500, 800, 1100, { locked: true, customData: { inkNotebook: { role: "pdf-page", pdf: "Docs/Paper.pdf", page: 3 } } }),
-      shape("frameA", "frame", 2000, 0, 500, 500, { name: "Diagram: flow" }),
-      shape("frameB", "frame", 3000, 0, 500, 500, { name: "Chapter 2" }),
+      shape("frameA", "frame", 2000, 0, 500, 500, { name: "Diagram" }),
       shape("cover", "image", 0, 0, 1000, 1414),
       stroke("inFrame", 2100, 100, 100, 30, { frameId: "frameA" }),
     ];
@@ -98,10 +97,8 @@ describe("classifyScene", () => {
     expect(c.pages.map((p) => [p.id, p.kind])).toEqual([
       ["paper", "paper"],
       ["pdfimg", "pdf"],
-      ["frameB", "frame"],
     ]);
     expect(c.pages[1]).toMatchObject({ pdfPath: "Docs/Paper.pdf", pdfPage: 3 });
-    expect(c.pages[2].title).toBe("Chapter 2");
     // a picture that covers a whole page is a background, not a diagram
     expect(c.diagrams.map((d) => d.frameId ?? d.elementIds.join())).toEqual(["frameA"]);
     expect(c.diagrams[0].elementIds).toEqual(["inFrame"]);
@@ -115,14 +112,6 @@ describe("classifyScene", () => {
     const c = classifyScene(els, [], new Set());
     expect(c.diagrams).toEqual([]);
     expect(c.pages).toHaveLength(1);
-  });
-
-  it("detects diagram frame names", () => {
-    expect(isDiagramFrameName("Diagram 1")).toBe(true);
-    expect(isDiagramFrameName("figure: flow")).toBe(true);
-    expect(isDiagramFrameName("Skizze")).toBe(true);
-    expect(isDiagramFrameName("Chapter 2")).toBe(false);
-    expect(isDiagramFrameName(null)).toBe(false);
   });
 
   it("keeps a diagram from swallowing the paragraph below it", () => {

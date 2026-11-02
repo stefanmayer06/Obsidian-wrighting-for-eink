@@ -49,14 +49,13 @@ export const DEFAULT_CLASSIFY_OPTIONS: ClassifyOptions = {
   labelMargin: 12,
 };
 
-export type PageKind = "paper" | "pdf" | "image" | "frame";
+export type PageKind = "paper" | "pdf" | "image";
 
 export interface PageInfo {
-  /** Element id of the page (paper/pdf image, image, frame). */
+  /** Element id of the page (its paper, PDF page or picture). */
   id: string;
   kind: PageKind;
   rect: Rect;
-  title?: string;
   pdfPath?: string;
   pdfPage?: number;
   imagePath?: string;
@@ -78,9 +77,8 @@ export interface DiagramItem {
   rect: Rect;
   elementIds: string[];
   labels: string[];
-  /** Set when the user marked a frame as diagram (frame name starts with "Diagram"/"Figure"/"Sketch"). */
+  /** Set when the diagram is a figure the user made (lasso → Figure): the id of its frame. */
   frameId?: string;
-  frameName?: string;
   /** A long thin hand-drawn line, rendered as a Markdown horizontal rule. */
   isRule?: boolean;
 }
@@ -102,18 +100,6 @@ export interface ClassifiedScene {
   textStrokeIds: Set<string>;
   /** Tiny marks ignored as noise. */
   noiseStrokeIds: string[];
-}
-
-const DIAGRAM_FRAME_RE = /^\s*(diagram|figure|fig\.?|sketch|drawing|chart|flow ?chart|skizze|zeichnung|abbildung|grafik)\b/i;
-
-export function isDiagramFrameName(name: string | null | undefined): boolean {
-  return !!name && DIAGRAM_FRAME_RE.test(name);
-}
-
-function frameTitle(name: string | null | undefined): string | undefined {
-  const n = (name ?? "").trim();
-  if (!n || /^frame(\s*\d+)?$/i.test(n)) return undefined;
-  return n;
 }
 
 interface WordRef {
@@ -194,8 +180,8 @@ export function classifyScene(
       continue;
     }
     if (el.type === "frame") {
-      if (isDiagramFrameName(el.name)) diagramFrames.push({ el, rect: elementRect(el) });
-      else pages.push({ id: el.id, kind: "frame", rect: elementRect(el), title: frameTitle(el.name) });
+      // the figures of the ink pages (see inkScene)
+      diagramFrames.push({ el, rect: elementRect(el) });
       continue;
     }
     if ((el.opacity ?? 100) <= 0) continue;
@@ -353,7 +339,6 @@ export function classifyScene(
       elementIds: members.map((m) => m.id),
       labels: [],
       frameId: f.el.id,
-      frameName: frameTitle(f.el.name) ?? f.el.name ?? undefined,
     });
   }
 
