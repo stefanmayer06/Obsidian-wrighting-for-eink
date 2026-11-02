@@ -190,7 +190,7 @@ export class PaperSearchModal extends Modal {
       title.addEventListener("click", toggle);
     }
 
-    action.addEventListener("click", async () => {
+    const runAction = async (): Promise<void> => {
       if (this.importing) return;
       if (done) {
         this.close();
@@ -215,7 +215,8 @@ export class PaperSearchModal extends Modal {
       }
       action.disabled = false;
       label(this.into ? "Add pages" : "Import", "download");
-    });
+    };
+    action.addEventListener("click", () => void runAction());
     return card;
   }
 }

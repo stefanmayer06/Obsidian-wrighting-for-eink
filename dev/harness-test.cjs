@@ -223,13 +223,13 @@ function check(name, cond, detail = "") {
   let wetWhileDrawing = "";
   await pen(along([[90, 115], [420, 118]], 4), {
     beforeUp: async () => {
-      wetWhileDrawing = await page.evaluate(() => window.surface.wet.style.display);
+      wetWhileDrawing = await page.evaluate(() => getComputedStyle(window.surface.wet).display);
     },
   });
   st = await state();
   check("ellipse and highlighter are added", st.strokes === 2, JSON.stringify(st));
-  const wetAfter = await page.evaluate(() => window.surface.wet.style.display);
-  check("the preview layer shows the highlighter, then goes away", wetWhileDrawing === "" && wetAfter === "none", `${wetWhileDrawing} / ${wetAfter}`);
+  const wetAfter = await page.evaluate(() => getComputedStyle(window.surface.wet).display);
+  check("the preview layer shows the highlighter, then goes away", wetWhileDrawing === "block" && wetAfter === "none", `${wetWhileDrawing} / ${wetAfter}`);
   await page.screenshot({ path: path.join(SHOTS, "04-page2.png") });
 
   console.log("save and load");

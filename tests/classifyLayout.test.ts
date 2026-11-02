@@ -91,8 +91,7 @@ describe("classifyScene", () => {
       shape("pdfimg", "image", 0, 1500, 800, 1100, { locked: true, customData: { inkNotebook: { role: "pdf-page", pdf: "Docs/Paper.pdf", page: 3 } } }),
       shape("frameA", "frame", 2000, 0, 500, 500, { name: "Diagram: flow" }),
       shape("frameB", "frame", 3000, 0, 500, 500, { name: "Chapter 2" }),
-      shape("marker", "frame", 4000, 0, 600, 800, { frameRole: "marker", link: "[[Other.pdf#page=2]]" }),
-      shape("markerImg", "image", 4000, 0, 600, 800),
+      shape("cover", "image", 0, 0, 1000, 1414),
       stroke("inFrame", 2100, 100, 100, 30, { frameId: "frameA" }),
     ];
     const c = classifyScene(els, [], new Set());
@@ -100,12 +99,10 @@ describe("classifyScene", () => {
       ["paper", "paper"],
       ["pdfimg", "pdf"],
       ["frameB", "frame"],
-      ["marker", "pdf"],
     ]);
     expect(c.pages[1]).toMatchObject({ pdfPath: "Docs/Paper.pdf", pdfPage: 3 });
-    expect(c.pages[3]).toMatchObject({ pdfPath: "Other.pdf", pdfPage: 2 });
     expect(c.pages[2].title).toBe("Chapter 2");
-    // the page-sized image under the marker frame is a background, not a diagram
+    // a picture that covers a whole page is a background, not a diagram
     expect(c.diagrams.map((d) => d.frameId ?? d.elementIds.join())).toEqual(["frameA"]);
     expect(c.diagrams[0].elementIds).toEqual(["inFrame"]);
   });

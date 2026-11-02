@@ -363,13 +363,11 @@ export default class InkNotebookPlugin extends Plugin {
     // a PDF or picture used on ink pages moved: follow it
     if (file instanceof TFile && file.extension !== "md") void this.renameAsset(oldPath, file.path);
     // wait for the metadata cache to pick up the new path
-    window.setTimeout(async () => {
-      try {
-        await this.pairs.onRename(file, oldPath, this.settings.keepNamesInSync);
-      } catch (e) {
-        console.warn("Ink Notebook: rename sync failed", e);
-      }
-      this.bookmarks.refreshAll();
+    window.setTimeout(() => {
+      void this.pairs
+        .onRename(file, oldPath, this.settings.keepNamesInSync)
+        .catch((e) => console.warn("Ink Notebook: rename sync failed", e))
+        .then(() => this.bookmarks.refreshAll());
     }, 300);
   }
 

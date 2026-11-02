@@ -9,12 +9,11 @@ import {
   libraryUrlFrom,
   parseExcalidrawLibrary,
   removeFromLibraryFile,
-  type LibraryItem,
 } from "../core/ink/excalidrawLib";
 import { FLOWCHART_LIBRARY_ID, flowchartLibrary } from "../core/ink/flowchart";
 import { mermaidToItems } from "../core/ink/fromMermaid";
 import { mermaidBlocks, mermaidNote, removeMermaidBlock } from "../core/ink/mermaid";
-import type { Items } from "../core/ink/model";
+import type { Items, LibraryItem } from "../core/ink/model";
 import { joinPath } from "../core/folders";
 import { inkTextMeasure, measuringContext, wrapText } from "../ink/render";
 import type { LibrarySource } from "../ink/ui/libraryPanel";
@@ -201,7 +200,7 @@ export class LibraryService {
   /** Import a library file chosen on the device. Resolves to the new source (null: nothing chosen). */
   importFile(): Promise<string | null> {
     return new Promise((resolve, reject) => {
-      const input = document.createElement("input");
+      const input = createEl("input");
       input.type = "file";
       input.accept = ".excalidrawlib,.json,application/json";
       input.addEventListener("change", () => {

@@ -28,7 +28,7 @@ export interface ToolbarHost {
   /** Buttons at the end of the bar (typed notes, text page). */
   endButtons(): Array<{ id: string; icon: string; label: string; showLabel?: boolean; run(): void }>;
   /** Open the object libraries (the Library button is shown when this is given). */
-  openLibrary?(): void;
+  openLibrary?: () => void;
 }
 
 const WRITING_PENS: WritingPen[] = ["fountain", "ballpoint", "pencil", "brush", "calligraphy"];
@@ -226,7 +226,7 @@ export class Toolbar {
     // the pen button shows the selected pen and colour
     const pen = this.toolButtons.get("pen");
     if (pen) {
-      const i = pen.querySelector(".ink-btn-icon") as HTMLElement | null;
+      const i = pen.querySelector<HTMLElement>(".ink-btn-icon");
       if (i && i.dataset.icon !== PENS[t.pen].icon) {
         i.replaceChildren();
         this.icon(i, PENS[t.pen].icon);
@@ -245,7 +245,7 @@ export class Toolbar {
     }
     const shape = this.toolButtons.get("shape");
     if (shape) {
-      const i = shape.querySelector(".ink-btn-icon") as HTMLElement | null;
+      const i = shape.querySelector<HTMLElement>(".ink-btn-icon");
       const icon = SHAPES[t.shape].icon;
       if (i && i.dataset.icon !== icon) {
         i.replaceChildren();

@@ -125,7 +125,7 @@ export async function importPaper(plugin: InkNotebookPlugin, paper: Paper, opts:
     // next to the notebook it goes into
     const pdf = await savePdf(plugin, parentPath(into.file.path), name, data);
     if (await addPdfPages(plugin, into, pdf)) return true;
-    await plugin.app.vault.delete(pdf);
+    await plugin.app.fileManager.trashFile(pdf);
     return false;
   }
 
@@ -148,7 +148,7 @@ export async function importPaper(plugin: InkNotebookPlugin, paper: Paper, opts:
     }
   } finally {
     // cancelled or failed: don't leave the download behind
-    if (!created) await plugin.app.vault.delete(pdf).catch(() => undefined);
+    if (!created) await plugin.app.fileManager.trashFile(pdf).catch(() => undefined);
   }
   if (!created) return false;
   new Notice(`"${paper.title}" is ready – write on its pages.`, 5000);

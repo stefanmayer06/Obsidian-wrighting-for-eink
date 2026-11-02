@@ -13,8 +13,26 @@ interface PdfEntry {
   used: number;
 }
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
-type PdfDoc = any;
+/** The part of PDF.js (as loaded by Obsidian's loadPdfJs) that is used here. */
+interface PdfViewport {
+  width: number;
+  height: number;
+}
+
+interface PdfPage {
+  getViewport(params: { scale: number }): PdfViewport;
+  render(params: { canvasContext: CanvasRenderingContext2D; viewport: PdfViewport }): { promise: Promise<void> };
+  cleanup?(): void;
+}
+
+interface PdfDoc {
+  numPages: number;
+  getPage(pageNumber: number): Promise<PdfPage>;
+}
+
+interface PdfJs {
+  getDocument(params: { data: Uint8Array }): { promise: Promise<PdfDoc> };
+}
 
 interface RenderedPage {
   canvas: HTMLCanvasElement;
@@ -119,12 +137,12 @@ export class VaultImages implements ImageSource {
   async pdfInfo(file: TFile, pages?: number[]): Promise<{ count: number; sizes: Map<number, { w: number; h: number }> }> {
     const doc = await this.pdf(file.path);
     const sizes = new Map<number, { w: number; h: number }>();
-    for (const n of pages ?? Array.from({ length: doc.numPages as number }, (_, i) => i + 1)) {
+    for (const n of pages ?? Array.from({ length: doc.numPages }, (_, i) => i + 1)) {
       const p = await doc.getPage(n);
       const vp = p.getViewport({ scale: 1 });
       sizes.set(n, { w: vp.width, h: vp.height });
     }
-    return { count: doc.numPages as number, sizes };
+    return { count: doc.numPages, sizes };
   }
 
   private pdf(path: string): Promise<PdfDoc> {
@@ -133,7 +151,7 @@ export class VaultImages implements ImageSource {
       const doc = (async () => {
         const file = this.app.vault.getAbstractFileByPath(path);
         if (!(file instanceof TFile)) throw new Error(`PDF not found: ${path}`);
-        const pdfjs = await loadPdfJs();
+        const pdfjs = (await loadPdfJs()) as PdfJs;
         const data = new Uint8Array(await this.app.vault.readBinary(file));
         return pdfjs.getDocument({ data }).promise;
       })();
@@ -177,7 +195,7 @@ export class VaultImages implements ImageSource {
     const page = await doc.getPage(pageNo);
     const base = page.getViewport({ scale: 1 });
     const viewport = page.getViewport({ scale: width / base.width });
-    const canvas = document.createElement("canvas");
+    const canvas = createEl("canvas");
     canvas.width = Math.round(viewport.width);
     canvas.height = Math.round(viewport.height);
     const ctx = canvas.getContext("2d");

@@ -297,6 +297,17 @@ export interface Items {
   figures: Figure[];
 }
 
+/** An item of an object library, as ink. */
+export interface LibraryItem {
+  id: string;
+  name: string;
+  items: Items;
+  /** Drawn in the current pen colour and thickness when placed (the built-in shapes). */
+  restyle?: boolean;
+  /** A whole diagram: it may fill most of the page when placed (other items are made smaller sooner). */
+  fitPage?: boolean;
+}
+
 export function pickItems(page: Page, sel: Selection): Items {
   return {
     strokes: page.strokes.filter((s) => sel.strokes.has(s.id)),

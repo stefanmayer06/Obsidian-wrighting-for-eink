@@ -1,4 +1,4 @@
-import type { LibraryItem } from "../../core/ink/excalidrawLib";
+import type { LibraryItem } from "../../core/ink/model";
 import { itemsBounds } from "../../core/ink/transform";
 import { drawItems } from "../render";
 import type { InkSurface } from "../surface";
@@ -31,7 +31,7 @@ export interface LibraryHost {
   /** Buttons under the items (importing libraries…). */
   actions(): Array<{ icon: string; label: string; run(): void }>;
   /** Remove an item from an editable library. */
-  removeItem?(sourceId: string, itemId: string): Promise<void>;
+  removeItem?: (sourceId: string, itemId: string) => Promise<void>;
   /** The library shown last (remembered between sessions). */
   lastSource?: string;
   sourceChanged?(id: string): void;
@@ -157,18 +157,12 @@ export class LibraryPanel {
   private renderItems(src: LibrarySource): void {
     const queue: Array<{ canvas: HTMLCanvasElement; item: LibraryItem }> = [];
     for (const it of this.items) {
-      const tile = this.grid.ownerDocument.createElement("button");
+      const tile = this.grid.createEl("button", { cls: "ink-library-tile" });
       tile.type = "button";
-      tile.className = "ink-library-tile";
       tile.title = it.name;
       tile.setAttribute("aria-label", it.name);
-      const canvas = this.grid.ownerDocument.createElement("canvas");
-      canvas.className = "ink-library-thumb";
-      tile.appendChild(canvas);
-      const name = this.grid.ownerDocument.createElement("span");
-      name.className = "ink-library-name";
-      name.textContent = it.name;
-      tile.appendChild(name);
+      const canvas = tile.createEl("canvas", { cls: "ink-library-thumb" });
+      tile.createSpan({ cls: "ink-library-name", text: it.name });
       tile.addEventListener("click", (e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -176,8 +170,7 @@ export class LibraryPanel {
       });
       const remove = this.host.removeItem;
       if (src.editable && remove) {
-        const x = this.grid.ownerDocument.createElement("span");
-        x.className = "ink-library-remove";
+        const x = tile.createSpan({ cls: "ink-library-remove" });
         x.setAttribute("role", "button");
         x.setAttribute("aria-label", `Remove “${it.name}”`);
         x.title = "Remove from the library";
@@ -187,9 +180,7 @@ export class LibraryPanel {
           e.stopPropagation();
           void remove(src.id, it.id).then(() => this.show(src.id));
         });
-        tile.appendChild(x);
       }
-      this.grid.appendChild(tile);
       this.tiles.set(it.id, tile);
       queue.push({ canvas, item: it });
     }

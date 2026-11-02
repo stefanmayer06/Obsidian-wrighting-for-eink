@@ -8,7 +8,7 @@ import { renderStrokeWidth, strokeImagePoints, type RenderPlan } from "../core/r
  * open in a view.
  */
 export async function renderStrokesPng(plan: RenderPlan, strokes: ReadonlyArray<SceneElement>): Promise<ArrayBuffer> {
-  const canvas = document.createElement("canvas");
+  const canvas = createEl("canvas");
   canvas.width = plan.width;
   canvas.height = plan.height;
   const ctx = canvas.getContext("2d");

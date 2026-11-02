@@ -50,8 +50,7 @@ export class TextEditor {
   private open(e: Editing): void {
     this.commit();
     this.editing = e;
-    const ta = this.s.el.ownerDocument.createElement("textarea");
-    ta.className = "ink-text-editor ink-ui";
+    const ta = this.s.overlay.createEl("textarea", { cls: "ink-text-editor ink-ui" });
     ta.value = e.box.text;
     ta.spellcheck = true;
     ta.style.fontFamily = TEXT_FONT;
@@ -67,7 +66,6 @@ export class TextEditor {
     });
     ta.addEventListener("blur", () => window.setTimeout(() => this.commit(), 0));
     ta.addEventListener("pointerdown", (ev) => ev.stopPropagation());
-    this.s.overlay.appendChild(ta);
     this.ta = ta;
     this.position();
     window.setTimeout(() => {
@@ -94,7 +92,8 @@ export class TextEditor {
   private autosize(): void {
     const ta = this.ta;
     if (!ta) return;
-    ta.style.height = "auto";
+    // drop the old height first, so scrollHeight measures the text and the box can shrink
+    ta.style.removeProperty("height");
     ta.style.height = `${Math.max(ta.scrollHeight, (this.editing?.box.size ?? 20) * this.s.view.scale * TEXT_LINE_HEIGHT)}px`;
   }
 

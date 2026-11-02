@@ -380,7 +380,6 @@ export class InputRouter {
   }
 
   private applyStageTransform(g: Gesture): void {
-    this.s.stage.style.transformOrigin = "0 0";
     this.s.stage.style.transform = `translate(${g.tx}px, ${g.ty}px) scale(${g.k})`;
   }
 
@@ -425,7 +424,7 @@ export class InputRouter {
   /** Apply (or drop) the CSS transform of a pan/pinch to the real view. */
   private endGesture(apply: boolean, g: Gesture | null = this.gesture): void {
     this.gesture = null;
-    this.s.stage.style.transform = "";
+    this.s.stage.style.removeProperty("transform");
     if (!g || !apply || (g.k === 1 && g.tx === 0 && g.ty === 0)) return;
     const v = this.s.view;
     this.s.setView({ scale: v.scale * g.k, ox: v.ox * g.k + g.tx, oy: v.oy * g.k + g.ty });

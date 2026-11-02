@@ -85,6 +85,39 @@ export function lighten(color: string, amount: number): string {
   return `#${hex(mix(m[1]))}${hex(mix(m[2]))}${hex(mix(m[3]))}`;
 }
 
+const NAMED: Record<string, string> = {
+  black: "#000000",
+  white: "#ffffff",
+  red: "#ff0000",
+  green: "#008000",
+  blue: "#0000ff",
+  yellow: "#ffff00",
+  orange: "#ffa500",
+  purple: "#800080",
+  gray: "#808080",
+  grey: "#808080",
+};
+
+/**
+ * A colour (#rgb, #rgba, #rrggbb, #rrggbbaa or a few names) as #rrggbb, its
+ * transparency and `opacity` (0..100) mixed with white; null for
+ * "transparent", "none" and what cannot be read.
+ */
+export function parseColor(v: unknown, opacity = 100): string | null {
+  if (typeof v !== "string") return null;
+  let c = v.trim().toLowerCase();
+  if (!c || c === "transparent" || c === "none") return null;
+  c = NAMED[c] ?? c;
+  let m = /^#([0-9a-f])([0-9a-f])([0-9a-f])([0-9a-f])?$/.exec(c);
+  if (m) c = `#${m[1]}${m[1]}${m[2]}${m[2]}${m[3]}${m[3]}${m[4] ? m[4] + m[4] : ""}`;
+  m = /^#([0-9a-f]{6})([0-9a-f]{2})?$/.exec(c);
+  if (!m) return null;
+  let alpha = m[2] ? parseInt(m[2], 16) / 255 : 1;
+  alpha *= Math.min(1, Math.max(0, opacity / 100));
+  if (alpha <= 0.02) return null;
+  return lighten(`#${m[1]}`, 1 - alpha);
+}
+
 export interface Pt2 {
   x: number;
   y: number;

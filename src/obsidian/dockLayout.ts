@@ -43,7 +43,7 @@ export class DockLayout {
     // the search bar and the like come and go
     this.mutationObserver = new MutationObserver((records) => {
       for (const r of records) {
-        const t = r.target instanceof Element ? r.target : r.target.parentElement;
+        const t = r.target.instanceOf(Element) ? r.target : r.target.parentElement;
         if (!t || root.contains(t) || t.tagName === "CANVAS" || t.closest(".markdown-preview-view, .cm-content")) continue;
         this.schedule();
         return;

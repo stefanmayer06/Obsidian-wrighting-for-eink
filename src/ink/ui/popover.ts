@@ -22,9 +22,9 @@ export interface MenuSection {
 
 export type IconFn = (el: HTMLElement, name: string) => void;
 
-let open: Popover | null = null;
-
 export class Popover {
+  /** The card that is open (one at a time). */
+  private static open: Popover | null = null;
   readonly el: HTMLElement;
   private outside = (e: PointerEvent) => {
     const t = e.target as Node | null;
@@ -41,12 +41,9 @@ export class Popover {
     private anchor: HTMLElement,
     cls = "",
   ) {
-    open?.close();
-    open = this;
-    this.el = host.ownerDocument.createElement("div");
-    this.el.className = `ink-popover ink-ui ${cls}`.trim();
-    this.el.setAttribute("role", "dialog");
-    host.appendChild(this.el);
+    Popover.open?.close();
+    Popover.open = this;
+    this.el = host.createDiv({ cls: `ink-popover ink-ui ${cls}`.trim(), attr: { role: "dialog" } });
     // capture: decide before the page sees the press
     host.ownerDocument.addEventListener("pointerdown", this.outside, true);
     host.ownerDocument.addEventListener("keydown", this.keys, true);
@@ -54,11 +51,11 @@ export class Popover {
   }
 
   static get current(): Popover | null {
-    return open;
+    return Popover.open;
   }
 
   static closeAll(): void {
-    open?.close();
+    Popover.open?.close();
   }
 
   /** Put the card next to its button, inside the host (side depends on where the toolbar is). */
@@ -85,7 +82,7 @@ export class Popover {
   }
 
   close(): void {
-    if (open === this) open = null;
+    if (Popover.open === this) Popover.open = null;
     this.host.ownerDocument.removeEventListener("pointerdown", this.outside, true);
     this.host.ownerDocument.removeEventListener("keydown", this.keys, true);
     this.anchor.classList.remove("is-open");
@@ -97,11 +94,7 @@ export class Popover {
 // ------------------------------------------------------------------ building blocks
 
 export function el<K extends keyof HTMLElementTagNameMap>(parent: HTMLElement, tag: K, cls?: string, text?: string): HTMLElementTagNameMap[K] {
-  const e = parent.ownerDocument.createElement(tag);
-  if (cls) e.className = cls;
-  if (text !== undefined) e.textContent = text;
-  parent.appendChild(e);
-  return e;
+  return parent.createEl(tag, { cls, text });
 }
 
 export function button(parent: HTMLElement, icon: IconFn, opts: { icon?: string; label: string; cls?: string; showLabel?: boolean; onClick: (e: MouseEvent) => void }): HTMLButtonElement {

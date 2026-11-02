@@ -187,7 +187,7 @@ export class MermaidModal extends Modal {
   }
 
   private chooseFile(): void {
-    const input = document.createElement("input");
+    const input = createEl("input");
     input.type = "file";
     input.accept = FILE_TYPES;
     input.addEventListener("change", () => {

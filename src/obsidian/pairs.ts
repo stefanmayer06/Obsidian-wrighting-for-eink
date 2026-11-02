@@ -25,7 +25,7 @@ export interface PagePair {
 }
 
 function linkFromFrontmatter(value: unknown): string | null {
-  const v = Array.isArray(value) ? value[0] : value;
+  const v: unknown = Array.isArray(value) ? value[0] : value;
   if (typeof v !== "string") return null;
   const m = /^\s*!?\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|[^\]]*)?\]\]\s*$/.exec(v);
   if (m) return m[1].trim();
@@ -338,9 +338,9 @@ export class PairManager {
 
   private async setLink(file: TFile, key: string, target: TFile): Promise<void> {
     const value = `[[${pairLink(target)}]]`;
-    const current = this.app.metadataCache.getFileCache(file)?.frontmatter?.[key];
+    const current: unknown = this.app.metadataCache.getFileCache(file)?.frontmatter?.[key];
     if (current === value) return;
-    await this.app.fileManager.processFrontMatter(file, (fm) => {
+    await this.app.fileManager.processFrontMatter(file, (fm: Record<string, unknown>) => {
       fm[key] = value;
     });
   }

@@ -4,7 +4,7 @@ import { elementRect, absolutePoints } from "../geometry";
 import { getInkData, type SceneElement } from "../scene";
 import { emptyPage, makeStroke, q, qp, type Figure, type ImageItem, type InkFile, type Page, type Region, type Stroke, type TextBox } from "./model";
 import { shapeFromDrag } from "./shapes";
-import { exColor } from "./excalidrawLib";
+import { parseColor } from "./pens";
 
 /**
  * Converts ink pages made by earlier versions of Ink Notebook (which were
@@ -146,7 +146,7 @@ export function excalidrawToInk(elements: ReadonlyArray<SceneElement>, files: Re
     if (el.type === "rectangle" || el.type === "ellipse" || el.type === "diamond") {
       if (colorOf(el) === "#000000" && el.strokeColor === "transparent") continue;
       const kind = el.type === "rectangle" ? "rect" : el.type === "ellipse" ? "ellipse" : "diamond";
-      const fill = exColor(el.backgroundColor, el.opacity ?? 100) ?? undefined;
+      const fill = parseColor(el.backgroundColor, el.opacity ?? 100) ?? undefined;
       const fillStyle = el.fillStyle;
       const s = shapeFromDrag(kind, { x: el.x - ox, y: el.y - oy }, { x: el.x - ox + el.width, y: el.y - oy + el.height }, {
         pen: "ballpoint",

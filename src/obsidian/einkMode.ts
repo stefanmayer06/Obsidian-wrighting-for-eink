@@ -2,10 +2,14 @@ import { Platform } from "obsidian";
 import { detectDevice, type DeviceInfo } from "../core/device";
 import type { InkSettings } from "../settings";
 
-/** Detect the current device once. */
+/**
+ * Detect the current device once. This needs the device model (Boox and other
+ * e-ink tablets), which only the user agent has: Platform tells the operating
+ * system, and on Android every tablet looks the same to it.
+ */
 export function currentDevice(): DeviceInfo {
   try {
-    return detectDevice(typeof navigator !== "undefined" ? navigator.userAgent : "");
+    return detectDevice(activeWindow.navigator.userAgent);
   } catch {
     return { isEink: false };
   }

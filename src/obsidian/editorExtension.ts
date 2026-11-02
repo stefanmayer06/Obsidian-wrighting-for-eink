@@ -24,11 +24,11 @@ class MarkerWidget extends WidgetType {
   }
 
   toDOM(): HTMLElement {
-    const el = document.createElement("span");
-    el.className = `ink-transcript-marker ink-transcript-${this.kind}`;
-    el.textContent = this.kind === "start" ? "✍ From your handwriting – edits here are kept" : "";
-    el.setAttribute("aria-hidden", "true");
-    return el;
+    return createSpan({
+      cls: `ink-transcript-marker ink-transcript-${this.kind}`,
+      text: this.kind === "start" ? "✍ From your handwriting – edits here are kept" : "",
+      attr: { "aria-hidden": "true" },
+    });
   }
 
   ignoreEvent(): boolean {
