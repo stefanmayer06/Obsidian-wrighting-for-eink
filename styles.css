@@ -68,13 +68,14 @@
   pointer-events: auto;
 }
 
-/* our display rules must not beat the hidden attribute */
+/* our display rules must not beat the hidden attribute: these selectors are
+   more specific than the display rules of the parts that get hidden */
 .ink-stage [hidden],
 .ink-overlay [hidden],
 .ink-popover [hidden],
 .ink-toolbar [hidden],
 .ink-library-panel [hidden] {
-  display: none !important;
+  display: none;
 }
 
 .ink-selection {
@@ -1350,8 +1351,10 @@ canvas.ink-preview-page {
   display: none;
 }
 
-.ink-text-page .metadata-container:not(:has(.metadata-property:not([data-property-key="ink-drawing"]):not([data-property-key="ink-pdf"]))) {
-  display: none;
+/* …and with nothing else in the properties, the whole box goes (the class is set in bookmarks.ts) */
+.ink-text-page.ink-only-ink-properties {
+  --metadata-display-editing: none;
+  --metadata-display-reading: none;
 }
 
 /* keep content clear of the bookmarks on narrow screens */
@@ -1513,7 +1516,7 @@ canvas.ink-preview-page {
 }
 
 .ink-mermaid-modal [hidden] {
-  display: none !important;
+  display: none;
 }
 
 .ink-mermaid-intro {
@@ -1605,7 +1608,7 @@ canvas.ink-preview-page {
 }
 
 .ink-arxiv-modal [hidden] {
-  display: none !important;
+  display: none;
 }
 
 .ink-arxiv-search {
@@ -1814,6 +1817,10 @@ canvas.ink-preview-page {
 /* ---------- E-ink mode --------------------------------------------------- */
 /* Turned on automatically on Boox / e-ink devices (or manually in settings). */
 
+/* Movement smears on e-ink screens, so e-ink mode turns off every animation
+   and shadow – also Obsidian's, a theme's and other plugins'. Most of them do
+   not use the --anim-duration-* or shadow variables, and their selectors are
+   more specific than any one rule here, so only !important reaches them all. */
 body.ink-eink *,
 body.ink-eink *::before,
 body.ink-eink *::after {
@@ -1863,23 +1870,25 @@ body.ink-eink.theme-dark {
   --link-color: #ffffff;
 }
 
-body.ink-eink a,
-body.ink-eink .internal-link,
-body.ink-eink .cm-hmd-internal-link {
-  text-decoration: underline;
-  text-decoration-thickness: 1.5px;
+/* links underlined, a little thicker (Obsidian's link variables: reading view and editor) */
+body.ink-eink {
+  --link-decoration: underline;
+  --link-decoration-hover: underline;
+  --link-external-decoration: underline;
+  --link-external-decoration-hover: underline;
+  --link-decoration-thickness: 1.5px;
 }
 
+/* highlights: a dotted line under the text instead of a grey background */
 body.ink-eink mark,
 body.ink-eink .cm-highlight {
   background: transparent;
   color: inherit;
-  text-decoration: underline dotted 2px;
-  text-underline-offset: 3px;
+  border-bottom: 2px dotted currentColor;
 }
 
 body.ink-eink .cm-cursor {
-  border-left-width: 3px !important;
+  border-left-width: 3px;
 }
 
 body.ink-eink .notice {

@@ -273,6 +273,8 @@ The pure logic (the ink model, file format, pens, erasers, shapes, OCR parsing, 
 - **Payment:** none – Ink Notebook is free.
 - **Account:** none. Handwriting recognition uses your own Azure AI Vision resource (a free Azure account is enough).
 - **Network use:** Ink Notebook works offline. It connects to the internet only for handwriting recognition and, when you use *Papers from arXiv*, to find and download papers: it sends handwriting images to *your* Azure AI Vision resource. *Papers from arXiv* sends your search words to the arXiv API (export.arxiv.org), loads the list of popular papers from Hugging Face (huggingface.co) and downloads the PDF of a paper you import from arxiv.org – only when you open it or search. *Import from a link…* in the object library downloads the library from the link you paste (usually libraries.excalidraw.com); *Find libraries* opens libraries.excalidraw.com in your browser. There is no telemetry and no ads.
+- **Files in your vault:** Ink Notebook reads and writes files only in your vault, through Obsidian. It goes through the list of the vault's files to offer pictures, PDFs, notes and folders when you choose one; to find the ink pages (when a picture or PDF on them is renamed, for **Match up the names of ink and text pages** and for **Convert ink pages made with Excalidraw**); to find the `.excalidrawlib` libraries and the notes in the Mermaid folder of the object library; and to know which arXiv papers you imported before. Nothing of this leaves your device.
+- **Clipboard:** Ink Notebook reads the clipboard only when you tap **Paste** in *Add a Mermaid diagram*. Copy, cut and paste with the lasso on an ink page use its own clipboard, not the system's.
 
 ## License
 

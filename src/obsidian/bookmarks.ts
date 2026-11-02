@@ -1,6 +1,7 @@
 import { Menu, setIcon, type WorkspaceLeaf } from "obsidian";
 import type InkNotebookPlugin from "../main";
 import { DockLayout } from "./dockLayout";
+import { FM_PDF, FM_TEXT_TO_DRAWING } from "./pairs";
 
 /**
  * The bookmark switcher on the text page: two ribbon bookmarks on the right
@@ -17,6 +18,9 @@ interface BookmarkEls {
   badge: HTMLElement;
   layout: DockLayout;
 }
+
+/** The text page's properties that link to its ink page and PDF (the bookmarks show them instead). */
+const INK_PROPERTIES = new Set([FM_TEXT_TO_DRAWING, FM_PDF]);
 
 const STATE_LABEL: Record<string, string> = {
   working: "Transcribing…",
@@ -46,7 +50,7 @@ export class BookmarkManager {
       el.root.remove();
       this.els.delete(leaf);
     }
-    leaf.view?.containerEl?.removeClass("ink-has-bookmarks", "ink-text-page");
+    leaf.view?.containerEl?.removeClass("ink-has-bookmarks", "ink-text-page", "ink-only-ink-properties");
   }
 
   removeAll(): void {
@@ -77,6 +81,9 @@ export class BookmarkManager {
       this.els.set(leaf, els);
     }
     container.addClass("ink-has-bookmarks", "ink-text-page");
+    // with only the links to the ink page in the properties, styles.css hides the properties box
+    const fm = info.pair.text ? this.plugin.app.metadataCache.getFileCache(info.pair.text)?.frontmatter : undefined;
+    container.toggleClass("ink-only-ink-properties", !fm || Object.keys(fm).every((k) => INK_PROPERTIES.has(k)));
     const { root, badge, text } = els;
     const keep = ["is-compact", "is-cramped"].filter((c) => root.hasClass(c));
     root.className = ["ink-bookmarks", `ink-pos-${this.plugin.settings.bookmarkPosition}`, ...keep].join(" ");
