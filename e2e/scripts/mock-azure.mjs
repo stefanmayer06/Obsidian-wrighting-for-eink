@@ -3,14 +3,18 @@
 // lines and words, and labels the lines with texts supplied by the test.
 //
 //   POST /__config  {"responses": [["line 1", "line 2"], [...]], "mode": "ok"|"401"|"500"}
+//                   {"pool": [[...], [...]]}: for each image the texts with as many lines as it has
 //   POST /computervision/imageanalysis:analyze   (Image Analysis 4.0)
 //   POST /vision/v3.2/read/analyze + GET /vision/v3.2/read/analyzeResults/:id
+//   MOCK_DUMP=<dir>: keep every image it is sent there (img1.png, …)
 import http from "http";
 import { PNG } from "pngjs";
+import fs from "fs";
 
 const PORT = Number(process.env.PORT ?? 8765);
 let responses = [];
 let fallbackTexts = null;
+let pool = [];
 let mode = "ok";
 let lastImages = [];
 const results = new Map();
@@ -48,15 +52,27 @@ function analyze(buf) {
     }
     if (count >= 4) comps.push({ x: minX, y: minY, w: maxX - minX + 1, h: maxY - minY + 1 });
   }
-  const hs = comps.map((c) => c.h).sort((a, b) => a - b);
+  // marks much smaller than the rest (i-dots, full stops) join the line they sit on
+  const all = comps.map((c) => Math.max(c.w, c.h)).sort((a, b) => a - b);
+  const medAll = all.length ? all[Math.floor(all.length / 2)] : 0;
+  const isMark = (c) => Math.max(c.w, c.h) < 0.3 * medAll;
+  const hs = comps.filter((c) => !isMark(c)).map((c) => c.h).sort((a, b) => a - b);
   const medH = hs.length ? hs[Math.floor(hs.length / 4)] : 0; // lower quartile: robust to big drawings
-  // big shapes (hand-drawn boxes, circles) are drawings, not text
-  const textComps = comps.filter((c) => !(c.h > 2.5 * medH && c.w > 2.5 * medH));
-  textComps.sort((a, b) => a.y + a.h / 2 - (b.y + b.h / 2));
+  const midH = hs.length ? hs[Math.floor(hs.length / 2)] : 0;
+  // big shapes (hand-drawn boxes, circles) are drawings, not text (a big heading is text)
+  const textComps = comps.filter((c) => !(c.h > 2.5 * medH && c.w > 2.5 * medH && c.h > 3 * midH));
+  textComps.sort((a, b) => isMark(a) - isMark(b) || a.y + a.h / 2 - (b.y + b.h / 2));
   const lines = [];
   for (const c of textComps) {
     const cy = c.y + c.h / 2;
-    const line = lines.find((l) => cy >= l.y && cy <= l.y + l.h);
+    const slack = isMark(c) ? medH * 0.5 : 0;
+    // on the line: its centre is, or it overlaps the line enough (a big word's descenders);
+    // of several such lines the one whose middle is nearest
+    const overlap = (l) => Math.min(l.y + l.h, c.y + c.h) - Math.max(l.y, c.y);
+    const on = (l) =>
+      slack ? cy >= l.y - slack && cy <= l.y + l.h + slack && c.x + c.w >= l.x - medH && c.x <= l.x + l.w + medH : (cy >= l.y && cy <= l.y + l.h) || overlap(l) >= 0.35 * c.h;
+    const dist = (l) => Math.abs(l.y + l.h / 2 - cy);
+    const line = lines.filter(on).sort((a, b) => dist(a) - dist(b))[0];
     if (line) {
       line.comps.push(c);
       const x2 = Math.max(line.x + line.w, c.x + c.w), y2 = Math.max(line.y + line.h, c.y + c.h);
@@ -65,7 +81,20 @@ function analyze(buf) {
     } else lines.push({ x: c.x, y: c.y, w: c.w, h: c.h, comps: [c] });
   }
   lines.sort((a, b) => a.y - b.y || a.x - b.x);
-  for (const l of lines) l.comps.sort((a, b) => a.x - b.x);
+  for (const l of lines) {
+    l.comps.sort((a, b) => a.x - b.x);
+    // words: components close together (a cursive word, its dots and crossings) form one word
+    const gap = 0.3 * medH;
+    l.clusters = [];
+    for (const c of l.comps) {
+      const w = l.clusters[l.clusters.length - 1];
+      if (w && c.x <= w.x + w.w + gap) {
+        const x2 = Math.max(w.x + w.w, c.x + c.w), y2 = Math.max(w.y + w.h, c.y + c.h);
+        w.x = Math.min(w.x, c.x); w.y = Math.min(w.y, c.y);
+        w.w = x2 - w.x; w.h = y2 - w.y;
+      } else l.clusters.push({ ...c });
+    }
+  }
   return { width, height, lines };
 }
 
@@ -76,14 +105,17 @@ const flat = (r) => [r.x, r.y, r.x + r.w, r.y, r.x + r.w, r.y + r.h, r.x, r.y + 
 
 function recognise(buf) {
   const { width, height, lines } = analyze(buf);
-  const texts = responses.length ? responses.shift() : fallbackTexts ?? lines.map((_, i) => `line ${i + 1}`);
-  lastImages.push({ width, height, lines: lines.length, texts });
+  // responses in order; else the texts of the pool with as many lines as the image has
+  const texts = responses.length ? responses.shift() : pool.find((t) => t.length === lines.length) ?? fallbackTexts ?? lines.map((_, i) => `line ${i + 1}`);
+  lastImages.push({ width, height, lines: lines.length, texts, boxes: lines.map((l) => [l.x, l.y, l.w, l.h, l.clusters.length]) });
+  if (process.env.MOCK_DUMP) fs.writeFileSync(`${process.env.MOCK_DUMP}/img${lastImages.length}.png`, buf);
   const out = [];
   lines.forEach((l, i) => {
     const text = texts[i] ?? `extra ${i + 1}`;
     const words = text.split(/\s+/).filter(Boolean);
     let boxes;
     if (words.length === l.comps.length) boxes = l.comps;
+    else if (words.length === l.clusters.length) boxes = l.clusters;
     else {
       const ww = l.w / words.length;
       boxes = words.map((_, k) => ({ x: l.x + k * ww, y: l.y, w: ww * 0.95, h: l.h }));
@@ -112,6 +144,7 @@ const server = http.createServer(async (req, res) => {
     const cfg = JSON.parse(body.toString() || "{}");
     if (cfg.responses) responses = cfg.responses;
     if ("fallback" in cfg) fallbackTexts = cfg.fallback;
+    if ("pool" in cfg) pool = cfg.pool ?? [];
     if (cfg.mode) mode = cfg.mode;
     if (cfg.reset) { lastImages = []; requestCount = 0; }
     return send(200, { ok: true });

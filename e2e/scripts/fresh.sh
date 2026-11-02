@@ -11,7 +11,7 @@ done
 if curl -s -m 1 http://127.0.0.1:9222/json/version >/dev/null 2>&1; then echo "port 9222 still in use"; exit 1; fi
 "$E2E/scripts/setup-vault.sh" >/dev/null
 (cd "$E2E" && nohup node scripts/mock-azure.mjs > "$E2E/mock.log" 2>&1 & echo $! > "$E2E/mock.pid")
-W=1024 H=1300 "$E2E/scripts/launch.sh" >/dev/null
+W=${W:-1024} H=${H:-1300} "$E2E/scripts/launch.sh" >/dev/null
 for i in $(seq 1 40); do curl -s http://127.0.0.1:9222/json/list | grep -q index.html && break; sleep 1; done
 sleep 4
 cd "$E2E" && node scripts/cdp.mjs eval 'await app.plugins.setEnable(true); await new Promise(r=>setTimeout(r,6000)); return Object.keys(app.plugins.plugins)'

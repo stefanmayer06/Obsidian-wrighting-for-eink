@@ -17,17 +17,19 @@ Ink Notebook has its own pen engine. It draws every stroke the moment the pen mo
 
 ## Screenshots
 
-Taken by the automated end-to-end tests in real Obsidian (the "handwriting" is generated test strokes).
+Taken in real Obsidian with this plugin (`e2e/scripts/screenshots.mjs`). The handwriting is generated from a single-stroke script font, and a local stand-in for Azure supplies the recognised words; everything else – the text page's headings, lists, tasks and links, the live figure, the pages, the PDF, the shapes – is the plugin at work. The arXiv list shows real results.
 
-| Ink page | Text page (e-ink mode) |
+| Ink page | Text page |
 | --- | --- |
-| ![Ink page with handwriting, a diagram and a text box](docs/ink-page.png) | ![Text page with the transcript and a live figure](docs/text-page-eink.png) |
-| **Pen options** | **All pages** |
-| ![The pen card: pens, thickness, colours](docs/pen-options.png) | ![Page overview](docs/pages.png) |
+| ![An ink page of meeting notes: a handwritten heading, a list with a highlighted phrase, three hand-drawn checkboxes (one ticked), a handwritten link, a small flow of three boxes and questions in blue ink](docs/ink-page.png) | ![Its text page: the heading, the paragraph with a link, the list, tasks with the ticked one done, the flow as a live figure and the questions as a list](docs/text-page.png) |
+| **Pen options (e-ink mode)** | **All pages** |
+| ![The pen card in e-ink mode: pens, thicknesses, colours, pressure sensitivity and favourite pens](docs/pen-options.png) | ![The page overview: notes on ruled paper, a sketch of app screens on squared paper, interview notes on dotted paper, Cornell notes and a checklist](docs/pages.png) |
+| **Paper templates** | **Annotating a PDF** |
+| ![Changing the paper of a page: blank, ruled, dotted, squared, graph, isometric, Cornell notes, checklist and music staff; spacing, colour and orientation](docs/paper.png) | ![A PDF handout with a highlighted sentence, a circled word, ticks, an underline and handwritten notes in the margin and below the text](docs/pdf.png) |
 | **Papers from arXiv** | **Flowcharts, fills, object libraries** |
-| ![Search arXiv; the most popular papers with an Import button](docs/arxiv.png) | ![A flowchart from the object library: shapes with labels, attached arrows, a filled decision and a hatched box from an Excalidraw library](docs/flowchart.png) |
+| ![Papers from arXiv: the most popular papers, each with its authors, date, abstract and an Import button](docs/arxiv.png) | ![A flowchart from the object library: shapes with typed labels, attached arrows, a filled decision, a hatched box and a handwritten note](docs/flowchart.png) |
 | **Adding a Mermaid diagram** | **A Mermaid diagram on the page** |
-| ![The dialog: Mermaid code taken from a note, shown as ink, with its shapes and arrows counted](docs/mermaid-dialog.png) | ![A Mermaid flowchart placed as ink: subgraphs, coloured shapes with labels, elbow arrows, the Mermaid library next to it](docs/mermaid.png) |
+| ![The dialog: Mermaid code taken from a note, shown as ink, with its shapes and arrows counted](docs/mermaid-dialog.png) | ![A Mermaid flowchart placed as ink: a subgraph, coloured shapes with labels, elbow arrows, the Mermaid library next to it](docs/mermaid.png) |
 
 ## Writing – like in the Boox Notes app
 
