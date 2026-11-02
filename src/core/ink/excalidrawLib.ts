@@ -602,7 +602,7 @@ export function itemsToExcalidraw(items: Pick<Items, "strokes" | "texts">, opts:
   return out;
 }
 
-export const LIBRARY_SOURCE = "https://github.com/stefanmayer06/Obsidian-wrighting-for-eink";
+export const LIBRARY_SOURCE = "https://github.com/stefanmayer06/Obsidian-writing-for-eink";
 
 /**
  * A library file (version 2) with an item added. `existing` is the file's
