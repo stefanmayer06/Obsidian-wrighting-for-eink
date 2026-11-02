@@ -37,5 +37,22 @@ node scripts/e2e.mjs           # run everything (screenshots in e2e/shots)
 node scripts/e2e.mjs pdf       # or a single step (after "setup")
 ```
 
+## Screenshots for the README
+
+`scripts/screenshots.mjs` stages the screenshots of the README (which is also
+the plugin's page in Obsidian's community plugins) in the same setup:
+handwriting traced from a single-stroke script font (`scripts/handwriting.mjs`,
+Hershey "cursive", public domain), recognised by the mock Azure server, and
+real arXiv results fetched with `curl` and served to Obsidian locally.
+
+```bash
+SCALE=2 W=1200 H=1400 ./scripts/fresh.sh   # twice the pixel density
+node scripts/screenshots.mjs                # all scenes → e2e/shots/listing
+node scripts/screenshots.mjs pdf            # or one scene (after "setup")
+```
+
+The images in `docs/` are these, scaled to 1440 × 1920 and reduced to 256
+colours (libimagequant / pngquant).
+
 The pen engine can also be tested without Obsidian, in a plain Chromium page:
 `npm run harness` in the repo root (see `dev/`).
