@@ -141,11 +141,11 @@ You need **Obsidian 1.8.7+** – nothing else.
 
 ### Option A – BRAT (easiest, also on the Boox)
 1. In Obsidian: *Settings → Community plugins → Browse*, install and enable **BRAT**.
-2. *Settings → BRAT → Add beta plugin* and enter `stefanmayer06/Obsidian-wrighting-for-eink`.
+2. *Settings → BRAT → Add beta plugin* and enter `stefanmayer06/Obsidian-writing-for-eink`.
 3. Enable **Ink Notebook** under *Community plugins*.
 
 ### Option B – manual
-1. Download `main.js`, `manifest.json` and `styles.css` from the [latest release](https://github.com/stefanmayer06/Obsidian-wrighting-for-eink/releases).
+1. Download `main.js`, `manifest.json` and `styles.css` from the [latest release](https://github.com/stefanmayer06/Obsidian-writing-for-eink/releases).
 2. Copy them to `<your vault>/.obsidian/plugins/ink-notebook/`.
 3. Restart Obsidian and enable **Ink Notebook**.
 
