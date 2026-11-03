@@ -139,7 +139,7 @@ You need **Obsidian 1.8.7+** – nothing else.
 3. Enable **Ink Notebook** under *Community plugins*.
 
 ### Option B – manual
-1. Download `main.js`, `manifest.json` and `styles.css` from the [latest release](https://github.com/stefanmayer06/Obsidian-writing-for-eink/releases).
+1. Download `main.js`, `manifest.json` and `styles.css` from the [latest release](https://github.com/stefanmayer06/Obsidian-writing-for-eink/releases/latest).
 2. Copy them to `<your vault>/.obsidian/plugins/ink-notebook/`.
 3. Restart Obsidian and enable **Ink Notebook**.
 
@@ -261,6 +261,8 @@ npm run harness   # the pen engine in a plain browser page, driven with real pen
 The pure logic (the ink model, file format, pens, erasers, shapes, OCR parsing, classification, layout, transcript merging, PDF maths) lives in `src/core` and is covered by unit tests; the pen engine and its toolbar (DOM only) are in `src/ink`; the Obsidian integration is in `src/obsidian`.
 
 **Releasing:** run `npm run set-version -- 2.4.0` (it updates `manifest.json`, `package.json`, `package-lock.json` and `versions.json`) and merge it into `main`, then on GitHub create a release with the tag `2.4.0` – just the version, without a "v" – on `main`, or open *Actions → Build & release → Run workflow* on `main`. Releases are made from `main` only: the release job stops if the tagged commit (or the branch it was run on) is not on `main`. The workflow runs the tests, builds and publishes the release with `main.js`, `manifest.json` and `styles.css` – which is what BRAT and manual installs download – each with a build provenance attestation (check one with `gh attestation verify main.js --repo stefanmayer06/Obsidian-writing-for-eink`). It publishes the `manifest.json` of the repository and stops if the tag is not its version, so a release always matches both its tag and the repository.
+
+**Test builds:** to try a branch before it is released, open *Actions → Build & release → Run workflow*, choose the branch and tick *test build*. That publishes the branch as a pre-release tagged `test-build` (each run replaces the previous one) and changes nothing on `main`. To install it, open *Settings → BRAT → Add beta plugin*, enter `stefanmayer06/Obsidian-writing-for-eink` and choose the version `test-build`; to go back, choose the latest release's version the same way (BRAT only replaces `main.js`, `manifest.json` and `styles.css`, so the settings stay). Users of the released plugin do not get it: Obsidian goes by the `manifest.json` on `main`, and BRAT's latest version is ranked by the version in a release's tag – `test-build` has none, so it never counts as newer.
 
 `e2e/` contains end-to-end tests that run the plugin inside the real Obsidian desktop app, write on ink pages with real pen events and use a fake Azure server (see `e2e/README.md`).
 
