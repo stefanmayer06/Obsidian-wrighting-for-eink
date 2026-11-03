@@ -7,19 +7,30 @@ name: Build & release
 # manifest.json). Releases are made only from commits that are on main: a tag
 # on another commit, or "Run workflow" on another branch, fails the release job.
 # The released files get a build provenance attestation (gh attestation verify).
+#
+# Test builds: "Run workflow" on any branch with "test build" ticked publishes
+# that branch as a pre-release tagged test-build (replacing the previous one),
+# for testers who pick that version in BRAT. Nobody else gets it: Obsidian goes
+# by the manifest.json on main, which a test build does not change, and BRAT's
+# "latest" ranks releases by the version in their tag – a tag without digits
+# never ranks above a real version.
 on:
   push:
     branches: ["**"]
-    tags: ["*"]
+    tags: ["*", "!test-build"]
   pull_request:
   workflow_dispatch:
     inputs:
       release:
-        description: "Create a GitHub release for the version in manifest.json"
+        description: "Create a GitHub release for the version in manifest.json (from main only)"
         type: boolean
         default: true
+      test:
+        description: "Instead, publish a test build of this branch for BRAT (pre-release \"test-build\"; users of the released plugin do not get it)"
+        type: boolean
+        default: false
 
-# read-only by default; only the release job may write
+# read-only by default; only the release jobs may write
 permissions:
   contents: read
 
@@ -54,7 +65,7 @@ jobs:
 
   release:
     needs: build
-    if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.release)
+    if: (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')) || (github.event_name == 'workflow_dispatch' && inputs.release && !inputs.test)
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -96,6 +107,43 @@ jobs:
           name: Ink Notebook ${{ steps.version.outputs.version }}
           target_commitish: ${{ github.sha }}
           generate_release_notes: true
+          files: |
+            main.js
+            manifest.json
+            styles.css
+
+  test-build:
+    needs: build
+    if: github.event_name == 'workflow_dispatch' && inputs.test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      # no digits: BRAT reads a version out of a tag, and one without any never counts as newer than a real release
+      TAG: test-build
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: ink-notebook
+
+      - name: Replace the previous test build
+        run: gh release delete "$TAG" --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes || true
+
+      - name: Publish the test build
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: test-build
+          name: Test build of ${{ github.ref_name }} (not a release)
+          target_commitish: ${{ github.sha }}
+          prerelease: true
+          make_latest: false
+          body: |
+            A test build of the branch `${{ github.ref_name }}` (${{ github.sha }}) – not a release, and not for general use.
+
+            Only those who choose it get it: install it with BRAT (*Settings → BRAT → Add beta plugin*, `${{ github.repository }}`, version `test-build`). Users of the released plugin – from Obsidian's community plugins or with BRAT's latest version – stay on the latest release.
+
+            To go back, pick the latest release's version in BRAT the same way. Running the workflow again with "test build" replaces this build.
           files: |
             main.js
             manifest.json
