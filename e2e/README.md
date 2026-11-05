@@ -59,6 +59,6 @@ The pen engine can also be tested without Obsidian, in a plain Chromium page:
 
 ## Promo video
 
-`promo/` records the footage of the promo video in the same setup (the real
-plugin in Obsidian's tablet layout, written on with pen events) and edits it
-into `docs/ink-notebook-promo.mp4` – see `promo/README.md`.
+`promo/` records the footage of the 28.5-second promo video in the same setup
+(the real plugin in Obsidian's tablet layout, written on with pen events) and
+edits it into `docs/ink-notebook-promo.mp4` – see `promo/README.md`.

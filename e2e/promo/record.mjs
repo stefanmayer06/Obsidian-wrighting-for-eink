@@ -1,567 +1,500 @@
 // Footage for the promo video, recorded in a real Obsidian with Ink Notebook.
 //
-//   SCALE=2 W=1000 H=1300 ./scripts/fresh.sh   # Obsidian at twice the pixel density
+//   SCALE=2 W=1000 H=1300 ./scripts/fresh.sh   # Obsidian at twice the pixel density + mock Azure
 //   node promo/record.mjs                       # every scene → e2e/shots/promo/<scene>/
-//   node promo/record.mjs write                 # or one scene (after "setup")
+//   node promo/record.mjs smart,lasso           # or some scenes (after "setup", which always runs)
 //
-// Obsidian runs in its tablet layout (mobile emulation) in a window the size of a
-// Boox Note Air (702 × 936 CSS pixels at 2× = 1404 × 1872, the device's
-// resolution). Scenes are recorded frame by frame at 30 fps in "virtual time":
-// for every frame the pen events of that 1/30 s are sent (real pointer events,
-// pointerType "pen", with pressure), then the window is captured. So the
-// writing has an even pace however fast this machine is. Each scene folder gets
-// numbered PNGs and a manifest.json with, per frame, where the pen is (for the
-// stylus drawn by compose.html) – a frame that does not change is captured once
-// and listed again.
+// Obsidian runs in its tablet layout (mobile emulation) in a window the size of
+// a Boox Note Air (702 × 936 CSS pixels at 2×), with Ink Notebook's e-ink look
+// on. Scenes are recorded frame by frame in virtual time (see rig.mjs): real
+// pen events with pressure, touch events for fingers, keystrokes for typing.
+// Each scene folder gets numbered PNGs and a manifest.json with the pen (and
+// fingers) per frame and named marks the edit (timeline.mjs) refers to.
 //
-// The handwriting is traced from a single-stroke script font (see
-// ../scripts/handwriting.mjs), and the text page is filled in by the mock Azure
-// server (../scripts/mock-azure.mjs) – the same staging as the README screenshots.
-import { chromium } from "playwright-core";
+// The handwriting is traced from a single-stroke script font
+// (../scripts/handwriting.mjs), the text page is filled in by the local stand-in
+// for Azure (../scripts/mock-azure.mjs), and arXiv is a local stand-in serving
+// made-up papers whose PDF is made here – everything else is the plugin.
 import fs from "fs";
+import http from "http";
 import path from "path";
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import { handwriting, handLine } from "../scripts/handwriting.mjs";
+import * as R from "./rig.mjs";
+import { Take, ev, sleep, mapping, write, travel, tapAt, tapEl, centre, swipe, typeText, setSettings, closeModals, closePopovers, waitView, openFile, tidyWorkspace, tool, recognise, remove, newInkPage, addInk, paper, flat, along, ellipse, rect, oval, sid, FPS, VAULT, OUT, MOCK, WIN } from "./rig.mjs";
 
-const E2E = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
-const VAULT = path.join(E2E, "vault");
-const OUT = path.join(E2E, "shots", "promo");
-const MOCK = "http://127.0.0.1:8765";
-const FPS = 30;
-/** The window: a Boox Note Air held upright (CSS pixels). */
-const WIN = { w: 702, h: 936 };
 const only = process.argv[2];
+await R.connect();
+const page = () => R.rig.page;
+const ACTIVE = ".workspace-leaf.mod-active";
 
-const browser = await chromium.connectOverCDP("http://127.0.0.1:9222");
-let page = browser.contexts().flatMap((c) => c.pages()).find((p) => p.url().includes("index.html"));
-let cdp = await page.context().newCDPSession(page);
-const ev = (fn, arg) => page.evaluate(fn, arg);
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const mock = async (cfg) => fetch(`${MOCK}/__config`, { method: "POST", body: JSON.stringify(cfg) });
-
-async function installHelpers() {
-  await ev(() => {
-    window.__t = {
-      sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
-      async waitFor(fn, timeout = 15000, label = "") {
-        const t0 = Date.now();
-        let last;
-        while (Date.now() - t0 < timeout) {
-          try {
-            last = await fn();
-            if (last) return last;
-          } catch (e) {
-            last = e;
-          }
-          await new Promise((r) => setTimeout(r, 100));
-        }
-        throw new Error(`timeout waiting for ${label} (last: ${last})`);
-      },
-      plugin: () => app.plugins.plugins["ink-notebook"],
-      view: () => app.workspace.getMostRecentLeaf()?.view,
-      surface: () => app.workspace.getMostRecentLeaf()?.view?.surface,
-      read: (p) => app.vault.read(app.vault.getAbstractFileByPath(p)),
-      paint: () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))),
-    };
-  });
-}
-
-// ---------------------------------------------------------------- recording
-
-/**
- * One scene's frames. `frame()` captures the window; `hold(n)` repeats the last
- * capture n times. Every frame records the pen: { x, y } in CSS pixels of the
- * window, `down` while it touches the screen, `tap` on the frame of a tap.
- */
-class Take {
-  constructor(name) {
-    this.name = name;
-    this.dir = path.join(OUT, name);
-    fs.rmSync(this.dir, { recursive: true, force: true });
-    fs.mkdirSync(this.dir, { recursive: true });
-    this.frames = [];
-    this.files = 0;
-    this.pen = null;
-    this.marks = {};
-  }
-  async frame(extra = {}) {
-    await ev(() => __t.paint());
-    const { data } = await cdp.send("Page.captureScreenshot", { format: "png" });
-    const file = `${String(++this.files).padStart(4, "0")}.png`;
-    fs.writeFileSync(path.join(this.dir, file), Buffer.from(data, "base64"));
-    this.frames.push({ file, pen: this.pen ? { ...this.pen } : null, ...extra });
-  }
-  hold(n, extra = {}) {
-    const last = this.frames[this.frames.length - 1];
-    for (let i = 0; i < n; i++) this.frames.push({ file: last.file, pen: this.pen ? { ...this.pen } : null, ...extra });
-  }
-  /** Name the current frame (compose.html times captions and cuts by these). */
-  mark(name) {
-    this.marks[name] = this.frames.length;
-  }
-  save(meta = {}) {
-    fs.writeFileSync(path.join(this.dir, "manifest.json"), JSON.stringify({ name: this.name, fps: FPS, width: WIN.w, height: WIN.h, frames: this.frames, marks: this.marks, ...meta }, null, 1));
-    console.log(`  🎞  ${this.name}: ${this.frames.length} frames (${(this.frames.length / FPS).toFixed(1)} s), ${this.files} captures`);
-  }
-}
-
-/** Page coordinates → window coordinates of the open ink page. */
-async function mapping() {
-  return ev(() => {
-    const s = __t.surface();
-    const r = s.el.getBoundingClientRect();
-    return { l: r.left, t: r.top, k: s.view.scale, ox: s.view.ox, oy: s.view.oy };
-  });
-}
-
-const mouse = (type, x, y, extra = {}) => cdp.send("Input.dispatchMouseEvent", { type, x, y, pointerType: "pen", ...extra });
-const ease = (u) => (u < 0.5 ? 2 * u * u : 1 - (-2 * u + 2) ** 2 / 2);
-
-/**
- * Move the pen (lifted) to a window point over `sec` seconds, one frame at a time.
- */
-async function travel(take, to, sec) {
-  const from = take.pen ?? { x: to.x + 120, y: to.y + 160 };
-  const n = Math.max(1, Math.round(sec * FPS));
-  if (n === 1 && Math.hypot(to.x - from.x, to.y - from.y) < 30) {
-    // a short hop (an i-dot, the next letter): the pen is just there
-    take.pen = { x: to.x, y: to.y, down: false };
-    take.hold(1);
-    return;
-  }
-  for (let i = 1; i <= n; i++) {
-    const u = ease(i / n);
-    // a slight arc, like a hand lifting the pen
-    const lift = Math.sin(Math.PI * u) * Math.min(40, Math.hypot(to.x - from.x, to.y - from.y) * 0.15);
-    take.pen = { x: from.x + (to.x - from.x) * u, y: from.y + (to.y - from.y) * u - lift, down: false };
-    await mouse("mouseMoved", take.pen.x, take.pen.y, { buttons: 0, force: 0 });
-    take.hold(1); // the page does not change while the pen moves above it
-  }
-}
-
-/**
- * Write strokes (flat [x, y, pressure, …] arrays in page units) with the pen:
- * `speed` page units per second along the stroke, the pen travelling between
- * strokes. Every frame sends the points of its 1/30 s, then captures.
- */
-async function write(take, strokes, { speed = 600, gap = 0.12, m = null, hold = 0 } = {}) {
-  m = m ?? (await mapping());
-  const at = (x, y) => ({ x: m.l + m.ox + x * m.k, y: m.t + m.oy + y * m.k });
-  for (const flat of strokes) {
-    const pts = [];
-    for (let i = 0; i < flat.length; i += 3) pts.push({ ...at(flat[i], flat[i + 1]), p: flat[i + 2], u: [flat[i], flat[i + 1]] });
-    // the pen travels to the start of the stroke
-    const d = take.pen ? Math.hypot(pts[0].x - take.pen.x, pts[0].y - take.pen.y) : 0;
-    if (take.pen && d > 2) await travel(take, pts[0], Math.min(0.4, gap + d / 1600));
-    // length along the stroke (page units)
-    const len = [0];
-    for (let i = 1; i < pts.length; i++) len.push(len[i - 1] + Math.hypot(pts[i].u[0] - pts[i - 1].u[0], pts[i].u[1] - pts[i - 1].u[1]));
-    const total = len[len.length - 1];
-    const dur = Math.max(1 / FPS, total / speed);
-    await mouse("mouseMoved", pts[0].x, pts[0].y, { buttons: 0, force: 0 });
-    await mouse("mousePressed", pts[0].x, pts[0].y, { button: "left", buttons: 1, clickCount: 1, force: pts[0].p });
-    take.pen = { x: pts[0].x, y: pts[0].y, down: true };
-    let i = 1;
-    const frames = Math.max(1, Math.round(dur * FPS));
-    for (let f = 1; f <= frames; f++) {
-      const reach = total * (f / frames);
-      while (i < pts.length && len[i] <= reach + 1e-6) {
-        await mouse("mouseMoved", pts[i].x, pts[i].y, { button: "left", buttons: 1, force: pts[i].p });
-        take.pen = { x: pts[i].x, y: pts[i].y, down: true };
-        i++;
-      }
-      if (f === frames && hold) await sleep(hold);
-      if (f < frames) await take.frame();
-    }
-    const e = pts[pts.length - 1];
-    await mouse("mouseReleased", e.x, e.y, { button: "left", buttons: 0, clickCount: 1, force: 0 });
-    // the pen touched the screen during this frame; it lifts after it
-    take.pen = { x: e.x, y: e.y, down: true };
-    await take.frame();
-    take.pen = { x: e.x, y: e.y, down: false };
-  }
-}
-
-/** Tap with the pen on a window point (a button), after moving there. */
-async function tapAt(take, x, y, { sec = 0.45, after = null } = {}) {
-  await travel(take, { x, y }, sec);
-  await mouse("mouseMoved", x, y, { buttons: 0, force: 0 });
-  await mouse("mousePressed", x, y, { button: "left", buttons: 1, clickCount: 1, force: 0.5 });
-  take.pen = { x, y, down: true };
-  await take.frame({ tap: true });
-  await mouse("mouseReleased", x, y, { button: "left", buttons: 0, clickCount: 1, force: 0 });
-  take.pen = { x, y, down: false };
-  if (after) await after();
-}
-
-/** The middle of an element (window coordinates). */
-async function centre(selector) {
-  return ev((sel) => {
-    const el = document.querySelector(sel);
-    if (!el) throw new Error(`no ${sel}`);
-    const r = el.getBoundingClientRect();
-    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
-  }, selector);
-}
-
-// ---------------------------------------------------------------- Obsidian
-
-async function setSettings(patch) {
-  await ev(async (patch) => {
-    const p = __t.plugin();
-    Object.assign(p.settings, patch);
-    await p.saveSettings();
-    p.applyInkSettings();
-  }, patch);
-}
-
-async function closeModals() {
-  for (let i = 0; i < 4; i++) {
-    if ((await ev(() => document.querySelectorAll(".modal-container").length)) === 0) return;
-    await ev(() => document.querySelectorAll(".modal-container .modal-close-button").forEach((b) => b.click()));
-    await sleep(250);
-    if ((await ev(() => document.querySelectorAll(".modal-container").length)) > 0) await page.keyboard.press("Escape");
-    await sleep(250);
-  }
-}
-
-async function setWindow(w, h) {
-  await ev(({ w, h }) => {
-    const win = window.require("@electron/remote").getCurrentWindow();
-    win.unmaximize();
-    win.setBounds({ x: 0, y: 0, width: w, height: h });
-  }, { w, h });
-  await sleep(900);
-}
-
-async function waitView(type, file) {
-  return ev(
-    async ({ type, file }) => {
-      await __t.waitFor(() => {
-        const v = __t.view();
-        return v && v.getViewType() === type && (!file || v.file?.path === file) && (type !== "ink-notebook" || v.inkFile);
-      }, 15000, `view ${type} ${file ?? ""}`);
-      await __t.sleep(300);
-      return __t.view().file.path;
-    },
-    { type, file },
-  );
-}
-
-async function openFile(p, type) {
-  await ev(async ({ p, type }) => {
-    const leaf = app.workspace.getLeaf(false);
-    await leaf.setViewState({ type, state: { file: p }, active: true });
-    app.workspace.setActiveLeaf(leaf, { focus: true });
-  }, { p, type });
-  await waitView(type, p);
-}
-
-/** One tab only, sidebars closed, no notices. */
-async function tidyWorkspace() {
-  await ev(() => {
-    const leaves = [];
-    app.workspace.iterateRootLeaves((l) => leaves.push(l));
-    const keep = app.workspace.getMostRecentLeaf();
-    for (const l of leaves) if (l !== keep) l.detach();
-    app.workspace.leftSplit.collapse();
-    app.workspace.rightSplit.collapse();
-    document.querySelectorAll(".notice").forEach((n) => n.remove());
-  });
-}
-
-async function tool(patch) {
-  await ev((patch) => __t.surface().setTools(patch), patch);
-}
-
-async function recognise(...areas) {
-  await ev(() => __t.plugin().ocr.cache.clear());
-  await mock({ reset: true, responses: [], fallback: null, pool: areas });
-}
-
-async function remove(...paths) {
-  await ev(async (paths) => {
-    for (const p of paths) {
-      const f = app.vault.getAbstractFileByPath(p);
-      if (f) await app.vault.delete(f, true);
-    }
-  }, paths);
-  await sleep(300);
-}
-
-async function newInkPage(name) {
-  await setSettings({ askForPageName: true });
-  await ev(() => app.commands.executeCommandById("ink-notebook:new-page"));
-  await ev(async (name) => {
-    const input = await __t.waitFor(() => document.querySelector(".modal.ink-modal input.ink-wide-input"), 5000, "name prompt");
-    input.value = name;
-    input.dispatchEvent(new Event("input", { bubbles: true }));
-    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-  }, name);
-  await setSettings({ askForPageName: false });
-  await waitView("ink-notebook", `Ink/Attachments/${name}.ink.md`);
-  await tidyWorkspace();
-  await sleep(500);
-}
-
-let idn = 0;
-const sid = (p) => `${p}${(++idn).toString(36)}${Math.random().toString(36).slice(2, 6)}`;
-
-/** Put strokes on the open page at once (what was written before the scene). */
-async function addInk(items) {
-  await ev((items) => {
-    const s = __t.surface();
-    const p = s.page;
-    const strokes = items.map((it) => {
-      const o = { id: it.id, pen: it.pen ?? "fountain", color: it.color ?? "#000000", width: it.width ?? 1.8, pts: Float32Array.from(it.pts) };
-      for (const k of ["poly", "closed", "arrow", "dash", "fill", "fillStyle", "from", "to", "elbow"]) if (it[k]) o[k] = it[k];
-      return o;
-    });
-    s.commitPage({ ...p, strokes: [...p.strokes, ...strokes] }, "all");
-  }, items.map((it) => ({ id: sid("s"), ...it })));
-}
-
-const flat = (pts, p = 0.5) => pts.flatMap(([x, y]) => [x, y, p]);
-const rect = (x, y, w, h, extra = {}) => ({ id: sid("r"), pts: flat([[x, y], [x + w, y], [x + w, y + h], [x, y + h]]), poly: true, closed: true, ...extra });
+/** Handwriting as ink items. */
+const hw = (text, x, y, seed, opts = {}) => handwriting(text, { x, y, size: opts.size ?? 2.0, seed, ...opts }).strokes.map((pts) => ({ pts, ...(opts.color ? { color: opts.color } : {}), ...(opts.pen ? { pen: opts.pen } : {}), ...(opts.width ? { width: opts.width } : {}) }));
+/** Handwriting as strokes for the pen to write. */
+const hs = (text, x, y, seed, opts = {}) => handwriting(text, { x, y, size: opts.size ?? 2.0, seed, ...opts }).strokes;
+const hwidth = (text, size, seed) => handwriting(text, { size, seed }).width;
 const handBox = (x, y, s, seed) => ({ pts: handLine([[x, y], [x + s, y + 0.5], [x + s - 0.5, y + s], [x + 0.5, y + s - 0.5], [x, y + 1.5]], { seed, step: 1.5, rounds: 0, wobble: 0.5 }) });
-
-// ---------------------------------------------------------------- scenes
+const tick = (x, y, seed, k = 1) => handLine([[x + 3 * k, y + 11 * k], [x + 13 * k, y + 25 * k], [x + 40 * k, y - 14 * k]], { seed, step: 1.2, rounds: 0 });
 
 const scenes = {};
 
+/** After a tap on "Text": wait for the text page (and its live figures), print it. */
+async function textPage(file) {
+  const t0 = Date.now();
+  while (Date.now() - t0 < 25000) {
+    const v = await ev(() => ({ type: __t.view()?.getViewType(), file: __t.view()?.file?.path }));
+    if (v.type === "markdown" && v.file === file) break;
+    await sleep(250);
+  }
+  const v = await ev(() => ({ type: __t.view()?.getViewType(), file: __t.view()?.file?.path }));
+  if (v.type !== "markdown") {
+    console.log("    (the tap did not flip the page; flipping with the command)", JSON.stringify(v), JSON.stringify(await (await fetch(`${MOCK}/__stats`)).json()).slice(0, 300));
+    await ev(() => app.commands.executeCommandById("ink-notebook:flip-page"));
+  }
+  await waitView("markdown", file);
+  await ev(async () => __t.waitFor(() => document.querySelector(".workspace-leaf.mod-active .ink-figure canvas"), 8000, "figure").catch(() => null));
+  await sleep(1500);
+  console.log((await ev((p) => __t.read(p), file)).replace(/^/gm, "    | "));
+  const stats = await (await fetch(`${MOCK}/__stats`)).json();
+  console.log("    mock saw:", JSON.stringify(stats.lastImages.map((i) => ({ size: [i.width, i.height], lines: i.lines, texts: i.texts, boxes: i.boxes }))));
+}
+
+// ---------------------------------------------------------------- setup
+
 scenes.setup = async () => {
   console.log("▶ setup");
-  const mobile = await ev(() => app.isMobile);
-  if (!mobile) {
+  if (!(await ev(() => app.isMobile))) {
     // the tablet layout of Obsidian (as on a Boox); Obsidian reloads its window
     await ev(() => setTimeout(() => app.emulateMobile(true), 50));
     await sleep(9000);
-    page = browser.contexts().flatMap((c) => c.pages()).find((p) => p.url().includes("index.html"));
-    cdp = await page.context().newCDPSession(page);
+    await R.attach();
   }
-  await installHelpers();
-  await setWindow(WIN.w, WIN.h);
-  await setSettings({ setupDone: true, azureEndpoint: MOCK, azureKey: "test-key", azureApi: "auto", azureDetectedApi: "", einkMode: "on", lowLatency: "off", fit: "width", queue: [], pageLocation: "fixed", folder: "Ink", inkSubfolder: "Attachments", askForPaper: false, askForPageName: false, holdToShape: true, scribbleErase: true, textViewMode: "reading" });
+  await R.installHelpers();
+  await R.setWindow(WIN.w, WIN.h);
+  await setSettings({ setupDone: true, azureEndpoint: MOCK, azureKey: "test-key", azureApi: "auto", azureDetectedApi: "", einkMode: "on", lowLatency: "off", fit: "width", queue: [], pageLocation: "fixed", folder: "Ink", inkSubfolder: "Attachments", askForPaper: false, askForPageName: false, holdToShape: true, scribbleErase: true, textViewMode: "reading", papersFolder: "Papers" });
   await ev(() => {
     app.vault.setConfig("alwaysUpdateLinks", true);
+    // the text page starts with what was written (the name of the note is in the tab and the path)
+    app.vault.setConfig("showInlineTitle", false);
     document.getElementById("ink-promo-css")?.remove();
     const style = document.head.createEl("style", { attr: { id: "ink-promo-css" } });
-    // no notices or status bar in the footage; no text cursor blinking
-    // (and no empty band for the Android status bar at the top: the device frame is drawn around the window)
+    // no notices or status bar in the footage, no blinking text cursor, no band for the Android status bar
     style.textContent = "body { --safe-area-inset-top: 0px !important; --safe-area-inset-bottom: 0px !important; } .notice-container, .status-bar { display: none !important; } * { caret-color: transparent !important; }";
   });
   await closeModals();
   await tidyWorkspace();
-  await mock({ reset: true, mode: "ok", responses: [], fallback: null });
+  await R.mock({ reset: true, mode: "ok", responses: [], fallback: null });
   console.log("  ", await ev(() => ({ mobile: app.isMobile, tablet: document.body.classList.contains("is-tablet"), w: innerWidth, h: innerHeight, dpr: devicePixelRatio })));
 };
+
+// ---------------------------------------------------------------- write + text: the hook
 
 /** Wide ruled paper: lines at y = 140 + 56k, the margin at x = 112. */
 const S = 56;
 const L = (k) => S * 2.5 + S * k;
 const X0 = 138;
-const SIZE = 2.0;
-const hw = (text, x, y, seed, opts = {}) => handwriting(text, { x, y, size: SIZE, seed, ...opts }).strokes;
-const asInk = (strokes, extra = {}) => strokes.map((pts) => ({ pts, ...extra }));
-const paper = (style, color = "white", spacing = "normal") => ({ kind: "paper", paper: { style, spacing, color, orientation: "portrait" } });
+const TRIP = { name: "Lisbon weekend", ink: "Ink/Attachments/Lisbon weekend.ink.md", text: "Ink/Lisbon weekend.md" };
 
-const NOTES = { name: "Garden app", ink: "Ink/Attachments/Garden app.ink.md", text: "Ink/Garden app.md" };
-
-/**
- * Writing: a page of meeting notes; the pen writes the last list item and
- * ticks a task, then taps "Text".
- */
-scenes.write = async () => {
-  console.log("▶ write: handwriting on the ink page");
-  await remove(NOTES.ink, NOTES.text);
+/** The ink page of the trip, as it is before the pen writes the last line. */
+async function tripPage() {
   fs.mkdirSync(path.join(VAULT, "People"), { recursive: true });
-  fs.writeFileSync(path.join(VAULT, "People", "Anna.md"), "# Anna\n\nDesigner of the garden app.\n");
-  await sleep(600);
-  await newInkPage(NOTES.name);
+  fs.writeFileSync(path.join(VAULT, "People", "Mia.md"), "# Mia\n\nTravels light, plans everything.\n");
+  await sleep(500);
+  await newInkPage(TRIP.name);
   await ev((bg) => __t.surface().setBackground(bg), paper("lined", "white", "wide"));
-  await tool({ tool: "pen", pen: "fountain", color: "#000000" });
-
-  // what is on the page already
   const ink = [
-    ...asInk(hw("Kickoff meeting", X0, L(2) - 6, 11, { size: 3.3 })),
-    ...asInk(hw("Met with [[Anna]] and Tom.", X0, L(4) - 4, 21)),
-    ...asInk(hw("- budget: 12k", X0, L(5) - 4, 31)),
+    ...hw("Lisbon trip", X0, L(2) + 4, 101, { size: 4.9 }),
+    ...hw("Trip with [[Mia]] and Leo.", X0, L(4) - 4, 102),
+    ...hw("- Fri: fly out at 8:40", X0, L(6) - 4, 103),
+    ...hw("- Sat: tram 28 to Belem", X0, L(7) - 4, 104),
   ];
   // two tasks: a box drawn in front of the line
-  const boxes = [L(7), L(8)].map((y, i) => handBox(X0 + 2, y - 30, 28, 40 + i));
-  ink.push(...boxes, ...asInk(hw("send the mockups", X0 + 52, L(7) - 4, 41)), ...asInk(hw("book a room", X0 + 52, L(8) - 4, 42)));
-  // a small flow: three boxes with handwritten labels and attached arrows
-  const y0 = L(10) - 10;
-  const flow = [
-    { x: X0, w: 200, label: "Idea" },
-    { x: X0 + 290, w: 220, label: "Sketch" },
-    { x: X0 + 600, w: 200, label: "Beta", fill: "#d3f9d8" },
-  ].map((b) => ({ ...b, id: sid("box") }));
-  const shapes = flow.map((b) => rect(b.x, y0, b.w, 104, { id: b.id, ...(b.fill ? { fill: b.fill } : {}) }));
-  for (const b of flow) {
-    const lw = handwriting(b.label, { size: SIZE * 1.1, seed: b.x }).width;
-    shapes.push(...asInk(hw(b.label, b.x + (b.w - lw) / 2, y0 + 66, b.x, { size: SIZE * 1.1 })));
+  [L(10), L(11)].forEach((y, i) => ink.push(handBox(X0 + 2, y - 30, 28, 110 + i)));
+  ink.push(...hw("book the hotel", X0 + 52, L(10) - 4, 112), ...hw("pack the camera", X0 + 52, L(11) - 4, 113));
+  // a small flow of places: shapes with handwritten names, arrows attached to them
+  const y0 = L(13) - 4;
+  const places = [
+    { x: X0, w: 220, label: "Airport", kind: "oval" },
+    { x: X0 + 300, w: 200, label: "Hotel", kind: "rect" },
+    { x: X0 + 580, w: 210, label: "Belem", kind: "rect", fill: "#ffd8a8" },
+  ].map((b) => ({ ...b, id: sid("place") }));
+  const shapes = places.map((b) => (b.kind === "oval" ? oval(b.x + b.w / 2, y0 + 50, b.w / 2, 50, { id: b.id }) : rect(b.x, y0, b.w, 100, { id: b.id, ...(b.fill ? { fill: b.fill } : {}) })));
+  for (const b of places) {
+    const lw = hwidth(b.label, 2.2, b.x);
+    shapes.push(...hw(b.label, b.x + (b.w - lw) / 2, y0 + 64, b.x, { size: 2.2 }));
   }
-  for (const i of [0, 1]) shapes.push({ pts: flat([[flow[i].x + flow[i].w, y0 + 52], [flow[i + 1].x, y0 + 52]]), poly: true, arrow: true, from: flow[i].id, to: flow[i + 1].id });
+  for (const i of [0, 1]) shapes.push({ pts: flat([[places[i].x + places[i].w, y0 + 50], [places[i + 1].x, y0 + 50]]), poly: true, arrow: true, from: places[i].id, to: places[i + 1].id });
   await addInk([...ink, ...shapes]);
+  await tool({ tool: "pen", pen: "fountain", color: "#000000" });
   await sleep(1200);
+}
 
+scenes.write = async () => {
+  console.log("▶ write: handwriting on the ink page, then Text");
+  await tripPage();
   const take = new Take("write");
   const m = await mapping();
-  const at = (x, y) => ({ x: m.l + m.ox + x * m.k, y: m.t + m.oy + y * m.k });
-  take.pen = { ...at(X0 + 10, L(6) - 40), down: false };
+  take.pen = { ...m.at(X0 + 30, L(8) - 60), down: false };
   await take.frame();
-  take.hold(5);
+  take.hold(4);
   take.mark("writeStart");
-  await write(take, hw("- launch in May", X0, L(6) - 4, 33), { speed: 760, m });
+  await write(take, hs("- Sun: pastries at 9", X0, L(8) - 4, 105), { speed: 820, m });
   take.mark("writeEnd");
-  // tick the second task (a big tick, the way a hand ticks a box)
-  const bx = X0 + 2;
-  const by = L(8) - 30;
-  await write(take, [handLine([[bx + 3, by + 11], [bx + 13, by + 25], [bx + 40, by - 14]], { seed: 9, step: 1.2, rounds: 0 })], { speed: 380, m });
+  // tick the second task, the way a hand ticks a box
+  await write(take, [tick(X0 + 2, L(11) - 30, 9)], { speed: 420, m });
   take.mark("tickEnd");
-  take.hold(6);
-  // flip to the text page
-  await recognise(["Kickoff meeting", "Met with [[Anna]] and Tom.", "- budget: 12k", "- launch in May", "D send the mockups", "D book a room", "Idea Sketch Beta"], ["Beta"], ["Idea", "Sketch", "Beta"]);
-  const btn = await centre(".workspace-leaf.mod-active .ink-tb-text");
+  take.hold(4);
+  await sleep(2500); // the page is saved (a save while the pen taps would swallow the tap)
+  await recognise(
+    ["Lisbon trip", "Trip with [[Mia]] and Leo.", "- Fri: fly out at 8:40", "- Sat: tram 28 to Belem", "- Sun: pastries at 9", "D book the hotel", "D pack the camera", "Airport Hotel Belem"],
+    ["Belem"],
+    ["Airport", "Hotel", "Belem"],
+  );
+  const btn = await centre(`${ACTIVE} .ink-tb-text`);
   take.mark("tapText");
-  await tapAt(take, btn.x, btn.y, { sec: 0.5 });
+  await tapAt(take, btn.x, btn.y, { sec: 0.45 });
   take.hold(2);
   take.save({ button: btn });
 
   // the text page
-  await waitView("markdown", NOTES.text);
-  await ev(async () => __t.waitFor(() => document.querySelector(".workspace-leaf.mod-active .ink-figure canvas"), 10000, "figure").catch(() => null));
-  await sleep(1500);
-  console.log((await ev((p) => __t.read(p), NOTES.text)).replace(/^/gm, "    | "));
-  console.log("    mock saw:", JSON.stringify((await (await fetch(`${MOCK}/__stats`)).json()).lastImages.map((i) => ({ lines: i.lines, texts: i.texts }))));
+  await textPage(TRIP.text);
   const text = new Take("text");
   text.pen = { x: btn.x, y: btn.y, down: false };
   await text.frame();
-  text.hold(FPS * 4);
+  text.hold(FPS * 3);
   text.save();
 };
 
-/** A hand-drawn ellipse (circling a word, a lasso loop). */
-function ellipse(cx, cy, rx, ry, turns = 1.08, start = -2.6) {
-  const pts = [];
-  for (let i = 0; i <= 48 * turns; i++) {
-    const a = start + (i / 48) * Math.PI * 2;
-    pts.push([cx + rx * Math.cos(a) * (1 + 0.03 * Math.sin(i / 5)), cy + ry * Math.sin(a)]);
-  }
-  return pts;
-}
+// ---------------------------------------------------------------- smart pen: hold to snap, scribble to erase
 
-/** Points every few units along a polyline (pressure 0.5). */
-function along(corners, step = 6) {
-  const out = [corners[0]];
-  for (let i = 1; i < corners.length; i++) {
-    const [ax, ay] = corners[i - 1];
-    const [bx, by] = corners[i];
-    const n = Math.max(1, Math.ceil(Math.hypot(bx - ax, by - ay) / step));
-    for (let k = 1; k <= n; k++) out.push([ax + ((bx - ax) * k) / n, ay + ((by - ay) * k) / n]);
-  }
-  return out;
-}
-
-/** Tap a toolbar button (or any element) with the pen. */
-async function tapEl(take, selector, opts = {}) {
-  const c = await centre(selector);
-  await tapAt(take, c.x, c.y, opts);
-  return c;
-}
-
-const MERMAID = `flowchart TD
-    S([Every hour]) --> R[Read the soil sensor]
-    R --> D{Soil dry?}
-    D -- no --> W([Wait])
-    D -- yes --> F{Rain forecast?}
-    F -- yes --> W
-    F -- no --> V
-    subgraph Watering
-        V[Open the valve] --> T[Water for 10 minutes]
-        T --> C[Close the valve]
-    end
-    C --> L[(Garden journal)]
-    L --> W
-
-    classDef sensor fill:#E1F5EE,stroke:#0F6E56,color:#085041
-    classDef water fill:#E7F0FD,stroke:#1565C0,color:#0D3C78
-    class S,R sensor
-    class V,T,C water`;
-
-/**
- * Diagrams: a Mermaid diagram from the object library is placed as ink with a
- * tap; then the lasso moves one of its shapes and the arrows follow.
- */
-scenes.diagram = async () => {
-  console.log("▶ diagram: Mermaid as ink, the lasso moves a shape");
-  fs.rmSync(path.join(VAULT, "Ink libraries", "Mermaid"), { recursive: true, force: true });
-  await remove("Ink/Attachments/Smart garden.ink.md", "Ink/Smart garden.md");
-  fs.mkdirSync(path.join(VAULT, "Projects"), { recursive: true });
-  fs.writeFileSync(path.join(VAULT, "Projects", "Watering logic.md"), "What the controller does every hour:\n\n```mermaid\n" + MERMAID + "\n```\n");
-  await sleep(1200);
-  await openFile("Projects/Watering logic.md", "markdown");
-  await tidyWorkspace();
-  await ev(() => {
-    const ed = app.workspace.activeEditor.editor;
-    ed.setCursor(ed.offsetToPos(ed.getValue().indexOf("subgraph Watering")));
-  });
-  await ev(() => app.commands.executeCommandById("ink-notebook:add-mermaid"));
-  await page.waitForSelector(".ink-mermaid-modal .ink-mermaid-code", { timeout: 5000 });
-  await page.waitForFunction(() => /shapes/.test(document.querySelector(".ink-mermaid-status")?.textContent ?? ""), null, { timeout: 5000 });
-  await page.click(".ink-mermaid-modal button.mod-cta");
-  await sleep(800);
-  await closeModals();
-
-  await newInkPage("Smart garden");
+scenes.smart = async () => {
+  console.log("▶ smart: hold to snap, scribble to erase");
+  await newInkPage("App names");
   await ev((bg) => __t.surface().setBackground(bg), paper("dots"));
-  await ev(() => app.commands.executeCommandById("ink-notebook:object-library"));
-  const panel = ".workspace-leaf.mod-active .ink-library-panel";
-  await page.click(`${panel} .ink-library-source[aria-label='Mermaid']`);
-  await page.waitForSelector(`${panel} .ink-library-tile[aria-label='Watering logic']`, { timeout: 5000 });
+  const words = [
+    { t: "Inkwell", x: 200, y: 470, seed: 201 },
+    { t: "Quill", x: 600, y: 430, seed: 202 },
+    { t: "Papertrail", x: 150, y: 680, seed: 203 },
+    { t: "Notely", x: 610, y: 650, seed: 204 },
+    { t: "Scribe", x: 420, y: 860, seed: 205 },
+  ];
+  await addInk([...hw("App names?", X0, 250, 200, { size: 3.2 }), ...words.flatMap((w) => hw(w.t, w.x, w.y, w.seed, { size: 2.5 }))]);
+  await tool({ tool: "pen", pen: "fountain", color: "#000000" });
   await sleep(800);
+  const take = new Take("smart");
+  const m = await mapping();
+  // a rough loop around "Inkwell": the pen rests at its end and it snaps into a clean ellipse
+  const iw = hwidth("Inkwell", 2.5, 201);
+  const cx = 200 + iw / 2;
+  const cy = 470 - 18;
+  take.pen = { ...m.at(cx - 40, cy + 140), down: false };
+  await take.frame();
+  take.hold(4);
+  take.mark("loop");
+  // lopsided and overshooting, the way a quick hand circles a word
+  const rough = [];
+  for (let i = 0; i <= 52; i++) {
+    const a = Math.PI * 0.9 + (i / 48) * Math.PI * 2;
+    const k = 1 + 0.08 * Math.sin(2 * a + 0.7) + 0.05 * Math.sin(3 * a + 2) + (i > 45 ? 0.016 * (i - 45) : 0);
+    rough.push([cx + (iw / 2 + 46) * k * Math.cos(a), cy + 64 * k * Math.sin(a)]);
+  }
+  const loop = handLine(rough, { seed: 211, step: 2, wobble: 2.2 });
+  await write(take, [loop], { speed: 1100, m, hold: 700, holdFrames: 1 });
+  take.mark("snapped");
+  take.hold(10);
+  // "Notely": scratched out
+  const nw = hwidth("Notely", 2.5, 204);
+  const x0 = 600, x1 = 610 + nw + 10, yT = 650 - 52, yB = 650 + 14;
+  const zig = [];
+  for (let i = 0; i <= 9; i++) {
+    const y = yT + ((yB - yT) * i) / 9;
+    zig.push(i % 2 ? [x0 + 6 * Math.sin(i), y] : [x1 - 6 * Math.cos(i), y]);
+  }
+  take.mark("scribble");
+  await write(take, [flat(along(zig, 5), 0.6)], { speed: 2600, m });
+  take.mark("erased");
+  take.hold(14);
+  take.save();
+};
 
-  const take = new Take("diagram");
-  const tile = await centre(`${panel} .ink-library-tile[aria-label='Watering logic']`);
-  take.pen = { x: tile.x - 60, y: tile.y + 140, down: false };
+// ---------------------------------------------------------------- lasso: select, move, to text
+
+scenes.lasso = async () => {
+  console.log("▶ lasso: select, move, To text");
+  await newInkPage("Launch plan");
+  await ev((bg) => __t.surface().setBackground(bg), paper("grid", "white"));
+  await addInk([
+    ...hw("Launch plan", X0, 230, 301, { size: 3.0 }),
+    ...hw("- polish the onboarding", X0, 340, 302),
+    ...hw("- record the demo video", X0, 400, 303),
+    ...hw("- write the release notes", X0, 460, 304),
+    ...hw("Ship it on Friday!", 190, 700, 305, { size: 2.9, color: "#1565c0" }),
+  ]);
+  await sleep(800);
+  await tool({ tool: "lasso" });
+  await sleep(300);
+  const take = new Take("lasso");
+  const m = await mapping();
+  const sw = hwidth("Ship it on Friday!", 2.9, 305);
+  const cx = 190 + sw / 2;
+  const cy = 700 - 24;
+  take.pen = { ...m.at(cx + 60, cy + 200), down: false };
+  await take.frame();
+  take.hold(4);
+  take.mark("loop");
+  await write(take, [flat(ellipse(cx, cy, sw / 2 + 50, 70, 1.1, Math.PI * 0.85), 0.5)], { speed: 1500, m });
+  await sleep(300);
+  await take.frame();
+  take.mark("selected");
+  take.hold(6);
+  // drag it up, next to the list
+  const dx = 60, dy = -95;
+  take.mark("drag");
+  await write(take, [flat(along([[cx, cy], [cx + dx * 0.5, cy + dy * 0.62], [cx + dx, cy + dy]], 4), 0.5)], { speed: 600, m });
+  await sleep(300);
+  await take.frame();
+  take.mark("moved");
+  take.hold(5);
+  // To text: the mock Azure reads it
+  await recognise(["Ship it on Friday!"]);
+  const btn = await ev(() => {
+    const b = [...document.querySelectorAll(".ink-sel-bar button, .ink-selection-bar button, [class*='ink-sel'] button")].find((x) => /To text/.test(x.getAttribute("aria-label") ?? x.textContent));
+    if (!b) return null;
+    const r = b.getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  });
+  if (!btn) throw new Error("no To text button");
+  take.mark("tapToText");
+  await tapAt(take, btn.x, btn.y, { sec: 0.35 });
+  await ev(async () => __t.waitFor(() => __t.surface().page.texts.some((t) => /Friday/.test(t.text)), 10000, "typed text"));
+  await sleep(400);
+  await take.frame();
+  take.mark("typed");
+  take.hold(14);
+  take.save();
+  await tool({ tool: "pen" });
+};
+
+// ---------------------------------------------------------------- flowchart: library shapes, attached arrows, fill
+
+const PANEL = `${ACTIVE} .ink-library-panel`;
+
+/** Open the object library on one of its sources. */
+async function openLibrary(source) {
+  await ev(() => app.commands.executeCommandById("ink-notebook:object-library"));
+  await page().waitForSelector(PANEL, { timeout: 5000 });
+  await page().click(`${PANEL} .ink-library-source[aria-label='${source}']`);
+  await sleep(500);
+  await unfoldLibrary();
+}
+
+async function unfoldLibrary() {
+  await ev(() => {
+    const p = document.querySelector(".workspace-leaf.mod-active .ink-library-panel");
+    if (p?.classList.contains("is-folded")) p.querySelector(".ink-library-fold").click();
+  });
+  await sleep(300);
+}
+
+/** A tap at a page point without recording it (staging). */
+async function quietTap(x, y) {
+  const m = await mapping();
+  const s = m.at(x, y);
+  const base = { pointerType: "pen", button: "left", buttons: 1 };
+  await R.rig.cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: s.x, y: s.y, pointerType: "pen", buttons: 0, force: 0 });
+  await R.rig.cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", x: s.x, y: s.y, clickCount: 1, force: 0.5, ...base });
+  await R.rig.cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: s.x, y: s.y, clickCount: 1, force: 0, ...base, buttons: 0 });
+  await sleep(150);
+}
+
+/** A drag at page points without recording it (staging: arrows). */
+async function quietDrag(pts) {
+  const m = await mapping();
+  const base = { pointerType: "pen", button: "left", buttons: 1 };
+  const s0 = m.at(...pts[0]);
+  await R.rig.cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: s0.x, y: s0.y, pointerType: "pen", buttons: 0, force: 0 });
+  await R.rig.cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", x: s0.x, y: s0.y, clickCount: 1, force: 0.5, ...base });
+  for (const p of pts.slice(1)) await R.rig.cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", ...m.at(...p), force: 0.5, ...base });
+  const e = m.at(...pts[pts.length - 1]);
+  await R.rig.cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: e.x, y: e.y, clickCount: 1, force: 0, ...base, buttons: 0 });
+  await sleep(150);
+}
+
+/** A label typed into a shape with the Text tool (staging). */
+async function label(x, y, text) {
+  await tool({ tool: "text" });
+  await quietTap(x, y);
+  await sleep(200);
+  await page().keyboard.type(text);
+  await page().keyboard.press("Escape");
+  await sleep(150);
+}
+
+scenes.flow = async () => {
+  console.log("▶ flow: flowchart shapes from the library, attached arrows, fill, move");
+  await newInkPage("Release flow");
+  await ev((bg) => __t.surface().setBackground(bg), paper("dots"));
+  await openLibrary("Flowchart");
+  const place = async (tile, x, y) => {
+    await page().click(`${PANEL} .ink-library-tile[aria-label='${tile}']`);
+    await quietTap(x, y);
+    await unfoldLibrary();
+  };
+  const cx = 250;
+  await place("Start / end", cx, 200);
+  await place("Process", cx, 400);
+  await place("Decision", cx, 630);
+  await place("Start / end", cx, 880);
+  await ev(() => document.querySelector(".workspace-leaf.mod-active .ink-library-panel .ink-library-close")?.click());
+  await tool({ tool: "shape", shape: "arrow" });
+  for (const [a, b] of [[200, 400], [400, 630], [630, 880]]) await quietDrag(along([[cx, a], [cx, b]], 8));
+  await label(cx, 200, "Idea");
+  await label(cx, 400, "Build it");
+  await label(cx, 630, "Tests pass?");
+  await label(cx, 880, "Ship it");
+  await label(cx + 16, 755, "yes");
+  await tool({ tool: "pen" });
+  await sleep(500);
+  // the library is open next to the page when the take starts
+  await openLibrary("Flowchart");
+  await sleep(600);
+
+  await ev(() => document.querySelector(".workspace-leaf.mod-active .ink-library-panel .ink-library-tile[aria-label='Database']")?.scrollIntoView({ block: "center" }));
+  await sleep(400);
+  const take = new Take("flow");
+  const m = await mapping();
+  const tile = await centre(`${PANEL} .ink-library-tile[aria-label='Database']`);
+  take.pen = { x: tile.x - 70, y: tile.y + 150, down: false };
   await take.frame();
   take.hold(4);
   take.mark("tapTile");
-  await tapAt(take, tile.x, tile.y, { sec: 0.4 });
-  await take.frame();
-  take.hold(3);
-  // the panel folds away while placing: tap the page where the diagram goes
-  const m = await mapping();
-  const vis = await ev(() => {
-    const s = __t.surface();
-    const r = s.el.getBoundingClientRect();
-    const p = document.querySelector(".workspace-leaf.mod-active .ink-library-panel");
-    const pr = p && !p.hidden ? p.getBoundingClientRect() : null;
-    return { l: r.left, r: r.right, t: r.top, b: r.bottom, panel: pr ? { l: pr.left, t: pr.top, b: pr.bottom, folded: p.classList.contains("is-folded") } : null };
-  });
-  console.log("   visible:", JSON.stringify(vis));
-  const place = { x: 500, y: 640 };
-  const sp = { x: m.l + m.ox + place.x * m.k, y: m.t + m.oy + place.y * m.k };
-  take.mark("place");
-  await tapAt(take, sp.x, sp.y, { sec: 0.45 });
-  await sleep(600);
-  await take.frame();
-  take.mark("placed");
-  take.hold(10);
-  // close the library (choosing a tool stops placing)
-  await tapEl(take, `${panel} .ink-library-close`, { sec: 0.4 });
+  await tapAt(take, tile.x, tile.y, { sec: 0.35 });
   await sleep(300);
   await take.frame();
-  take.hold(3);
-  await tapEl(take, ".workspace-leaf.mod-active .ink-tool-lasso", { sec: 0.4 });
+  // the library folds away while placing: tap the page
+  const db = { x: 640, y: 880 };
+  take.mark("place");
+  const sp = m.at(db.x, db.y);
+  await tapAt(take, sp.x, sp.y, { sec: 0.4 });
+  await sleep(400);
+  await take.frame();
+  take.mark("placed");
+  take.hold(4);
+  // an arrow from "Ship it" to the database: it attaches to both
+  await ev(() => document.querySelector(".workspace-leaf.mod-active .ink-library-panel .ink-library-close")?.click());
+  await tool({ tool: "shape", shape: "arrow" });
   await sleep(200);
   await take.frame();
+  take.mark("arrow");
+  await write(take, [flat(along([[cx + 60, 880], [db.x - 40, 880]], 6), 0.5)], { speed: 900, m });
+  await sleep(300);
+  await take.frame();
+  take.mark("arrowEnd");
+  take.hold(3);
+  // fill the decision: blue, hatched
+  await tool({ tool: "fill", fillColor: "#1565c0", fillStyle: "hatch" });
+  await sleep(200);
+  take.mark("fill");
+  const dp = m.at(cx - 40, 655);
+  await tapAt(take, dp.x, dp.y, { sec: 0.35 });
+  await sleep(300);
+  await take.frame();
+  take.mark("filled");
+  take.hold(3);
+  // the lasso moves "Build it": its arrows follow
+  await tool({ tool: "lasso" });
+  await sleep(200);
+  take.mark("lasso");
+  await write(take, [flat(ellipse(cx, 400, 150, 72, 1.1, Math.PI * 0.9), 0.5)], { speed: 1800, m });
+  await sleep(300);
+  await take.frame();
+  take.mark("drag");
+  await write(take, [flat(along([[cx, 400], [cx + 120, 410], [cx + 250, 420]], 4), 0.5)], { speed: 700, m });
+  await sleep(300);
+  await take.frame();
+  take.mark("moved");
+  take.hold(4);
+  await quietTap(900, 1100);
+  await sleep(200);
+  await take.frame();
+  take.hold(10);
+  take.save();
+  await tool({ tool: "pen" });
+};
+
+// ---------------------------------------------------------------- Mermaid → ink
+
+const COFFEE = `flowchart TD
+  A([Alarm rings]) --> B{Snooze?}
+  B -- yes --> A
+  B -- no --> C[Make coffee]
+  C --> D{Beans left?}
+  D -- no --> E[Buy beans]
+  D -- yes --> F[Brew a cup]
+  E --> F
+  F --> G([Start the day])
+  classDef warm fill:#FFE8CC,stroke:#C2410C,color:#7C2D12
+  class C,F warm`;
+
+scenes.mermaid = async () => {
+  console.log("▶ mermaid: type Mermaid, get ink");
+  fs.rmSync(path.join(VAULT, "Ink libraries", "Mermaid"), { recursive: true, force: true });
+  await sleep(500);
+  await newInkPage("Mornings");
+  await ev((bg) => __t.surface().setBackground(bg), paper("blank"));
+  await ev(() => app.commands.executeCommandById("ink-notebook:add-mermaid"));
+  await page().waitForSelector(".ink-mermaid-modal .ink-mermaid-code", { timeout: 5000 });
+  await ev(() => {
+    const ta = document.querySelector(".ink-mermaid-modal .ink-mermaid-code");
+    ta.value = "";
+    ta.dispatchEvent(new Event("input", { bubbles: true }));
+    ta.focus();
+  });
+  await sleep(500);
+  const take = new Take("mermaid");
+  take.pen = { x: 560, y: 760, down: false };
+  await take.frame();
+  take.hold(3);
+  take.mark("type");
+  // typed (or pasted): the preview draws the diagram as ink while it grows
+  const lines = COFFEE.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    await typeText(take, lines[i] + (i < lines.length - 1 ? "\n" : ""), { perFrame: 7 });
+    await sleep(120);
+    await take.frame();
+  }
+  await page().waitForFunction(() => /shapes/.test(document.querySelector(".ink-mermaid-status")?.textContent ?? ""), null, { timeout: 5000 });
+  await sleep(500);
+  await take.frame();
+  take.mark("typed");
+  take.hold(8);
+  console.log("   ", await ev(() => document.querySelector(".ink-mermaid-status").textContent));
+  // the dialog has grown with the preview: bring its buttons into view
+  await ev(() => document.querySelector(".ink-mermaid-modal button.mod-cta").scrollIntoView({ block: "end" }));
+  await sleep(300);
+  await take.frame();
   take.hold(2);
-  // where is "Soil dry?" (page units)
+  take.mark("add");
+  await tapEl(take, ".ink-mermaid-modal button.mod-cta", { sec: 0.4 });
+  await ev(async () => __t.waitFor(() => !document.querySelector(".ink-mermaid-modal") && __t.surface()?.tools.tool === "stamp", 8000, "placing the diagram").catch(() => null));
+  console.log("    placing:", JSON.stringify(await ev(() => ({ tool: __t.surface()?.tools.tool, modal: !!document.querySelector(".ink-mermaid-modal"), panel: !!document.querySelector(".workspace-leaf.mod-active .ink-library-panel") }))));
+  await sleep(400);
+  await take.frame();
+  take.hold(2);
+  // ready to be placed: a tap on the page
+  const m = await mapping();
+  const at = m.at(470, 560);
+  take.mark("place");
+  await tapAt(take, at.x, at.y, { sec: 0.4 });
+  await sleep(700);
+  await take.frame();
+  take.mark("placed");
+  take.hold(6);
+  // the lasso moves one of its shapes: the curved arrows follow
+  await tool({ tool: "lasso" });
   const box = await ev(() => {
     const p = __t.surface().page;
-    const t = p.texts.find((t) => /Soil dry/.test(t.text));
+    const t = p.texts.find((t) => /Buy beans/.test(t.text));
     const st = p.strokes.find((s) => s.id === t.container);
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
     for (let i = 0; i < st.pts.length; i += 3) {
@@ -570,165 +503,413 @@ scenes.diagram = async () => {
     }
     return { x0, y0, x1, y1 };
   });
-  console.log("   soil dry:", JSON.stringify(box));
-  const cx = (box.x0 + box.x1) / 2;
-  const cy = (box.y0 + box.y1) / 2;
-  // a lasso loop around it
+  const bx = (box.x0 + box.x1) / 2;
+  const by = (box.y0 + box.y1) / 2;
   take.mark("lasso");
-  const loop = ellipse(cx, cy, (box.x1 - box.x0) / 2 + 26, (box.y1 - box.y0) / 2 + 22, 1.12, Math.PI * 0.95);
-  await write(take, [flat(loop)], { speed: 900, m });
+  await write(take, [flat(ellipse(bx, by, (box.x1 - box.x0) / 2 + 24, (box.y1 - box.y0) / 2 + 22, 1.12, Math.PI * 0.95), 0.5)], { speed: 1500, m });
   await sleep(300);
   await take.frame();
-  take.hold(8);
-  // drag it to the left: the arrows follow
   take.mark("drag");
-  const dx = -170;
-  const drag = along([[cx, cy], [cx + dx * 0.5, cy + 8], [cx + dx, cy + 4]], 4);
-  await write(take, [flat(drag, 0.5)], { speed: 260, m });
+  await write(take, [flat(along([[bx, by], [bx - 90, by + 10], [bx - 170, by + 30]], 4), 0.5)], { speed: 600, m });
   await sleep(300);
   await take.frame();
-  take.mark("dropped");
-  take.hold(10);
-  // tap beside it: the selection goes away
-  await tapAt(take, m.l + m.ox + 130 * m.k, m.t + m.oy + 980 * m.k, { sec: 0.4 });
+  take.mark("moved");
+  take.hold(8);
+  await quietTap(80, 1100);
   await sleep(200);
   await take.frame();
-  take.hold(12);
+  take.hold(8);
   take.save();
   await tool({ tool: "pen" });
 };
 
-/** A PDF handout: the highlighter, a circle and a note in the margin. */
-scenes.pdf = async () => {
-  console.log("▶ pdf: annotate a PDF");
-  await remove("Ink/Attachments/Companion planting (annotated).ink.md", "Ink/Companion planting (annotated).md", "Docs/Companion planting.pdf");
+// ---------------------------------------------------------------- a hand-drawn table → a Markdown table
+
+const COFFEE_LOG = { name: "Coffee log", ink: "Ink/Attachments/Coffee log.ink.md", text: "Ink/Coffee log.md" };
+
+scenes.table = async () => {
+  console.log("▶ table: a hand-drawn table becomes a Markdown table");
+  await newInkPage(COFFEE_LOG.name);
+  await ev((bg) => __t.surface().setBackground(bg), paper("dots"));
+  const cols = [X0, 410, 720];
+  const rows = [400, 500, 590, 680];
+  const cells = [
+    ["Bean", "Origin", "Score"],
+    ["Gesha", "Panama", "9"],
+    ["Huila", "Colombia", "8"],
+    ["Sidamo", "Ethiopia", "10"],
+  ];
+  const ink = [...hw("Coffee log", X0, 270, 401, { size: 4.3 })];
+  cells.forEach((r, i) => r.forEach((c, j) => {
+    if (i === 3 && j === 2) return; // written by the pen in the take
+    ink.push(...hw(c, cols[j] + 14, rows[i], 410 + i * 3 + j, { size: 2.2 }));
+  }));
+  // the rule under the header and the lines between the columns, drawn by hand
+  ink.push({ pts: handLine([[X0 - 10, 432], [880, 434]], { seed: 430, step: 3, wobble: 0.8 }), width: 2 });
+  ink.push({ pts: handLine([[cols[1] - 14, 340], [cols[1] - 13, 712]], { seed: 431, step: 3, wobble: 0.8 }), width: 2 });
+  ink.push({ pts: handLine([[cols[2] - 14, 340], [cols[2] - 15, 712]], { seed: 432, step: 3, wobble: 0.8 }), width: 2 });
+  ink.push(...hw("- V60, 15 g to 250 ml", X0, 830, 440, { size: 2.2 }), ...hw("- next: try a Kenya!", X0, 900, 441, { size: 2.2, color: "#1565c0" }));
+  await addInk(ink);
+  await tool({ tool: "pen", pen: "fountain", color: "#000000" });
+  await sleep(800);
+  const take = new Take("table");
+  const m = await mapping();
+  take.pen = { ...m.at(cols[2] + 60, rows[3] - 80), down: false };
+  await take.frame();
+  take.hold(3);
+  take.mark("write");
+  // "1" and "0" close together, so that they read as one word
+  await write(take, [...hs("1", cols[2] + 14, rows[3], 419, { size: 2.2 }), ...hs("0", cols[2] + 36, rows[3], 420, { size: 2.2 })], { speed: 700, m });
+  take.mark("written");
+  take.hold(3);
+  await sleep(2500);
+  await recognise(["Coffee log", "Bean Origin Score", "Gesha Panama 9", "Huila Colombia 8", "Sidamo Ethiopia 10", "- V60, 15 g to 250 ml", "- next: try a Kenya!"]);
+  const btn = await centre(`${ACTIVE} .ink-tb-text`);
+  take.mark("tapText");
+  await tapAt(take, btn.x, btn.y, { sec: 0.45 });
+  take.hold(2);
+  take.save({ button: btn });
+  await textPage(COFFEE_LOG.text);
+  const text = new Take("tabletext");
+  text.pen = { x: btn.x, y: btn.y, down: false };
+  await text.frame();
+  text.hold(FPS * 2);
+  text.save();
+};
+
+// ---------------------------------------------------------------- arXiv, then marking up the paper
+
+const PAPERS_URL = "http://127.0.0.1:8769";
+const PAPER = {
+  id: "2610.04127",
+  title: "Pens Beat Keyboards: Handwriting and Long-Term Recall",
+  authors: ["Maya Okafor", "Lukas Brandt", "Sora Ito"],
+  summary:
+    "Students who take notes by hand remember more than those who type – but why? We followed 412 students through a semester and found that handwritten notes were shorter, more selective and better organised. One week after a lecture, students who wrote by hand recalled 34% more key ideas. The advantage held when notes were written on a tablet, which suggests that the act of writing, not the paper, drives the effect.",
+};
+const OTHER_PAPERS = [
+  { id: "2610.03311", title: "Sketch2Flow: Turning Whiteboard Photos into Editable Flowcharts", authors: ["Priya Raman", "Tomás Vidal", "Ines Moreau"], summary: "We present a model that reads photos of hand-drawn diagrams and returns editable shapes, labels and connectors. On a new benchmark of 9,000 whiteboard photos it recovers 91% of the connections, enough to edit most diagrams without redrawing them." },
+  { id: "2610.02958", title: "Paper-Like Displays at 60 Hz: Fast Refresh for Colour E-Ink", authors: ["Hannah Weiss", "Kenji Mori"], summary: "Colour e-paper is pleasant to read but slow to update. A new driving scheme cuts the latency of partial updates to 16 ms while keeping ghosting below the threshold of perception, making writing with a stylus feel immediate." },
+  { id: "2610.01874", title: "Tiny Experts: Sparse Language Models That Run on a Tablet", authors: ["Omar Haddad", "Julia Novak", "Chen Wei"], summary: "Mixtures of very small experts reach the quality of dense models eight times their size while using a fraction of the memory, so that a capable assistant fits on an e-reader." },
+  { id: "2610.00592", title: "Forgetting Curves in the Age of Search", authors: ["Elif Sahin", "Marco Rossi"], summary: "Why remember what you can look up? A year-long diary study of how people decide what to keep in their heads, in their notes and in a search box." },
+];
+
+/** The paper's PDF: a first page as a preprint looks (made up, made here). */
+async function paperPdf() {
   const doc = await PDFDocument.create();
-  const regular = await doc.embedFont(StandardFonts.TimesRoman);
-  const bold = await doc.embedFont(StandardFonts.HelveticaBold);
-  const italic = await doc.embedFont(StandardFonts.HelveticaOblique);
-  const pg = doc.addPage([595, 842]);
-  const X = 56;
-  const COL = 380;
+  const serif = await doc.embedFont(StandardFonts.TimesRoman);
+  const serifBold = await doc.embedFont(StandardFonts.TimesRomanBold);
+  const serifItalic = await doc.embedFont(StandardFonts.TimesRomanItalic);
   const lines = [];
-  let y = 770;
-  const text = (t, font, size, opts = {}) => {
-    pg.drawText(t, { x: opts.x ?? X, y, size, font, color: opts.color ?? rgb(0.1, 0.1, 0.1) });
-    lines.push({ t, x: opts.x ?? X, y, size, font });
+  const W = 595, H = 842, X = 72, COL = 451;
+  const pg = doc.addPage([W, H]);
+  let y = 760;
+  const centred = (t, font, size, color = rgb(0.08, 0.08, 0.08)) => {
+    const w = font.widthOfTextAtSize(t, size);
+    pg.drawText(t, { x: (W - w) / 2, y, size, font, color });
+    lines.push({ t, x: (W - w) / 2, y, size, font });
   };
-  const para = (t, size = 11.5, lead = 16.5) => {
+  const para = (t, { size = 10.5, lead = 14.2, font = serif, x = X, width = COL } = {}) => {
     let cur = "";
+    const flush = () => {
+      pg.drawText(cur, { x, y, size, font, color: rgb(0.1, 0.1, 0.1) });
+      lines.push({ t: cur, x, y, size, font });
+      y -= lead;
+    };
     for (const w of t.split(" ")) {
       const next = cur ? `${cur} ${w}` : w;
-      if (regular.widthOfTextAtSize(next, size) > COL) {
-        text(cur, regular, size);
-        y -= lead;
+      if (font.widthOfTextAtSize(next, size) > width) {
+        flush();
         cur = w;
       } else cur = next;
     }
-    if (cur) text(cur, regular, size);
-    y -= lead + 8;
+    if (cur) flush();
+    y -= 6;
   };
-  text("Companion planting", bold, 26);
-  y -= 22;
-  text("A short guide for balcony gardens", italic, 12.5, { color: rgb(0.35, 0.35, 0.35) });
-  y -= 34;
-  para("Some plants grow better side by side. They keep pests away from each other, share the light and use the soil in different ways. On a balcony, where every pot counts, the right neighbours make a real difference.");
-  para("Basil planted next to tomatoes keeps whiteflies away and is said to improve their flavour. Marigolds protect almost anything from aphids, and their roots keep nematodes out of the soil.");
-  y -= 4;
-  text("Good neighbours", bold, 15);
-  y -= 26;
-  const rows = [
-    ["Plant", "Grows well with", "Keep away from"],
-    ["Tomato", "basil, carrots", "fennel"],
-    ["Beans", "carrots, cucumber", "onions, garlic"],
-    ["Lettuce", "radish, chives", "celery"],
-    ["Cucumber", "beans, dill", "sage"],
-  ];
-  const cols = [X, X + 95, X + 240];
-  rows.forEach((r, i) => {
-    r.forEach((c, j) => {
-      pg.drawText(c, { x: cols[j], y, size: 11.5, font: i === 0 ? bold : regular, color: rgb(0.1, 0.1, 0.1) });
-      lines.push({ t: c, x: cols[j], y, size: 11.5, font: i === 0 ? bold : regular });
-    });
-    if (i === 0) pg.drawLine({ start: { x: X, y: y - 5 }, end: { x: X + COL, y: y - 5 }, thickness: 0.8, color: rgb(0.5, 0.5, 0.5) });
-    y -= 21;
-  });
+  const heading = (t) => {
+    pg.drawText(t, { x: X, y, size: 12, font: serifBold, color: rgb(0.06, 0.06, 0.06) });
+    lines.push({ t, x: X, y, size: 12, font: serifBold });
+    y -= 19;
+  };
+  pg.drawText("arXiv:2610.04127v1  [cs.HC]  29 Oct 2026", { x: 22, y: 300, size: 11, font: serif, color: rgb(0.55, 0.55, 0.55), rotate: { type: "degrees", angle: 90 } });
+  centred("Pens Beat Keyboards:", serifBold, 19);
+  y -= 24;
+  centred("Handwriting and Long-Term Recall", serifBold, 19);
+  y -= 30;
+  centred("Maya Okafor     Lukas Brandt     Sora Ito", serif, 12);
+  y -= 16;
+  centred("Northfield University, Department of Learning Sciences", serifItalic, 10.5, rgb(0.3, 0.3, 0.3));
+  y -= 36;
+  centred("Abstract", serifBold, 11.5);
   y -= 18;
-  text("Why it works", bold, 15);
-  y -= 26;
-  para("Strong scents confuse insects looking for their favourite plant. Deep roots and shallow roots do not compete for water, and tall plants give shade to those that prefer it.");
-  para("Start small: one pot of basil between two tomatoes is enough to see the difference in a single summer.");
-  pg.drawText("Balcony gardening · 3", { x: X, y: 40, size: 9, font: italic, color: rgb(0.5, 0.5, 0.5) });
-  fs.mkdirSync(path.join(VAULT, "Docs"), { recursive: true });
-  fs.writeFileSync(path.join(VAULT, "Docs", "Companion planting.pdf"), await doc.save());
-  await sleep(1500);
+  para(PAPER.summary, { size: 10, lead: 13.6, x: X + 30, width: COL - 60 });
+  y -= 10;
+  heading("1   Introduction");
+  para("Laptops and tablets have replaced paper in many lecture halls. Typing is fast, so students capture more of what is said – yet several studies found that they remember less of it. A common explanation is that typing invites verbatim transcription, while writing by hand is slow enough to force a summary.");
+  para("We test this explanation in a semester-long field study with three groups: students who typed, students who wrote on paper and students who wrote with a stylus on an e-ink tablet.");
+  y -= 4;
+  heading("2   Results");
+  para("Figure 1 shows recall one week after each lecture. Both handwriting groups outperformed the typing group; the difference between paper and tablet was small and not significant.");
+  // Figure 1: a small bar chart
+  const fy = y - 120;
+  const bars = [["Typed", 0.48], ["Paper", 0.66], ["Tablet", 0.64]];
+  pg.drawLine({ start: { x: X + 80, y: fy }, end: { x: X + 380, y: fy }, thickness: 0.8, color: rgb(0.2, 0.2, 0.2) });
+  pg.drawLine({ start: { x: X + 80, y: fy }, end: { x: X + 80, y: fy + 112 }, thickness: 0.8, color: rgb(0.2, 0.2, 0.2) });
+  bars.forEach(([name, v], i) => {
+    const bx = X + 115 + i * 92;
+    pg.drawRectangle({ x: bx, y: fy, width: 50, height: v * 150, color: i === 0 ? rgb(0.72, 0.72, 0.72) : rgb(0.25, 0.25, 0.25) });
+    const w = serif.widthOfTextAtSize(name, 9.5);
+    pg.drawText(name, { x: bx + 25 - w / 2, y: fy - 13, size: 9.5, font: serif, color: rgb(0.15, 0.15, 0.15) });
+    lines.push({ t: name, x: bx + 25 - w / 2, y: fy - 13, size: 9.5, font: serif });
+  });
+  y = fy - 32;
+  centred("Figure 1: Key ideas recalled after one week (share of all ideas).", serifItalic, 9.5, rgb(0.25, 0.25, 0.25));
+  pg.drawText("1", { x: W / 2 - 3, y: 40, size: 10, font: serif, color: rgb(0.3, 0.3, 0.3) });
+  return { bytes: await doc.save(), lines };
+}
 
-  await ev(() => app.commands.executeCommandById("ink-notebook:annotate-pdf"));
-  await page.waitForSelector(".prompt-input", { timeout: 5000 });
-  await page.fill(".prompt-input", "Companion planting.pdf");
-  await page.keyboard.press("Enter");
-  await waitView("ink-notebook", "Ink/Attachments/Companion planting (annotated).ink.md");
-  await tidyWorkspace();
-  await ev(async () => __t.waitFor(() => __t.plugin().images.pdfPage("Docs/Companion planting.pdf", 1, 100), 8000, "pdf page").catch(() => null));
-  await tool({ tool: "pen", pen: "fountain", color: "#000000" });
-  await sleep(1500);
+/** A local stand-in for arXiv and Hugging Face Papers: made-up papers, our PDF. */
+async function papersServer(pdfBytes) {
+  const all = [PAPER, ...OTHER_PAPERS];
+  const server = http.createServer((req, res) => {
+    const url = new URL(req.url, PAPERS_URL);
+    if (url.pathname === "/daily_papers") {
+      const p = Number(url.searchParams.get("p") ?? 0);
+      const items = p > 0 ? [] : all.map((x, i) => ({ paper: { id: x.id, title: x.title, summary: x.summary, authors: x.authors.map((name) => ({ name })), publishedAt: `2026-10-${29 - i}T00:00:00.000Z`, upvotes: 412 - i * 57 } }));
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify(items));
+    } else if (url.pathname.startsWith("/pdf/")) {
+      res.writeHead(200, { "content-type": "application/pdf" });
+      res.end(Buffer.from(pdfBytes));
+    } else if (url.pathname === "/api/query") {
+      res.writeHead(200, { "content-type": "application/atom+xml" });
+      res.end(`<?xml version='1.0' encoding='UTF-8'?><feed xmlns="http://www.w3.org/2005/Atom" xmlns:opensearch="http://a9.com/-/spec/opensearch/1.1/"><opensearch:totalResults>0</opensearch:totalResults></feed>`);
+    } else {
+      res.writeHead(404);
+      res.end("not found");
+    }
+  });
+  await new Promise((r) => server.listen(8769, "127.0.0.1", r));
+  return server;
+}
+
+const PAPER_NAME = "Pens Beat Keyboards - Handwriting and Long-Term Recall";
+
+scenes.arxiv = async () => {
+  console.log("▶ arxiv: the most popular papers, Import, then marking it up");
+  await remove(`Papers/Attachments/${PAPER_NAME}.ink.md`, `Papers/Attachments/${PAPER_NAME}.pdf`, `Papers/${PAPER_NAME}.md`);
+  const { bytes, lines } = await paperPdf();
+  const server = await papersServer(bytes);
+  try {
+    await ev((base) => Object.assign(__t.plugin().papers.endpoints, { arxivApi: `${base}/api/query`, arxivSite: base, popular: `${base}/daily_papers` }), PAPERS_URL);
+    // start from the trip notes (any page will do)
+    await openFile(TRIP.ink, "ink-notebook");
+    await tidyWorkspace();
+    await ev(() => app.commands.executeCommandById("ink-notebook:import-arxiv"));
+    await ev(async () => __t.waitFor(() => document.querySelectorAll(".ink-arxiv-card").length >= 4 && !document.querySelector(".ink-arxiv-status span"), 20000, "papers"));
+    await ev(() => document.activeElement?.blur());
+    await sleep(800);
+    const take = new Take("arxiv");
+    const imp = await centre(".ink-arxiv-card:nth-of-type(1) .ink-arxiv-import");
+    take.pen = { x: imp.x - 150, y: imp.y + 300, down: false };
+    await take.frame();
+    take.hold(10);
+    take.mark("tapImport");
+    await tapAt(take, imp.x, imp.y, { sec: 0.7 });
+    await waitView("ink-notebook", `Papers/Attachments/${PAPER_NAME}.ink.md`);
+    await tidyWorkspace();
+    await ev(async (name) => __t.waitFor(() => __t.plugin().images.pdfPage(`Papers/Attachments/${name}.pdf`, 1, 100), 10000, "pdf page").catch(() => null), PAPER_NAME);
+    await tool({ tool: "pen", pen: "fountain", color: "#000000" });
+    await sleep(1500);
+    await take.frame();
+    take.mark("opened");
+    take.hold(24);
+    take.save();
+    await markUp(lines);
+  } finally {
+    server.close();
+  }
+};
+
+/** The paper on its ink page: highlight, circle, a note in the margin, then the export menu. */
+async function markUp(lines) {
   const k = await ev(() => __t.surface().page.w / 595);
   const P = (x, y) => [x * k, (842 - y) * k];
   const span = (phrase) => {
     const l = lines.find((l) => l.t.includes(phrase));
+    if (!l) throw new Error(`no line with "${phrase}" in:\n${lines.map((x) => x.t).join("\n")}`);
     const x0 = l.x + l.font.widthOfTextAtSize(l.t.slice(0, l.t.indexOf(phrase)), l.size);
-    const x1 = x0 + l.font.widthOfTextAtSize(phrase, l.size);
-    return { x0, x1, y: l.y, size: l.size };
+    return { x0, x1: x0 + l.font.widthOfTextAtSize(phrase, l.size), y: l.y, size: l.size };
   };
-
   const take = new Take("pdf");
   const m = await mapping();
-  const toScreen = (x, y) => ({ x: m.l + m.ox + x * m.k, y: m.t + m.oy + y * m.k });
-  const h1 = span("Basil planted next to tomatoes keeps whiteflies away");
-  const [hx0, hy] = P(h1.x0 - 1, h1.y + 3.5);
+  const h1 = span("students who wrote by hand recalled 34% more");
+  const [hx0, hy] = P(h1.x0 - 1, h1.y + 3.2);
   const [hx1] = P(h1.x1 + 1, h1.y);
-  take.pen = { ...toScreen(hx0 + 60, hy + 120), down: false };
+  take.pen = { ...m.at(hx0 + 80, hy + 140), down: false };
   await take.frame();
-  take.hold(4);
+  take.hold(3);
   // the highlighter
   take.mark("marker");
-  await tapEl(take, ".workspace-leaf.mod-active .ink-tool-marker", { sec: 0.4 });
+  await tapEl(take, `${ACTIVE} .ink-tool-marker`, { sec: 0.4 });
   await take.frame();
-  await write(take, [handLine([[hx0, hy], [hx1, hy - 1]], { seed: 401, wobble: 0.5 })], { speed: 1300, m });
+  await write(take, [handLine([[hx0, hy], [hx1, hy - 1]], { seed: 501, wobble: 0.5 })], { speed: 1300, m });
   take.mark("markerEnd");
-  take.hold(3);
-  // back to the pen, in red: circle "fennel", a note in the margin
-  await tapEl(take, ".workspace-leaf.mod-active .ink-tool-pen", { sec: 0.35 });
-  await tool({ tool: "pen", pen: "fountain", color: "#c62828" });
+  take.hold(2);
+  // the pen, in red: circle "34%", a note in the margin with an arrow
+  await tapEl(take, `${ACTIVE} .ink-tool-pen`, { sec: 0.35 });
+  await tool({ tool: "pen", pen: "fountain", color: "#d32f2f" });
   await take.frame();
-  const f = span("fennel");
-  const [fx0, fy] = P(f.x0, f.y + 4);
+  const f = span("34%");
+  const [fx0, fy] = P(f.x0, f.y + 3.5);
   const [fx1] = P(f.x1, f.y);
   take.mark("circle");
-  await write(take, [handLine(ellipse((fx0 + fx1) / 2, fy, (fx1 - fx0) / 2 + 14, 19), { seed: 406, step: 1.5 })], { speed: 900, m });
+  await write(take, [handLine(ellipse((fx0 + fx1) / 2, fy, (fx1 - fx0) / 2 + 13, 17), { seed: 506, step: 1.5 })], { speed: 900, m });
   take.hold(2);
   take.mark("note");
-  const noteX = 455 * k;
-  await write(take, hw("try this!", noteX, hy + 60, 402, { size: 1.9 }), { speed: 800, m });
-  const hl = lines.find((l) => l.t.includes("Basil planted"));
-  const lineEnd = P(hl.x + hl.font.widthOfTextAtSize(hl.t, hl.size), hl.y)[0];
-  // an arrow from the note to the sentence
-  const [ax, ay] = [noteX - 6, hy + 36];
-  const [bx, by] = [lineEnd + 10, hy - 2];
-  const a = Math.atan2(by - ay, bx - ax);
-  const head = (da) => [bx - 18 * Math.cos(a + da), by - 18 * Math.sin(a + da)];
-  await write(take, [handLine([[ax, ay], [(ax + bx) / 2 + 6, (ay + by) / 2 + 6], [bx, by]], { seed: 405, step: 1.5 }), handLine([head(0.5), [bx, by], head(-0.5)], { seed: 406, step: 1.2, rounds: 0 })], { speed: 900, m });
+  // the right margin of the abstract
+  const noteX = P(500, 0)[0];
+  await write(take, hs("wow!", noteX + 10, fy + 70, 502, { size: 2.3 }), { speed: 800, m });
+  const a0 = [noteX + 20, fy + 40];
+  const a1 = [fx1 + 22, fy + 6];
+  const ang = Math.atan2(a1[1] - a0[1], a1[0] - a0[0]);
+  const head = (da) => [a1[0] - 16 * Math.cos(ang + da), a1[1] - 16 * Math.sin(ang + da)];
+  await write(take, [handLine([a0, [(a0[0] + a1[0]) / 2 + 4, (a0[1] + a1[1]) / 2 + 8], a1], { seed: 505, step: 1.5 }), handLine([head(0.5), a1, head(-0.5)], { seed: 507, step: 1.2, rounds: 0 })], { speed: 900, m });
+  // underline the conclusion in blue
+  await tool({ tool: "pen", pen: "fountain", color: "#1565c0" });
+  const u = span("writing, not the paper, drives the effect.");
+  const [ux0, uy] = P(u.x0, u.y - 2.5);
+  const [ux1] = P(u.x1, u.y);
+  take.mark("underline");
+  await write(take, [handLine([[ux0, uy], [ux1, uy + 1]], { seed: 508 })], { speed: 900, m });
   take.mark("noteEnd");
   take.hold(4);
-  await travel(take, { x: take.pen.x + 40, y: take.pen.y + 120 }, 0.5);
+  await sleep(1500);
+  // More → Export: the annotated PDF, with the ink as vectors
+  take.mark("more");
+  await tapEl(take, `${ACTIVE} .ink-tb-more`, { sec: 0.4 });
+  await sleep(500);
+  await ev(() => {
+    const items = [...document.querySelectorAll(".ink-pop-menu *")];
+    const ex = items.find((e) => /^Export$/.test(e.textContent?.trim() ?? ""));
+    ex?.scrollIntoView({ block: "start" });
+  });
+  await sleep(300);
+  await take.frame();
+  take.mark("menu");
+  take.hold(4);
+  const ann = await ev(() => {
+    const b = [...document.querySelectorAll(".ink-pop-menu button")].find((x) => /Annotated PDF/.test(x.textContent));
+    if (!b) return null;
+    const r = b.getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  });
+  if (ann) {
+    await travel(take, ann, 0.4);
+    take.hold(8);
+  }
+  take.save();
+  await closePopovers();
+}
+
+// ---------------------------------------------------------------- pens
+
+scenes.pens = async () => {
+  console.log("▶ pens: the pen card, five pens, ten colours");
+  await newInkPage("Pens");
+  await ev((bg) => __t.surface().setBackground(bg), paper("lined", "white", "wide"));
+  const y = (k) => L(k) - 4;
+  await addInk([
+    ...hw("Fountain pen", X0, y(2), 601, { size: 2.4 }),
+    ...hw("Ballpoint", X0, y(4), 602, { size: 2.4, pen: "ballpoint", color: "#1565c0", width: 1.5 }),
+    ...hw("Pencil", X0, y(6), 603, { size: 2.4, pen: "pencil", color: "#4d4d4d", width: 2.1 }),
+    ...hw("Brush pen", X0, y(8), 604, { size: 2.4, pen: "brush", color: "#d32f2f", width: 4 }),
+  ]);
+  await tool({ tool: "pen", pen: "fountain", color: "#000000" });
+  await sleep(800);
+  const take = new Take("pens");
+  const m = await mapping();
+  const penBtn = await centre(`${ACTIVE} .ink-tool-pen`);
+  take.pen = { x: penBtn.x + 90, y: penBtn.y + 200, down: false };
+  await take.frame();
+  take.hold(3);
+  take.mark("open");
+  await tapAt(take, penBtn.x, penBtn.y, { sec: 0.35 });
+  await page().waitForSelector(".ink-pop-pen", { timeout: 3000 });
+  await sleep(300);
+  await take.frame();
+  take.mark("card");
+  take.hold(3);
+  await tapEl(take, ".ink-pop-pen .ink-tile[aria-label='Calligraphy']", { sec: 0.3 });
+  await sleep(250);
+  await take.frame();
+  take.hold(2);
+  await tapEl(take, ".ink-pop-pen button[aria-label='Purple']", { sec: 0.3 });
+  await sleep(250);
+  await take.frame();
+  take.mark("picked");
+  take.hold(4);
+  await closePopovers();
+  // the pen moves on to the page (and the swatch's tooltip goes)
+  await travel(take, m.at(X0 - 10, y(10) - 50), 0.25);
+  await sleep(300);
+  await take.frame();
+  take.mark("closed");
+  take.mark("write");
+  await write(take, hs("Calligraphy", X0, y(10), 605, { size: 2.6 }), { speed: 700, m });
+  take.mark("written");
   take.hold(10);
+  take.save();
+  await tool({ tool: "pen", pen: "fountain", color: "#000000" });
+};
+
+// ---------------------------------------------------------------- paper templates
+
+scenes.paper = async () => {
+  console.log("▶ paper: nine paper templates, the writing stays");
+  await newInkPage("Any paper");
+  await ev((bg) => __t.surface().setBackground(bg), paper("lined"));
+  await addInk([
+    ...hw("Same notes,", X0 + 30, 300, 701, { size: 3.0 }),
+    ...hw("any paper.", X0 + 30, 400, 702, { size: 3.0 }),
+    ...hw("- ruled, dotted, squared", X0 + 30, 560, 703, { size: 2.0 }),
+    ...hw("- Cornell, checklist, music", X0 + 30, 630, 704, { size: 2.0 }),
+    { pts: handLine(ellipse(700, 860, 110, 70, 1.05), { seed: 705, step: 2 }), color: "#1565c0" },
+    ...hw("yes!", 652, 878, 706, { size: 2.4, color: "#1565c0" }),
+  ]);
+  await sleep(600);
+  // the picker
+  await ev(() => void __t.view().changePaper());
+  await page().waitForSelector(".modal.ink-paper-picker", { timeout: 5000 });
+  await sleep(700);
+  const pick = new Take("picker");
+  pick.pen = { x: 430, y: 720, down: false };
+  await pick.frame();
+  pick.hold(3);
+  for (const style of ["dots", "grid", "cornell"]) {
+    await tapEl(pick, `.modal.ink-paper-picker .ink-paper-card[data-style="${style}"]`, { sec: 0.3 });
+    await sleep(300);
+    await pick.frame();
+    pick.hold(5);
+  }
+  pick.save();
+  await closeModals();
+  // the page itself, on every paper
+  const take = new Take("paper");
+  for (const [style, color, spacing] of [["lined", "white", "normal"], ["dots", "white", "normal"], ["grid", "ivory", "normal"], ["graph", "white", "normal"], ["isometric", "white", "normal"], ["cornell", "white", "normal"], ["checklist", "yellow", "normal"], ["music", "white", "normal"], ["blank", "blue", "normal"], ["lined", "ivory", "wide"]]) {
+    await ev((bg) => __t.surface().setBackground(bg), paper(style, color, spacing));
+    await sleep(300);
+    take.mark(style + (take.marks[style] !== undefined ? "2" : ""));
+    await take.frame();
+  }
   take.save();
 };
 
-/** The notebook's pages: different paper, and the page overview. */
+// ---------------------------------------------------------------- pages: a notebook
+
 scenes.pages = async () => {
-  console.log("▶ pages: overview and paper");
-  await openFile(NOTES.ink, "ink-notebook");
+  console.log("▶ pages: swipe to the next page, all pages");
+  await openFile(TRIP.ink, "ink-notebook");
   await tidyWorkspace();
   await ev(() => {
     const s = __t.surface();
@@ -743,123 +924,233 @@ scenes.pages = async () => {
     }, bg);
     await sleep(300);
   };
-  const H = (text, x, y, seed, opts = {}) => asInk(hw(text, x, y, seed, { size: 1.4, ...opts }), opts.color ? { color: opts.color } : {});
-  const roundRect = (x, y, w, h, r) => {
-    const pts = [];
-    const arc = (cx, cy, a0) => {
-      for (let i = 0; i <= 6; i++) {
-        const a = a0 + (i / 6) * (Math.PI / 2);
-        pts.push([cx + r * Math.cos(a), cy + r * Math.sin(a)]);
-      }
-    };
-    arc(x + w - r, y + r, -Math.PI / 2);
-    arc(x + w - r, y + h - r, 0);
-    arc(x + r, y + h - r, Math.PI / 2);
-    arc(x + r, y + r, Math.PI);
-    pts.push([x + w - r, y + 0.5]);
-    return pts;
-  };
-  // 2: squared paper, a sketch of the app's screens
-  await newPage(paper("grid", "ivory"));
-  const sketch = [...H("Screens", 80, 150, 61, { size: 2.3 })];
-  ["Home", "Plant", "Settings"].forEach((name, i) => {
-    const x = 70 + i * 300;
-    const y = 230;
-    sketch.push({ pts: handLine(roundRect(x, y, 240, 470, 30), { seed: 70 + i, step: 2 }) });
-    sketch.push({ pts: handLine([[x + 16, y + 70], [x + 224, y + 71]], { seed: 80 + i }) });
-    sketch.push(...H(name, x + 22, y + 52, 90 + i, { size: 1.05 }));
-    if (i === 0) {
-      for (let r = 0; r < 4; r++) {
-        const ry = y + 110 + r * 80;
-        sketch.push({ pts: handLine(ellipse(x + 50, ry + 20, 20, 20, 1.02), { seed: 100 + r, step: 1.5 }) });
-        sketch.push({ pts: handLine([[x + 86, ry + 12], [x + 210, ry + 12]], { seed: 110 + r }) });
-        sketch.push({ pts: handLine([[x + 86, ry + 32], [x + 170, ry + 33]], { seed: 120 + r }) });
-      }
-    } else if (i === 1) {
-      sketch.push({ pts: handLine(ellipse(x + 120, y + 190, 80, 80, 1.02), { seed: 130, step: 2 }) });
-      sketch.push(...H("photo", x + 84, y + 196, 131, { size: 1.05 }));
-      for (let r = 0; r < 3; r++) sketch.push({ pts: handLine([[x + 30, y + 320 + r * 36], [x + 210 - r * 30, y + 321 + r * 36]], { seed: 140 + r }) });
-      sketch.push({ pts: handLine(roundRect(x + 40, y + 410, 160, 40, 18), { seed: 150, step: 2 }) });
-      sketch.push(...H("Water", x + 82, y + 438, 151, { size: 1.0 }));
-    } else {
-      for (let r = 0; r < 4; r++) {
-        const ry = y + 110 + r * 80;
-        sketch.push({ pts: handLine([[x + 24, ry + 22], [x + 130, ry + 22]], { seed: 160 + r }) });
-        sketch.push({ pts: handLine(roundRect(x + 150, ry + 6, 66, 32, 16), { seed: 170 + r, step: 1.5 }) });
-        sketch.push({ pts: handLine(ellipse(x + (r % 2 ? 166 : 200), ry + 22, 12, 12, 1.02), { seed: 180 + r, step: 1.2 }) });
-      }
-    }
-    sketch.push(...H(name, x + 70, y + 530, 190 + i));
-  });
-  sketch.push(...H("tap a plant", 600, 820, 210, { color: "#c62828" }));
-  await addInk(sketch);
-  // 3: dotted paper, interview notes
-  await newPage(paper("dots"));
-  const notes = [...H("User interviews", 70, 160, 220, { size: 2.3 })];
-  ["Maria - balcony garden, forgets to water", "Jonas - wants reminders on his watch", "Lea - likes the plant photos", "Sam - has 40 plants (!)"].forEach((t, i) => notes.push(...H(t, 70, 270 + i * 60, 230 + i)));
-  notes.push(...H("-> reminders first!", 70, 560, 240, { color: "#c62828" }));
-  await addInk(notes);
-  // 4: Cornell notes
-  await newPage(paper("cornell"));
-  const LN = (k) => 110 + 44 * k;
-  const corn = [...H("Sensors", 30, LN(2), 250, { color: "#1565c0" }), ...H("Battery", 30, LN(6), 251, { color: "#1565c0" })];
-  [[2, "soil moisture and light"], [3, "one per pot, about 8 each"], [4, "Bluetooth, no hub needed"], [6, "two AA cells, 6 months"], [7, "warn when it gets low"]].forEach(([k, t], i) => corn.push(...H(t, 300, LN(k), 260 + i)));
-  corn.push(...H("One sensor per pot is enough.", 40, 1200, 270));
-  await addInk(corn);
-  // 5: a checklist
+  const H = (text, x, y, seed, opts = {}) => hw(text, x, y, seed, { size: 1.9, ...opts });
+  // 2: a packing checklist
   await newPage(paper("checklist"));
-  const list = [...H("Launch checklist", 70, LN(0) - 8, 280, { size: 2.1 })];
-  ["app store texts", "screenshots", "privacy policy", "beta feedback"].forEach((t, i) => list.push(...H(t, 72, LN(i + 2) - 10, 290 + i)));
-  list.push({ pts: handLine([[37, LN(2) - 30], [44, LN(2) - 22], [58, LN(2) - 44]], { seed: 300, step: 1.2, rounds: 0 }), width: 2.2 });
-  await addInk(list);
-  // 6: music staff
+  const LN = (k) => 110 + 44 * k;
+  const pack = [...H("Packing list", 70, LN(0) - 6, 801, { size: 2.6 })];
+  ["passport", "camera + charger", "sunscreen", "comfy shoes", "tram card"].forEach((t, i) => pack.push(...H(t, 72, LN(i + 2) - 10, 802 + i)));
+  for (const i of [0, 1, 3]) pack.push({ pts: handLine([[37, LN(i + 2) - 30], [44, LN(i + 2) - 22], [58, LN(i + 2) - 44]], { seed: 810 + i, step: 1.2, rounds: 0 }), width: 2.2 });
+  await addInk(pack);
+  // 3: a map, sketched on dotted paper
+  await newPage(paper("dots", "ivory"));
+  const map = [...H("Day 2", 80, 160, 820, { size: 2.6 })];
+  map.push({ pts: handLine([[60, 700], [220, 640], [380, 690], [560, 620], [760, 660], [940, 600]], { seed: 821, step: 3 }), color: "#1565c0", width: 3 });
+  map.push(...H("river Tejo", 600, 740, 822, { color: "#1565c0" }));
+  for (const [x, yy, name, seed] of [[200, 420, "Alfama", 823], [470, 330, "Baixa", 824], [760, 470, "Belem", 825]]) {
+    map.push({ pts: handLine(ellipse(x, yy, 16, 16, 1.02), { seed, step: 1.2 }), color: "#d32f2f", width: 3 });
+    map.push(...H(name, x + 28, yy + 8, seed + 10));
+  }
+  map.push({ pts: handLine([[216, 420], [454, 336]], { seed: 830, step: 2 }), dash: true });
+  map.push({ pts: handLine([[486, 336], [744, 466]], { seed: 831, step: 2 }), dash: true });
+  await addInk(map);
+  // 4: phrases on Cornell paper
+  await newPage(paper("cornell"));
+  const corn = [...H("Phrases", 30, LN(2), 840, { color: "#1565c0" })];
+  [[2, "obrigado - thank you"], [3, "bom dia - good morning"], [4, "a conta - the bill"], [6, "uma bica - an espresso"]].forEach(([k, t], i) => corn.push(...H(t, 300, LN(k), 841 + i)));
+  await addInk(corn);
+  // 5: a budget on squared paper
+  await newPage(paper("grid"));
+  const budget = [...H("Budget", 70, 170, 850, { size: 2.6 })];
+  [["flights", "180"], ["hotel", "240"], ["food", "120"], ["trams", "20"]].forEach(([a, b], i) => {
+    budget.push(...H(a, 90, 280 + i * 70, 851 + i), ...H(b, 520, 280 + i * 70, 860 + i));
+  });
+  budget.push({ pts: handLine([[80, 560], [640, 562]], { seed: 870 }), width: 2 });
+  budget.push(...H("560", 520, 630, 871, { size: 2.3, color: "#d32f2f" }));
+  await addInk(budget);
+  // 6: a tune heard in Alfama, on music paper
   await newPage(paper("music"));
+  const tune = [...H("Fado in Alfama", 70, 150, 880, { size: 2.3 })];
+  await addInk(tune);
   await ev(() => __t.surface().goTo(0));
   await sleep(800);
 
   const take = new Take("pages");
-  const label = await centre(".workspace-leaf.mod-active .ink-tb-pagelabel");
-  take.pen = { x: label.x - 80, y: label.y + 260, down: false };
+  const r = await ev(() => {
+    const b = __t.surface().el.getBoundingClientRect();
+    return { l: b.left, t: b.top, w: b.width, h: b.height };
+  });
+  take.pen = null;
   await take.frame();
   take.hold(3);
+  // a finger swipes to the next page
+  take.mark("swipe");
+  await swipe(take, { x: r.l + r.w * 0.78, y: r.t + r.h * 0.55 }, { x: r.l + r.w * 0.22, y: r.t + r.h * 0.52 }, 0.3);
+  await sleep(500);
+  await take.frame();
+  take.mark("turned");
+  take.hold(6);
+  // tap the page number: all pages
+  const label = await centre(`${ACTIVE} .ink-tb-pagelabel`);
+  take.pen = { x: label.x - 60, y: label.y + 260, down: false };
   take.mark("tapPages");
-  await tapAt(take, label.x, label.y, { sec: 0.4 });
-  await page.waitForSelector(".modal.ink-pages-modal .ink-page-canvas", { timeout: 5000 });
+  await tapAt(take, label.x, label.y, { sec: 0.35 });
+  await page().waitForSelector(".modal.ink-pages-modal .ink-page-canvas", { timeout: 5000 });
   await sleep(1500);
-  await travel(take, { x: label.x - 200, y: label.y + 420 }, 0.5);
+  await travel(take, { x: label.x - 220, y: label.y + 420 }, 0.4);
   await take.frame();
   take.mark("overview");
   take.hold(FPS * 2);
   take.save();
   await closeModals();
+};
 
-  // the paper picker
-  const pick = new Take("paper");
-  await ev(() => void __t.view().changePaper());
-  await page.waitForSelector(".modal.ink-paper-picker", { timeout: 5000 });
-  await sleep(800);
-  pick.pen = { x: 420, y: 700, down: false };
-  await pick.frame();
-  pick.hold(6);
-  for (const style of ["dots", "grid", "cornell"]) {
-    await tapEl(pick, `.modal.ink-paper-picker .ink-paper-card[data-style="${style}"]`, { sec: 0.35 });
-    await sleep(300);
-    await pick.frame();
-    pick.hold(8);
+// ---------------------------------------------------------------- stills for the feature wall
+
+/** One frame of what is on the screen now. */
+async function still(name) {
+  const t = new Take(`still-${name}`);
+  await t.frame();
+  t.save();
+}
+
+scenes.stills = async () => {
+  console.log("▶ stills: erasers, menus, typed notes, daily notes, files, embeds, libraries, setup");
+  // the eraser card
+  await openFile(TRIP.ink, "ink-notebook");
+  await tidyWorkspace();
+  await ev(() => __t.surface().goTo(0));
+  // a tap chooses the eraser, a second tap opens its card
+  await page().click(`${ACTIVE} .ink-tool-eraser`);
+  await sleep(700);
+  if (!(await ev(() => !!document.querySelector(".ink-popover")))) await page().click(`${ACTIVE} .ink-tool-eraser`);
+  await page().waitForSelector(".ink-popover", { timeout: 3000 }).catch(() => console.log("    (no eraser card)"));
+  await sleep(400);
+  await still("eraser");
+  await closePopovers();
+  await tool({ tool: "pen" });
+  // the Insert items (in the More menu at this width)
+  await page().click(`${ACTIVE} .ink-tb-more`);
+  await sleep(500);
+  await still("more");
+  await closePopovers();
+  // typed notes: typed on the text page, shown next to the ink
+  const text = await ev((p) => __t.read(p), TRIP.text);
+  if (!/Typed on the train/.test(text)) {
+    await ev(async (p) => {
+      const f = app.vault.getAbstractFileByPath(p);
+      await app.vault.process(f, (t) => t.trimEnd() + "\n\n## Typed on the train\n- Ask Mia about the **fado bar**\n- Restaurant: *Taberna da Rua*\n- [ ] Book the tram tour\n");
+    }, TRIP.text);
+    await sleep(800);
   }
-  pick.save();
+  await ev(() => __t.view().toggleNotes());
+  await sleep(1200);
+  await still("notes");
+  await ev(() => __t.view().toggleNotes());
+  await sleep(300);
+  // the files: two Markdown files per page
+  await ev(() => app.commands.executeCommandById("file-explorer:reveal-active-file"));
+  await sleep(1500);
+  await ev(async () => {
+    const v = app.workspace.getLeavesOfType("file-explorer")[0]?.view;
+    // (the drawer's tree is drawn when it is sorted)
+    v?.requestSort?.();
+    await __t.sleep(600);
+    for (const [p, open] of [["Ink", true], ["Ink/Attachments", true], ["Papers", false], ["People", false], ["Ink libraries", false]]) v?.fileItems?.[p]?.setCollapsed?.(!open);
+  });
+  await sleep(1000);
+  console.log("    files:", await ev(() => document.querySelectorAll(".nav-file-title, .tree-item-self").length));
+  await still("files");
+  await ev(() => app.workspace.leftSplit.collapse());
+  await sleep(400);
+  // an ink page embedded in a note
+  fs.writeFileSync(path.join(VAULT, "Trips.md"), "# Trips\n\nThe Lisbon notebook:\n\n![[Lisbon weekend.ink]]\n");
+  await sleep(800);
+  await openFile("Trips.md", "markdown");
+  await ev(async () => {
+    const leaf = app.workspace.getMostRecentLeaf();
+    await leaf.setViewState({ type: "markdown", state: { file: "Trips.md", mode: "preview" } });
+  });
+  await sleep(2500);
+  await still("embed");
+  // an Excalidraw library in the object library
+  await excalidrawLibrary();
+  await openFile(TRIP.ink, "ink-notebook");
+  await ev(() => app.commands.executeCommandById("ink-notebook:object-library"));
+  await page().waitForSelector(PANEL, { timeout: 5000 });
+  await sleep(500);
+  await ev(() => {
+    const b = [...document.querySelectorAll(".workspace-leaf.mod-active .ink-library-source")].find((x) => /Doodles/.test(x.getAttribute("aria-label") ?? x.textContent));
+    b?.click();
+  });
+  await sleep(800);
+  await still("excalidraw");
+  await ev(() => document.querySelector(".workspace-leaf.mod-active .ink-library-panel .ink-library-close")?.click());
+  // today's daily note, on an ink page
+  await ev(() => app.internalPlugins.getPluginById("daily-notes")?.enable?.());
+  await sleep(500);
+  await ev(() => app.commands.executeCommandById("ink-notebook:open-today-ink"));
+  await sleep(3000);
+  await tidyWorkspace();
+  const isInk = await ev(() => __t.view()?.getViewType() === "ink-notebook");
+  if (isInk) {
+    await addInk([
+      ...hw("Thursday", X0, 250, 901, { size: 3.0 }),
+      ...hw("- call the bakery", X0, 360, 902),
+      ...hw("- 3pm design review", X0, 420, 903),
+      ...hw("- run 5 km", X0, 480, 904),
+    ]);
+    await sleep(800);
+    await still("daily");
+  } else console.log("    (no daily note on an ink page)", await ev(() => __t.view()?.getViewType()));
+  // the setup assistant
+  await ev(() => app.commands.executeCommandById("ink-notebook:open-setup"));
+  await sleep(1500);
+  await still("setup");
   await closeModals();
 };
 
-const order = ["setup", "write", "diagram", "pdf", "pages"];
+/** A small Excalidraw library (a cloud, a star, a server and a smiley) in the vault. */
+async function excalidrawLibrary() {
+  const base = { angle: 0, strokeColor: "#1e1e1e", backgroundColor: "transparent", fillStyle: "solid", strokeWidth: 2, strokeStyle: "solid", roughness: 0, opacity: 100, roundness: null, isDeleted: false, groupIds: [], boundElements: null, locked: false, version: 1, versionNonce: 1, seed: 1 };
+  let n = 0;
+  const el = (o) => ({ ...base, id: `el${++n}`, ...o });
+  const cloud = [];
+  for (const [x, y, w, h] of [[0, 30, 70, 60], [40, 0, 90, 80], [100, 25, 80, 65], [30, 50, 120, 50]]) cloud.push(el({ type: "ellipse", x, y, width: w, height: h, backgroundColor: "#a5d8ff", fillStyle: "solid", strokeColor: "#1971c2" }));
+  const star = [];
+  {
+    const pts = [];
+    for (let i = 0; i <= 10; i++) {
+      const a = -Math.PI / 2 + (i * Math.PI) / 5;
+      const r = i % 2 ? 26 : 62;
+      pts.push([62 + r * Math.cos(a), 62 + r * Math.sin(a)]);
+    }
+    star.push(el({ type: "line", x: 0, y: 0, width: 124, height: 124, points: pts, backgroundColor: "#ffd43b", fillStyle: "hachure", strokeColor: "#e67700" }));
+  }
+  const server = [
+    el({ type: "rectangle", x: 0, y: 0, width: 110, height: 40, backgroundColor: "#d0bfff", fillStyle: "cross-hatch", strokeColor: "#5f3dc4", roundness: { type: 3 } }),
+    el({ type: "rectangle", x: 0, y: 50, width: 110, height: 40, backgroundColor: "#d0bfff", fillStyle: "cross-hatch", strokeColor: "#5f3dc4", roundness: { type: 3 } }),
+    el({ type: "ellipse", x: 85, y: 14, width: 12, height: 12, backgroundColor: "#2f9e44", fillStyle: "solid", strokeColor: "#2f9e44" }),
+    el({ type: "ellipse", x: 85, y: 64, width: 12, height: 12, backgroundColor: "#2f9e44", fillStyle: "solid", strokeColor: "#2f9e44" }),
+  ];
+  const smile = [
+    el({ type: "ellipse", x: 0, y: 0, width: 110, height: 110, backgroundColor: "#ffec99", fillStyle: "solid", strokeColor: "#f08c00" }),
+    el({ type: "ellipse", x: 32, y: 36, width: 10, height: 14, backgroundColor: "#1e1e1e", fillStyle: "solid" }),
+    el({ type: "ellipse", x: 68, y: 36, width: 10, height: 14, backgroundColor: "#1e1e1e", fillStyle: "solid" }),
+    el({ type: "line", x: 28, y: 66, width: 54, height: 18, points: [[0, 0], [14, 14], [40, 14], [54, 0]] }),
+  ];
+  const arrow = [el({ type: "arrow", x: 0, y: 40, width: 160, height: 30, points: [[0, 0], [70, -30], [160, 0]], strokeColor: "#c2255c", endArrowhead: "arrow", startArrowhead: null, roundness: { type: 2 } })];
+  const note = [
+    el({ type: "rectangle", x: 0, y: 0, width: 130, height: 90, backgroundColor: "#b2f2bb", fillStyle: "solid", strokeColor: "#2b8a3e" }),
+    el({ type: "text", x: 18, y: 30, width: 94, height: 25, text: "To do!", fontSize: 20, fontFamily: 1, textAlign: "center", verticalAlign: "middle", strokeColor: "#2b8a3e", originalText: "To do!", lineHeight: 1.25 }),
+  ];
+  const items = [["Cloud", cloud], ["Star", star], ["Server", server], ["Smiley", smile], ["Swoosh", arrow], ["Sticky note", note]].map(([name, elements], i) => ({ id: `item${i}`, status: "published", created: 1, name, elements }));
+  fs.mkdirSync(path.join(VAULT, "Ink libraries"), { recursive: true });
+  fs.writeFileSync(path.join(VAULT, "Ink libraries", "Doodles.excalidrawlib"), JSON.stringify({ type: "excalidrawlib", version: 2, source: "promo", libraryItems: items }));
+  await sleep(1200);
+}
+
+// ---------------------------------------------------------------- order
+
+const order = ["setup", "write", "smart", "lasso", "flow", "mermaid", "table", "arxiv", "pens", "paper", "pages", "stills"];
 const run = only ? ["setup", ...only.split(",")] : order;
 for (const name of run) {
   try {
     await scenes[name]();
   } catch (e) {
     console.log(`  ✗ ${name}: ${e.stack ?? e}`);
-    await page.screenshot({ path: path.join(OUT, `error-${name}.png`) }).catch(() => {});
+    await page().screenshot({ path: path.join(OUT, `error-${name}.png`) }).catch(() => {});
     process.exitCode = 1;
   }
 }
-await browser.close();
+await R.rig.browser.close();
