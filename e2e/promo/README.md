@@ -1,6 +1,6 @@
 # Promo video
 
-A 28.5-second video of Ink Notebook for Reddit and other feeds: 1080 × 1350
+A 40-second video of Ink Notebook for Reddit and other feeds: 1080 × 1350
 (4:5, the size feeds show largest on phones), 30 fps, H.264 + AAC, with
 captions burnt in so it works muted. The finished video is
 [`docs/ink-notebook-promo.mp4`](../../docs/ink-notebook-promo.mp4).
@@ -33,10 +33,13 @@ sounds are synthesised (`sound.py`) – no samples, nothing to license.
 | 24 | Wall | 24 features as tiles: erasers, Excalidraw libraries, typed notes, daily notes, the files… |
 | – | End | a highlighter stroke wipes to yellow, "Ink Notebook" written by hand, "Community plugins → Browse → Ink Notebook" |
 
-The look: a dark studio, the tablet tilting and punching in on the beat, a
-feature counter, headlines whose key word gets a highlighter stroke, and an
-e-ink refresh (the screen inverts, then settles with a ghost of the old page)
-at every cut. The refresh is one dark flash per cut, at most one a second.
+The look: a dark studio, a slowly tilting tablet, a feature counter and
+headlines whose key word gets a highlighter stroke. The clips flow into each
+other: at every cut the camera glides from the last view of one clip to the
+first of the next, pulling back a little on the way, while the screens
+cross-fade; cuts inside a clip cross-fade too, the captions hand over with an
+eased slide, the last tablet eases back into the feature wall and a felt-tip
+stroke wipes to the end card.
 
 ## Making it
 
@@ -51,7 +54,7 @@ npm install
 ./scripts/download.sh
 SCALE=2 W=1000 H=1300 ./scripts/fresh.sh        # a fresh vault, Obsidian at twice the pixel density + mock Azure
 node promo/record.mjs                           # footage → shots/promo/<scene>/ (about 5 minutes)
-node promo/render.mjs                           # → shots/promo/video/ink-notebook-promo.mp4 (about 5 minutes)
+node promo/render.mjs                           # → shots/promo/video/ink-notebook-promo.mp4 (about 6 minutes)
 node promo/render.mjs --frames 0,120,600        # or a few frames as PNGs, to look at
 node promo/render.mjs --sheet 15                # or every 15th frame
 ```
@@ -65,12 +68,14 @@ node promo/render.mjs --sheet 15                # or every 15th frame
   with the pen (and fingers) per frame and named marks; the `still-*` scenes are
   single frames for the feature wall.
 - `timeline.mjs` is the edit: which frames play and how fast (by the marks of
-  the manifests), the camera, the captions and the tiles of the wall. The music
-  is 120 bpm and every clip lasts a whole number of beats, so the cuts fall on
-  the beat.
+  the manifests), the camera, the captions and the tiles of the wall. The video
+  is 80 beats of 120 bpm music and every clip lasts a whole number of beats, so
+  the cuts fall on the beat; the music starts with a two-beat pickup, so the
+  page turning into Markdown, the wall and the end card land on downbeats.
 - `compose.html` draws one frame of the video.
 - `render.mjs` renders every frame in a headless Chromium into ffmpeg, writes
   `cues.json` (the pen, taps, cuts and events per frame) and runs `sound.py`,
   which makes the music and the sounds that follow the picture (the pen
-  scratching while it writes, taps, a "zap" on every e-ink refresh, the felt-tip
-  swipe of the end card), then puts picture and sound together.
+  scratching while it writes, taps, a soft whoosh as one clip flows into the
+  next, the felt-tip swipe of the end card), then puts picture and sound
+  together.

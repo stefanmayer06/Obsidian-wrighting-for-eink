@@ -3,9 +3,15 @@
 // compose.html (the pictures) and render.mjs / sound.py (the sound follows the
 // pen, the cuts and the beat).
 //
-// The music is 120 bpm: a beat is 15 frames at 30 fps. Every clip lasts a whole
-// number of beats, so every cut lands on a beat, the wall on a downbeat and the
-// end card on the downbeat after it.
+// 40 seconds: 80 beats of 120 bpm music (a beat is 15 frames at 30 fps). Every
+// clip lasts a whole number of beats, so every cut lands on a beat. The music
+// starts with a two-beat pickup, so its bars begin on beats 2, 6, 10, … and the
+// page turning into Markdown (beat 6), the wall (66) and the end card (70) all
+// land on a downbeat.
+//
+// Clips flow into each other: the camera glides from the last view of a clip to
+// the first of the next (pulling back a little on the way) while the screens
+// cross-fade over TRANSITION frames; cuts inside a clip cross-fade too.
 //
 // Ranges refer to the named marks of a scene's manifest (record.mjs), with an
 // optional offset in frames: "tapText+2", "loop-3"; "end" is the last frame.
@@ -18,6 +24,10 @@ export const BPM = 120;
 export const BEAT = (FPS * 60) / BPM; // 15 frames
 export const VIDEO = { w: 1080, h: 1350 };
 export const SCREEN = { w: 702, h: 936 };
+/** Beats before the first downbeat of the music. */
+export const PICKUP = 2;
+/** Frames over which one clip flows into the next. */
+export const TRANSITION = 12;
 
 const WIDE = { z: 1, x: 351, y: 468 };
 
@@ -25,211 +35,212 @@ export const CLIPS = [
   {
     id: "write",
     count: 1,
-    beats: 4,
+    beats: 6,
     pen: true,
     ranges: [
-      { scene: "write", from: "writeStart-2", to: "writeEnd", rate: 1.85 },
-      { scene: "write", from: "writeEnd+1", to: "tapText+2", rate: 1.1 },
+      { scene: "write", from: "writeStart-2", to: "writeEnd", rate: 1.2 },
+      { scene: "write", from: "writeEnd+1", to: "end", rate: 1.0 },
     ],
     camera: [
-      { b: 0, z: 1.95, x: 290, y: 500, r: -2.2 },
-      { b: 2.6, z: 1.95, x: 280, y: 520, r: -1.4 },
-      { b: 3.2, z: 1.8, x: 270, y: 560, r: -0.8 },
-      { b: 3.75, z: 1.3, x: 430, y: 380, r: 0 },
-      { b: 4, z: 1.28, x: 440, y: 370, r: 0 },
+      { b: 0, z: 1.95, x: 290, y: 500, r: -2 },
+      { b: 4.2, z: 2.0, x: 282, y: 528, r: -1.2 },
+      { b: 5.0, z: 1.8, x: 300, y: 540, r: -0.6 },
+      { b: 6, z: 1.38, x: 430, y: 390, r: 0 },
     ],
   },
   {
     id: "text",
     count: 2,
-    beats: 4,
-    in: "eink",
-    ranges: [{ scene: "text", from: 0, to: 60, rate: 1 }],
+    beats: 6,
+    in: "fade",
+    ranges: [{ scene: "text", from: 0, to: 90, rate: 1 }],
     camera: [
       { b: 0, z: 1.15, x: 351, y: 440, r: 0 },
-      { b: 0.9, z: 1.2, x: 340, y: 420, r: 0.4 },
-      { b: 3.3, z: 1.72, x: 300, y: 300, r: 1.2 },
-      { b: 4, z: 1.76, x: 300, y: 298, r: 1.4 },
+      { b: 1.0, z: 1.18, x: 345, y: 425, r: 0.3 },
+      { b: 5.4, z: 1.74, x: 300, y: 300, r: 1.2 },
+      { b: 6, z: 1.77, x: 298, y: 298, r: 1.4 },
     ],
   },
   {
     id: "pens",
     count: 3,
-    beats: 3,
+    beats: 6,
     pen: true,
-    in: "eink",
+    in: "fade",
     ranges: [
-      { scene: "pens", from: "open", to: "picked+3", rate: 1.9 },
-      { scene: "pens", from: "write", to: "written+2", rate: 2.3, cut: 3 },
+      { scene: "pens", from: "open+4", to: "picked+3", rate: 1.0 },
+      { scene: "pens", from: "write", to: "written+2", rate: 1.0, cut: 8 },
     ],
     camera: [
-      { b: 0, z: 1.5, x: 210, y: 390, r: -1.5 },
-      { b: 1.15, z: 1.55, x: 215, y: 400, r: -1 },
-      { b: 1.25, z: 1.6, x: 250, y: 500, r: 0.5 },
-      { b: 3, z: 1.68, x: 260, y: 510, r: 1 },
+      { b: 0, z: 1.5, x: 210, y: 390, r: -1.4 },
+      { b: 1.6, z: 1.55, x: 214, y: 400, r: -1 },
+      { b: 2.6, z: 1.6, x: 250, y: 540, r: 0.4 },
+      { b: 6, z: 1.7, x: 262, y: 546, r: 1 },
     ],
   },
   {
     id: "smart",
     count: 4,
-    beats: 4,
+    beats: 6,
     pen: true,
-    in: "eink",
+    in: "fade",
     ranges: [
-      { scene: "smart", from: "loop-1", to: "snapped-3", rate: 1.6 },
-      { scene: "smart", hold: "snapped-3", frames: 6 },
-      { scene: "smart", from: "snapped-2", to: "scribble", rate: 1.2 },
-      { scene: "smart", from: "scribble", to: "erased+12", rate: 1.25 },
+      { scene: "smart", from: "loop-1", to: "snapped-3", rate: 1.1 },
+      { scene: "smart", hold: "snapped-3", frames: 8 },
+      { scene: "smart", from: "snapped-2", to: "scribble", rate: 1.0 },
+      { scene: "smart", from: "scribble", to: "erased+12", rate: 1.0 },
     ],
     camera: [
-      { b: 0, z: 2.1, x: 225, y: 470, r: 1.5 },
-      { b: 1.35, z: 2.2, x: 220, y: 466, r: 1.2 },
-      { b: 1.85, z: 2.15, x: 460, y: 570, r: -0.6 },
-      { b: 4, z: 2.1, x: 465, y: 572, r: -1 },
+      { b: 0, z: 2.08, x: 228, y: 470, r: 1.4 },
+      { b: 2.35, z: 2.2, x: 220, y: 466, r: 1.1 },
+      { b: 3.05, z: 2.12, x: 460, y: 570, r: -0.4 },
+      { b: 6, z: 2.1, x: 466, y: 574, r: -1 },
     ],
   },
   {
     id: "lasso",
     count: 6,
-    beats: 4,
+    beats: 6,
     pen: true,
-    in: "eink",
+    in: "fade",
     ranges: [
-      { scene: "lasso", from: "loop-1", to: "moved+2", rate: 1.85 },
-      { scene: "lasso", from: "tapToText-6", to: "typed+12", rate: 1.2, cut: 3 },
+      { scene: "lasso", from: "loop-1", to: "moved+2", rate: 1.0 },
+      { scene: "lasso", from: "tapToText-6", to: "typed+14", rate: 1.0, cut: 8 },
     ],
     camera: [
-      { b: 0, z: 1.75, x: 300, y: 580, r: -1.5 },
-      { b: 1.4, z: 1.7, x: 320, y: 540, r: -0.5 },
-      { b: 2.3, z: 1.85, x: 320, y: 530, r: 0.4 },
-      { b: 4, z: 1.95, x: 300, y: 535, r: 1 },
+      { b: 0, z: 1.75, x: 300, y: 582, r: -1.4 },
+      { b: 3.6, z: 1.7, x: 320, y: 540, r: -0.4 },
+      { b: 4.6, z: 1.88, x: 320, y: 530, r: 0.4 },
+      { b: 6, z: 1.96, x: 302, y: 535, r: 1 },
     ],
   },
   {
     id: "flow",
     count: 8,
-    beats: 4,
+    beats: 6,
     pen: true,
-    in: "eink",
+    in: "fade",
     ranges: [
-      { scene: "flow", from: "tapTile-2", to: "placed+1", rate: 2.1 },
-      { scene: "flow", from: "arrow", to: "filled+1", rate: 2.0, cut: 2 },
-      { scene: "flow", from: "lasso", to: "moved+3", rate: 1.9, cut: 2 },
+      { scene: "flow", from: "tapTile-2", to: "placed+1", rate: 1.0 },
+      { scene: "flow", from: "arrow", to: "filled+1", rate: 1.0, cut: 8 },
+      { scene: "flow", from: "lasso", to: "moved+3", rate: 1.0, cut: 8 },
     ],
     camera: [
       { b: 0, z: 1.3, x: 420, y: 560, r: 1.2 },
-      { b: 0.9, z: 1.5, x: 380, y: 690, r: 0.6 },
-      { b: 1.6, z: 1.55, x: 300, y: 660, r: 0 },
-      { b: 2.45, z: 1.6, x: 250, y: 560, r: -0.4 },
-      { b: 4, z: 1.55, x: 270, y: 470, r: -1.2 },
+      { b: 1.4, z: 1.48, x: 400, y: 700, r: 0.7 },
+      { b: 2.1, z: 1.55, x: 330, y: 720, r: 0.3 },
+      { b: 2.9, z: 1.6, x: 230, y: 615, r: -0.2 },
+      { b: 4.0, z: 1.6, x: 250, y: 485, r: -0.6 },
+      { b: 6, z: 1.55, x: 272, y: 462, r: -1.2 },
     ],
   },
   {
     id: "mermaid",
     count: 9,
-    beats: 4,
+    beats: 6,
     pen: true,
-    in: "eink",
+    in: "fade",
     ranges: [
-      { scene: "mermaid", from: "type", to: "typed", rate: 2.3 },
-      { scene: "mermaid", from: "place-2", to: "placed+2", rate: 1.6, cut: 3 },
-      { scene: "mermaid", from: "drag", to: "moved+4", rate: 1.5, cut: 2 },
+      { scene: "mermaid", from: "type-2", to: "typed+6", rate: 1.3 },
+      { scene: "mermaid", from: "place-4", to: "placed+6", rate: 1.0, cut: 8 },
+      { scene: "mermaid", from: "lasso", to: "moved+8", rate: 1.0, cut: 8 },
     ],
     camera: [
       { b: 0, z: 1.28, x: 351, y: 420, r: -1 },
-      { b: 2.0, z: 1.34, x: 351, y: 470, r: -0.4 },
-      { b: 2.1, z: 1.4, x: 330, y: 430, r: 0.4 },
-      { b: 3.0, z: 1.5, x: 300, y: 500, r: 0.8 },
-      { b: 4, z: 1.7, x: 250, y: 600, r: 1.2 },
+      { b: 2.6, z: 1.32, x: 351, y: 470, r: -0.5 },
+      { b: 3.2, z: 1.42, x: 330, y: 440, r: 0.2 },
+      { b: 4.1, z: 1.5, x: 290, y: 520, r: 0.6 },
+      { b: 6, z: 1.7, x: 250, y: 600, r: 1.2 },
     ],
   },
   {
     id: "table",
     count: 10,
-    beats: 3,
+    beats: 5,
     pen: true,
-    in: "eink",
+    in: "fade",
     ranges: [
-      { scene: "table", from: "write-1", to: "tapText+2", rate: 1.6 },
-      { scene: "tabletext", from: 0, to: 40, rate: 1, cut: "eink" },
+      { scene: "table", from: 0, to: "end", rate: 1.0 },
+      { scene: "tabletext", from: 0, to: 45, rate: 1, cut: 10 },
     ],
     camera: [
       { b: 0, z: 1.6, x: 380, y: 500, r: 1.2 },
-      { b: 0.55, z: 1.4, x: 420, y: 420, r: 0.6 },
-      { b: 0.7, z: 2.3, x: 150, y: 262, r: 0 },
-      { b: 3, z: 2.42, x: 150, y: 262, r: -0.8 },
+      { b: 1.0, z: 1.55, x: 400, y: 480, r: 0.8 },
+      { b: 1.9, z: 1.38, x: 440, y: 390, r: 0.4 },
+      { b: 3.0, z: 2.3, x: 150, y: 262, r: 0 },
+      { b: 5, z: 2.42, x: 150, y: 262, r: -0.8 },
     ],
   },
   {
     id: "arxiv",
     count: 11,
-    beats: 3,
+    beats: 4,
     pen: true,
-    in: "eink",
+    in: "fade",
     ranges: [
-      { scene: "arxiv", from: 0, to: "tapImport+1", rate: 0.9 },
-      { scene: "arxiv", from: "opened", to: "end", rate: 1.1, cut: "eink" },
+      { scene: "arxiv", from: 0, to: "opened-1", rate: 1.0 },
+      { scene: "arxiv", from: "opened", to: "end", rate: 1.0, cut: 8 },
     ],
     camera: [
       { b: 0, z: 1.35, x: 350, y: 390, r: -1.2 },
-      { b: 1.7, z: 1.42, x: 380, y: 360, r: -0.6 },
-      { b: 1.85, z: 1.3, x: 351, y: 380, r: 0 },
-      { b: 3, z: 1.38, x: 351, y: 360, r: 0.8 },
+      { b: 1.9, z: 1.45, x: 400, y: 340, r: -0.6 },
+      { b: 2.6, z: 1.3, x: 351, y: 380, r: 0 },
+      { b: 4, z: 1.38, x: 351, y: 360, r: 0.8 },
     ],
   },
   {
     id: "pdf",
     count: 12,
-    beats: 4,
+    beats: 6,
     pen: true,
-    in: "eink",
+    in: "fade",
     ranges: [
-      { scene: "pdf", from: "marker-1", to: "noteEnd+1", rate: 2.75 },
-      { scene: "pdf", from: "menu", to: "end", rate: 1.2, cut: 2 },
+      { scene: "pdf", from: "marker-1", to: "noteEnd+1", rate: 1.6 },
+      { scene: "pdf", from: "menu-4", to: "end", rate: 1.0, cut: 8 },
     ],
     camera: [
       { b: 0, z: 1.95, x: 400, y: 410, r: 1.2 },
-      { b: 2.7, z: 2.0, x: 410, y: 430, r: 0.4 },
-      { b: 2.85, z: 1.45, x: 470, y: 330, r: -0.6 },
-      { b: 4, z: 1.5, x: 480, y: 320, r: -1 },
+      { b: 4.1, z: 2.0, x: 410, y: 430, r: 0.4 },
+      { b: 4.9, z: 1.45, x: 470, y: 330, r: -0.6 },
+      { b: 6, z: 1.5, x: 480, y: 320, r: -1 },
     ],
   },
   {
     id: "paper",
     count: 13,
-    beats: 4,
+    beats: 5,
     pen: true,
-    in: "eink",
+    in: "fade",
     ranges: [
-      { scene: "picker", from: 0, to: "end", rate: 3.4 },
-      { scene: "paper", steps: ["dots", "grid", "isometric", "cornell", "music", "checklist"], each: 7.5 },
+      { scene: "picker", from: 0, to: "end", rate: 2.2 },
+      { scene: "paper", steps: ["dots", "grid", "graph", "isometric", "cornell", "checklist", "music"], each: 7.5, cut: 3 },
     ],
     camera: [
       { b: 0, z: 1.25, x: 346, y: 420, r: -1 },
-      { b: 1, z: 1.28, x: 346, y: 420, r: -0.5 },
-      { b: 1.05, z: 1.2, x: 351, y: 480, r: 0.5 },
-      { b: 4, z: 1.28, x: 351, y: 480, r: 1.2 },
+      { b: 1.2, z: 1.28, x: 346, y: 420, r: -0.6 },
+      { b: 1.9, z: 1.2, x: 351, y: 480, r: 0.3 },
+      { b: 5, z: 1.3, x: 351, y: 480, r: 1.2 },
     ],
   },
   {
     id: "pages",
     count: 14,
-    beats: 3,
+    beats: 4,
     pen: true,
-    in: "eink",
+    in: "fade",
     ranges: [
-      { scene: "pages", from: "swipe-2", to: "turned+3", rate: 1.1 },
-      { scene: "pages", from: "tapPages-6", to: "overview+30", rate: 1.0, cut: 2 },
+      { scene: "pages", from: "swipe-2", to: "turned+4", rate: 1.0 },
+      { scene: "pages", from: "tapPages-6", to: "overview+34", rate: 1.0, cut: 8 },
     ],
     camera: [
       { b: 0, z: 1.12, x: 351, y: 470, r: 1 },
-      { b: 0.55, z: 1.12, x: 351, y: 470, r: 0.5 },
-      { b: 0.7, z: 1.15, x: 350, y: 480, r: -0.4 },
-      { b: 3, z: 1.22, x: 350, y: 480, r: -1 },
+      { b: 0.9, z: 1.12, x: 351, y: 470, r: 0.6 },
+      { b: 1.6, z: 1.16, x: 350, y: 480, r: -0.2 },
+      { b: 4, z: 1.22, x: 350, y: 480, r: -1 },
     ],
   },
   { id: "wall", count: 24, beats: 4, in: "wall" },
-  { id: "end", beats: 9, in: "end" },
+  { id: "end", beats: 10, in: "end" },
 ];
 
 /** Captions: from `at` beats into their clip until the next caption. `mark` gets the highlighter. */
@@ -238,9 +249,9 @@ export const CAPTIONS = [
   { clip: "text", at: 0, main: "Get Markdown.", mark: "Markdown", sub: "Headings · lists · tasks · [[links]] · live sketches", foot: "Handwriting recognition: Azure AI Vision with your own free key" },
   { clip: "pens", at: 0, main: "5 pens. 10 colours.", mark: "5 pens.", sub: "Pressure, highlighter, favourite pens" },
   { clip: "smart", at: 0, main: "Hold to snap.", mark: "snap", sub: "Draw a shape, rest the pen – it's perfect" },
-  { clip: "smart", at: 1.85, main: "Scribble to erase.", mark: "erase", sub: "Scratch it out, like on paper" },
+  { clip: "smart", at: 2.9, main: "Scribble to erase.", mark: "erase", sub: "Scratch it out, like on paper" },
   { clip: "lasso", at: 0, main: "Lasso. Move.", mark: "Lasso.", sub: "Resize, rotate, recolour, duplicate" },
-  { clip: "lasso", at: 2.2, main: "…or make it text.", mark: "text", sub: "Handwriting → a typed text box" },
+  { clip: "lasso", at: 4.0, main: "…or make it text.", mark: "text", sub: "Handwriting → a typed text box" },
   { clip: "flow", at: 0, main: "Arrows that stick.", mark: "stick", sub: "Flowchart shapes · fills · object library" },
   { clip: "mermaid", at: 0, main: "Mermaid → ink.", mark: "ink", sub: "Paste the code, get real, editable shapes" },
   { clip: "table", at: 0, main: "Draw a table.", mark: "table", sub: "It becomes a Markdown table" },
@@ -253,7 +264,7 @@ export const CAPTIONS = [
 ];
 
 /** The names shown under "9 paper templates" while the paper changes (scene "paper" steps). */
-export const PAPER_NAMES = { picker: "Ruled · dotted · squared · Cornell · music…", dots: "Dotted", grid: "Squared", isometric: "Isometric", cornell: "Cornell notes", music: "Music staff", checklist: "Checklist" };
+export const PAPER_NAMES = { picker: "Ruled · dotted · squared · Cornell · music…", dots: "Dotted", grid: "Squared", graph: "Graph paper", isometric: "Isometric", cornell: "Cornell notes", music: "Music staff", checklist: "Checklist" };
 
 /**
  * The feature wall: a tile per feature, a crop of a recorded frame
@@ -345,12 +356,12 @@ export function build(manifests) {
           const src = frameOf(m, r.hold);
           for (let i = 0; i < r.frames; i++) push(src);
         } else if (r.steps) {
-          let acc = 0;
           r.steps.forEach((name, si) => {
             const n = Math.round((si + 1) * r.each) - Math.round(si * r.each);
             const src = frameOf(m, name);
+            const first = frames.length;
             for (let i = 0; i < n; i++) push(src, { step: name, stepLocal: i });
-            acc += n;
+            if (si > 0 && r.cut) frames[first].cut = { frames: r.cut, from: frames[first - 1].file };
           });
         } else {
           const rate = r.rate * k;
@@ -359,8 +370,8 @@ export function build(manifests) {
           const n = Math.max(1, Math.round((b - a) / rate));
           for (let i = 0; i < n; i++) push(Math.min(b, Math.floor(a + i * rate)));
         }
-        // a cut inside the clip: "eink" refreshes the screen, a number dissolves over that many frames
-        if (r.cut && firstOfRange > start) frames[firstOfRange].cut = { type: r.cut === "eink" ? "eink" : "dissolve", frames: typeof r.cut === "number" ? r.cut : 4, from: frames[firstOfRange - 1].file };
+        // a cut inside the clip cross-fades over r.cut frames
+        if (r.cut && !r.steps && firstOfRange > start) frames[firstOfRange].cut = { frames: r.cut, from: frames[firstOfRange - 1].file, fromPen: frames[firstOfRange - 1].pen };
       }
       // exactly `want` frames: hold the last one, or drop the extra
       while (frames.length - start < want) frames.push({ ...frames[frames.length - 1], local: frames.length - start, tap: false, ink: null, cut: null });

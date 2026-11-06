@@ -3,15 +3,16 @@
     python3 promo/sound.py shots/promo/video/cues.json shots/promo/video/sound.wav
 
 Music: a bright 120 bpm track in A minor (Am – F – C – G, ending on C):
-four-on-the-floor kick, claps, hats, a pumping bass, synth stabs and an arp;
-it opens up when the page turns into Markdown, builds into the feature wall
-(where every tile that lands plays the next note of a rising arpeggio) and
-resolves on the end card.
+four-on-the-floor kick, claps, hats, a pumping bass, synth stabs and an arp.
+It starts with a two-beat pickup (so its bars begin on beats 2, 6, 10, … of
+the video), opens up when the page turns into Markdown, builds into the
+feature wall (where every tile that lands plays the next note of a rising
+arpeggio) and resolves on the end card.
 
 Foley follows the picture (cues.json, written by render.mjs, has the pen, the
 taps, the cuts and the events of every frame): the pen scratching while it
-writes, taps, an e-ink "zap" on every refresh, paper flicks, the felt-tip swipe
-of the end card and a chime when the name is written.
+writes, taps, a soft whoosh as one clip flows into the next, paper flicks, the
+felt-tip swipe of the end card and a chime when the name is written.
 """
 import json
 import sys
@@ -211,8 +212,14 @@ CHORDS = {
     "C": (36, [55, 60, 64, 67]),
     "G": (31, [55, 59, 62, 67]),
 }
-PROG = ["Am", "F", "C", "G"] * 3 + ["C", "C", "C"]
+LOOP = ["Am", "F", "C", "G"]
+PICKUP = 2  # beats before the first downbeat
 ARP = [0, 1, 2, 3, 2, 1, 2, 3, 0, 1, 2, 3, 2, 3, 1, 2]
+
+
+def chord_of_bar(b):
+    """The intro bar sits on G, then Am – F – C – G from the drop on."""
+    return "G" if b == 0 else LOOP[(b - 1) % 4]
 
 
 def music(seconds, cues):
@@ -233,10 +240,15 @@ def music(seconds, cues):
             duck[i : i + len(seg)] = np.minimum(duck[i : i + len(seg)], seg)
 
     mus = Track(seconds)  # the tonal parts, ducked later
-    bars = int(np.ceil(seconds / BAR))
+    grid = PICKUP * BEAT  # the first downbeat
+    # the pickup: hats and a soft swell lead into the first downbeat
+    tr.add(riser(grid), 0, 0.12)
+    for k in range(4):
+        tr.add(hat(), k * BEAT / 2, 0.035 + 0.01 * k, 0.3)
+    bars = int(np.ceil((seconds - grid) / BAR))
     for b in range(bars):
-        t0 = b * BAR
-        name = PROG[min(b, len(PROG) - 1)]
+        t0 = grid + b * BAR
+        name = chord_of_bar(b)
         root, chord = CHORDS[name]
         freqs = [midi(m) for m in chord]
         intro = t0 < drop - 0.01
@@ -247,10 +259,10 @@ def music(seconds, cues):
                 # the last chord: wide, held, over the end card
                 mus.add(stab([midi(m) for m in [48, 55, 60, 64, 67, 72, 76]], BAR * 2.4, bright=0.8), t0, 0.46)
                 mus.add(pad([midi(m) for m in [48, 55, 64, 67, 71]], BAR * 2.3), t0, 0.26)
-                tr.add(bass_note(midi(36), BAR * 0.6, release=2.2), t0, 0.34)
-                tr.add(impact(), t0, 0.5)
-                kick_at(t0, 1.1)
-                tr.add(clap(), t0, 0.25, 0.05)
+                tr.add(bass_note(midi(36), BAR * 0.6, release=2.2), t0, 0.3)
+                tr.add(impact(), t0, 0.3)
+                kick_at(t0, 0.85)
+                tr.add(clap(), t0 + 0.012, 0.16, 0.05)
             # a soft pulse fading out under the end card
             for beat in range(4):
                 at = t0 + beat * BEAT
@@ -352,14 +364,14 @@ def tap():
     return bandpass(noise(len(t)), 1800, 6000) * np.exp(-t / 0.005) + 0.7 * np.sin(2 * np.pi * 260 * t) * np.exp(-t / 0.01)
 
 
-def zap():
-    """An e-ink refresh: a short digital chirp and a fizz."""
-    t = tt(0.16)
-    f = 2600 * np.exp(-t / 0.03) + 180
-    chirp = np.sign(np.sin(2 * np.pi * np.cumsum(f) / SR)) * np.exp(-t / 0.05) * 0.35
-    fizz = highpass(noise(len(t)), 5000) * np.exp(-t / 0.035) * 0.5
-    crush = np.round((chirp + fizz) * 6) / 6
-    return lowpass(crush, 9000)
+def whoosh(dur=0.5, lo=250, hi=3800):
+    """Air moving past: a soft swell of filtered noise, its pitch rising a little."""
+    t = tt(dur)
+    u = t / dur
+    low = bandpass(noise(len(t)), lo, hi * 0.6)
+    high = bandpass(noise(len(t)), lo * 2, hi)
+    sig = low * (1 - u) + high * u
+    return sig / np.std(sig) * np.sin(np.pi * u) ** 1.6
 
 
 def swoosh(dur=0.3, lo=500, hi=6000):
@@ -391,10 +403,11 @@ def foley(seconds, cues):
         if f.get("touch") and not (i and cues["frames"][i - 1].get("touch")):
             tr.add(swoosh(0.35, 400, 3000), at, 0.12, -0.2)
         ev = f.get("event")
-        if ev == "eink":
-            tr.add(zap(), at - 0.01, 0.16, pan=0.1)
-        elif ev == "dissolve":
-            tr.add(swoosh(0.22), at - 0.08, 0.06)
+        if ev == "fade":
+            # the camera glides over to the next clip
+            tr.add(whoosh(0.55), at - 0.12, 0.05, pan=-0.1)
+        elif ev == "cut":
+            tr.add(whoosh(0.35, 400, 3000), at - 0.06, 0.025, pan=0.1)
         elif ev == "step":
             tr.add(flick(), at, 0.2, pan=0.2)
         elif ev == "wall":
@@ -404,8 +417,8 @@ def foley(seconds, cues):
     end = next(c for c in cues["clips"] if c["id"] == "end")
     t_end = end["start"] / fps
     # the name is written: a chime
-    tr.add(chime(midi(84)), t_end + 2.08, 0.07, 0.2)
-    tr.add(chime(midi(91)), t_end + 2.2, 0.045, -0.2)
+    tr.add(chime(midi(84)), t_end + 2.38, 0.07, 0.2)
+    tr.add(chime(midi(91)), t_end + 2.5, 0.045, -0.2)
     return tr
 
 
@@ -435,9 +448,10 @@ def main():
     rms = np.sqrt(np.mean(np.concatenate([L[busy], R[busy]]) ** 2))
     gain = 10 ** (-14.0 / 20) / max(rms, 1e-6)
     L, R = np.tanh(L * gain * 1.15) / 1.15, np.tanh(R * gain * 1.15) / 1.15
+    # headroom for the AAC encoder, which overshoots sharp hits
     peak = max(np.max(np.abs(L)), np.max(np.abs(R)))
-    if peak > 0.9:
-        L, R = L * 0.9 / peak, R * 0.9 / peak
+    if peak > 0.8:
+        L, R = L * 0.8 / peak, R * 0.8 / peak
     out = np.stack([L, R], axis=1)
     with wave.open(sys.argv[2], "wb") as w:
         w.setnchannels(2)

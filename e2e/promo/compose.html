@@ -63,7 +63,7 @@
   </div>
 </div>
 <script type="module">
-import { build, cameraAt, frameOf, CAPTIONS, CLIPS, FPS, BEAT, VIDEO, SCREEN, WALL, PAPER_NAMES } from "./timeline.mjs";
+import { build, cameraAt, frameOf, CAPTIONS, CLIPS, FPS, BEAT, VIDEO, SCREEN, WALL, PAPER_NAMES, TRANSITION } from "./timeline.mjs";
 
 const cv = document.getElementById("cv");
 const main = cv.getContext("2d");
@@ -97,8 +97,7 @@ function img(file) {
 const clamp = (v, a = 0, b = 1) => Math.max(a, Math.min(b, v));
 const ease = (u) => { u = clamp(u); return u * u * (3 - 2 * u); };
 const easeOut = (u) => 1 - Math.pow(1 - clamp(u), 3);
-const easeIn = (u) => Math.pow(clamp(u), 3);
-const backOut = (u) => { u = clamp(u); const c = 1.6; return 1 + (c + 1) * Math.pow(u - 1, 3) + c * Math.pow(u - 1, 2); };
+const easeInOut = (u) => { u = clamp(u); return u < 0.5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2; };
 
 function roundRect(c, x, y, w, h, r) {
   c.beginPath();
@@ -161,13 +160,33 @@ function drawGrain(f, alpha = 0.035) {
 }
 
 // ------------------------------------------------------------ the camera: screen (CSS px) → video px
-function camOf(f) {
+/** The first TRANSITION frames of a clip that flows in from the clip before: how far along it is. */
+function transitionAt(f) {
   const fr = T.frames[f];
   const c = clipById[fr.clip];
-  const cam = cameraAt(c.camera, fr.local / BEAT);
-  // a little punch on every cut, a breath on every beat
-  const punch = 1 + 0.045 * Math.exp(-fr.local / 3.2) + 0.006 * Math.exp(-(fr.local % BEAT) / 3);
-  return { ...cam, s: BASE * cam.z * punch, rad: ((cam.r ?? 0) * Math.PI) / 180 };
+  if (c.in !== "fade" || c.start === 0 || fr.local >= TRANSITION) return null;
+  const prevF = T.frames[c.start - 1];
+  const u = (fr.local + 1) / (TRANSITION + 1);
+  return { u, e: easeInOut(u), prevF, prevClip: clipById[prevF.clip] };
+}
+
+function clipCam(clip, local) {
+  const cam = cameraAt(clip.camera, local / BEAT);
+  return { z: cam.z, x: cam.x, y: cam.y, r: cam.r ?? 0 };
+}
+
+function camOf(f) {
+  const fr = T.frames[f];
+  let cam = clipCam(clipById[fr.clip], fr.local);
+  // across a transition the camera glides from where the last clip ended, pulling back a little on the way
+  const tr = transitionAt(f);
+  if (tr) {
+    const a = clipCam(tr.prevClip, tr.prevClip.frames - 1);
+    const e = tr.e;
+    const z = Math.exp(Math.log(a.z) + (Math.log(cam.z) - Math.log(a.z)) * e) * (1 - 0.1 * Math.sin(Math.PI * e));
+    cam = { z, x: a.x + (cam.x - a.x) * e, y: a.y + (cam.y - a.y) * e, r: a.r + (cam.r - a.r) * e };
+  }
+  return { ...cam, s: BASE * cam.z, rad: (cam.r * Math.PI) / 180 };
 }
 function mapper(cam, extra = { k: 1, dx: 0, dy: 0, rot: 0 }) {
   const s = cam.s * extra.k;
@@ -246,21 +265,6 @@ function drawShot(im, a = 1, filter = "none") {
   ctx.drawImage(im, 0, 0, SCREEN.w, SCREEN.h);
   ctx.filter = "none";
   ctx.globalAlpha = wasA;
-}
-
-/**
- * An e-ink refresh from `from` to `to` (u: frame of the transition): the old
- * picture inverts, the new one shows inverted, then it settles with a ghost of
- * the old one, the way a Boox screen does a full refresh.
- */
-function drawRefresh(from, to, u) {
-  if (u <= 0) drawShot(from, 1, "invert(1)");
-  else if (u === 1) drawShot(to, 1, "invert(1) contrast(0.9)");
-  else {
-    drawShot(to);
-    const ghost = u === 2 ? 0.16 : u === 3 ? 0.07 : 0;
-    if (ghost) drawShot(from, ghost);
-  }
 }
 
 // ------------------------------------------------------------ the stylus (tip at the origin, the body along +y)
@@ -433,23 +437,23 @@ function updateCaptions(t, f) {
       return;
     }
     const lt = t - start;
-    const outU = ease((t - (end - 0.13)) / 0.13);
+    // it leaves upwards as the next one is about to come
+    const outU = easeInOut((t - (end - 0.24)) / 0.24);
     el.style.opacity = String(1 - outU);
-    el.style.transform = `translateY(${-outU * 16}px)`;
+    el.style.transform = `translateY(${-outU * 24}px)`;
     const words = el.querySelectorAll(".w");
     words.forEach((w, k) => {
-      const u = first ? 1 : backOut((lt - 0.035 * k) / 0.26);
-      const a = first ? 1 : easeOut((lt - 0.035 * k) / 0.16);
-      w.style.opacity = String(a);
-      w.style.transform = `translateY(${(1 - u) * 46}px)`;
+      const u = first ? 1 : easeOut((lt - 0.04 - 0.045 * k) / 0.42);
+      w.style.opacity = String(first ? 1 : clamp(u * 1.4));
+      w.style.transform = `translateY(${(1 - u) * 34}px)`;
     });
-    const mkU = first && lt < 0.001 ? 1 : easeOut((lt - (first ? 0 : 0.18)) / 0.24);
+    const mkU = first ? 1 : easeInOut((lt - 0.3) / 0.36);
     el.querySelectorAll(".mk").forEach((mk) => {
-      mk.style.setProperty("--mk", String(first ? Math.max(mkU, 1) : mkU));
-      mk.style.color = (first ? 1 : mkU) > 0.55 ? "#141416" : "";
+      mk.style.setProperty("--mk", String(mkU));
+      mk.style.color = mkU > 0.55 ? "#141416" : "";
     });
     const sub = el.querySelector(".sub");
-    const su = first ? 1 : easeOut((lt - 0.16) / 0.3);
+    const su = first ? 1 : easeOut((lt - 0.22) / 0.42);
     sub.style.opacity = String(su);
     sub.style.transform = `translateY(${(1 - su) * 14}px)`;
     if (c.ticker) {
@@ -458,8 +462,8 @@ function updateCaptions(t, f) {
       const name = fr.step ? PAPER_NAMES[fr.step] : PAPER_NAMES.picker;
       if (sub.textContent !== name) sub.textContent = name;
       if (fr.step) {
-        const pop = easeOut(fr.stepLocal / 3);
-        sub.style.transform = `translateY(${(1 - pop) * 10}px)`;
+        const pop = easeOut(fr.stepLocal / 4);
+        sub.style.transform = `translateY(${(1 - pop) * 8}px)`;
         sub.style.color = "#ffe14d";
       } else sub.style.color = "";
     }
@@ -473,7 +477,7 @@ function updateCaptions(t, f) {
     const c = clipById[cap.clip];
     const st = c.start / FPS, en = (c.start + c.frames) / FPS;
     foot.textContent = cap.foot;
-    foot.style.opacity = String(Math.min(easeOut((t - st - 0.35) / 0.3), 1 - ease((t - en + 0.2) / 0.2)));
+    foot.style.opacity = String(Math.min(easeOut((t - st - 0.45) / 0.4), 1 - easeInOut((t - en + 0.3) / 0.3)));
   }
 }
 
@@ -487,11 +491,15 @@ function updateCounter(f) {
   let roll = 0;
   if (fr.clip === "wall") {
     // counts up with the tiles of the wall
-    n = Math.min(24, 14 + Math.floor(Math.max(0, fr.local - 4) / 1.6));
-  } else if (fr.local < 5 && clipIndex[fr.clip] > 0) roll = 1 - easeOut(fr.local / 5);
+    n = Math.min(24, 14 + Math.floor(Math.max(0, fr.local - 6) / 2));
+  } else if (fr.local < 9 && clipIndex[fr.clip] > 0) roll = 1 - easeInOut(fr.local / 9);
   // the smart clip shows two features, so does the lasso
-  if (fr.clip === "smart" && fr.local >= 2.2 * BEAT) n = 5;
-  if (fr.clip === "lasso" && fr.local >= 2.2 * BEAT) n = 7;
+  const second = (id) => CAPTIONS.find((c, i) => c.clip === id && c.at > 0);
+  if ((fr.clip === "smart" || fr.clip === "lasso") && fr.local >= second(fr.clip).at * BEAT) {
+    n += 1;
+    const d = fr.local - second(fr.clip).at * BEAT;
+    if (d < 9) roll = 1 - easeInOut(d / 9);
+  }
   const label = String(n).padStart(2, "0");
   if (num.textContent !== label) num.textContent = label;
   num.style.transform = `translateY(${roll * 40}px)`;
@@ -502,8 +510,11 @@ function updateCounter(f) {
 function penAlpha(f) {
   const fr = T.frames[f];
   const c = clipById[fr.clip];
-  let a = clipIndex[fr.clip] === 0 ? 1 : clamp((fr.local + 1) / 5);
-  a = Math.min(a, clamp((c.frames - fr.local) / 4));
+  const tr = transitionAt(f);
+  let a = tr ? tr.e : 1;
+  // before a clip without the tablet's pen (the wall), it is put away
+  const next = T.clips[clipIndex[fr.clip] + 1];
+  if (!next || next.in !== "fade") a = Math.min(a, easeInOut((c.frames - fr.local) / 8));
   return a;
 }
 
@@ -525,33 +536,48 @@ async function drawFootage(f, { alpha = 1, extra = null, pen = true } = {}) {
   const M = mapper(cam, extra ?? undefined);
   const im = await img(fr.file);
   let screen = () => drawShot(im);
-  const clip = clipById[fr.clip];
-  // a refresh at the start of a clip, or at a cut inside it
-  const prevF = clip.start > 0 ? T.frames[clip.start - 1] : null;
-  if (clip.in === "eink" && prevF && prevF.file && fr.local < 4) {
-    const from = await img(prevF.file);
-    screen = () => drawRefresh(from, im, fr.local);
+  // flowing in from the last clip: its screen fades out under this one
+  const tr = transitionAt(f);
+  if (tr && tr.prevF.file) {
+    const from = await img(tr.prevF.file);
+    screen = () => {
+      drawShot(from);
+      drawShot(im, tr.e);
+    };
   }
-  let cutStart = null;
-  for (let d = 0; d < 6; d++) {
+  // a cut inside the clip cross-fades too
+  let cut = null;
+  for (let d = 0; d < 12; d++) {
     const g = T.frames[f - d];
     if (!g || g.clip !== fr.clip) break;
     if (g.cut) {
-      cutStart = { d, cut: g.cut };
+      if (d < g.cut.frames) cut = { ...g.cut, e: easeInOut((d + 1) / (g.cut.frames + 1)) };
       break;
     }
   }
-  if (cutStart) {
-    const from = await img(cutStart.cut.from);
-    if (cutStart.cut.type === "eink" && cutStart.d < 4) screen = () => drawRefresh(from, im, cutStart.d);
-    else if (cutStart.cut.type === "dissolve" && cutStart.d < cutStart.cut.frames) screen = () => { drawShot(from); drawShot(im, ease((cutStart.d + 1) / (cutStart.cut.frames + 1))); };
+  if (cut) {
+    const from = await img(cut.from);
+    screen = () => {
+      drawShot(from);
+      drawShot(im, cut.e);
+    };
   }
   drawTablet(M, screen, alpha);
   if (!pen) return M;
   // the pen and the fingers
   const k = 0.95 * Math.pow(cam.z, 0.42);
+  // the last clip's pen fades out where it was
+  if (tr && tr.prevF.pen && tr.prevClip.pen) {
+    const p = M.pt(tr.prevF.pen.x, tr.prevF.pen.y);
+    drawPen(p.x, p.y, k, 1, alpha * (1 - tr.e), -0.52 + M.a);
+  }
   if (fr.pen) {
-    const a = alpha * penAlpha(f);
+    let a = alpha * penAlpha(f);
+    if (cut && cut.fromPen) {
+      const p = M.pt(cut.fromPen.x, cut.fromPen.y);
+      drawPen(p.x, p.y, k, 1, alpha * (1 - cut.e), -0.52 + M.a);
+      a *= cut.e;
+    }
     for (let d = 0; d < 11; d++) {
       const g = T.frames[f - d];
       if (g && g.tap && g.clip === fr.clip && g.pen) {
@@ -583,6 +609,11 @@ function tileRect(i) {
   return { x: WALL_BOX.x + col * (w + gap), y: WALL_BOX.y + row * (h + gap), w, h };
 }
 
+/** When tile i lands (frames into the wall): a diagonal wave. */
+function tileDelay(i) {
+  return 4 + (Math.floor(i / WALL_COLS) + (i % WALL_COLS)) * 2.1 + (i % 2) * 0.6;
+}
+
 async function drawWall(lt, out = 0) {
   // lt: frames into the wall; tiles land one after the other, in a diagonal wave
   ctx.save();
@@ -591,16 +622,15 @@ async function drawWall(lt, out = 0) {
     const t = wallTiles[i];
     const r = tileRect(i);
     const col = i % WALL_COLS, row = Math.floor(i / WALL_COLS);
-    const delay = 2 + (row + col) * 2.2 + (i % 2) * 0.6;
-    const u = clamp((lt - delay) / 7);
+    const delay = tileDelay(i);
+    const u = clamp((lt - delay) / 10);
     if (u <= 0) continue;
-    const s = 0.6 + 0.4 * backOut(u);
+    const s = 0.86 + 0.14 * easeOut(u);
     const im = await img(t.file);
     ctx.save();
-    ctx.globalAlpha = easeOut(u * 1.6) * (1 - out);
-    ctx.translate(r.x + r.w / 2, r.y + r.h / 2);
+    ctx.globalAlpha = easeOut(u) * (1 - out);
+    ctx.translate(r.x + r.w / 2, r.y + r.h / 2 + (1 - easeOut(u)) * 16);
     ctx.scale(s, s);
-    ctx.rotate((1 - easeOut(u)) * (i % 2 ? 0.06 : -0.06));
     ctx.translate(-r.w / 2, -r.h / 2);
     // the card
     ctx.save();
@@ -633,10 +663,10 @@ async function drawWall(lt, out = 0) {
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.fillText(t.label, r.w / 2, r.h - labelH / 2 - 1);
-    // a flash of the highlighter on landing
-    const flash = 1 - clamp((lt - delay - 3) / 6);
-    if (flash > 0 && u > 0.3) {
-      ctx.fillStyle = `rgba(255, 225, 77, ${0.35 * flash})`;
+    // a glow of the highlighter as it lands
+    const glow = Math.sin(Math.PI * clamp((lt - delay) / 14));
+    if (glow > 0) {
+      ctx.fillStyle = `rgba(255, 225, 77, ${0.22 * glow})`;
       ctx.fillRect(0, 0, r.w, r.h);
     }
     ctx.restore();
@@ -702,7 +732,7 @@ function drawSweep(u) {
   ctx.rotate(-0.38);
   const W = 2400, H = 2000;
   // the front of the stroke, from just left of the picture to past its right edge
-  const x1 = -980 + 2050 * (0.15 * u + 0.85 * ease(u));
+  const x1 = -980 + 2050 * easeInOut(u);
   ctx.beginPath();
   ctx.moveTo(-W / 2, -H / 2);
   // a soft, gently wavy front, like the edge of a felt tip
@@ -751,22 +781,22 @@ async function renderFrame(f) {
   if (fr.clip === "wall" || fr.clip === "end") {
     const wall = clipById.wall;
     const wl = fr.clip === "wall" ? fr.local : wall.frames + fr.local;
-    // the last tablet shrinks back into the wall
-    if (wl < 10) {
+    // the last tablet eases back and fades as the wall builds up
+    if (wl < 18) {
       const lastF = wall.start - 1;
-      const u = easeIn(wl / 10);
-      await drawFootage(lastF, { alpha: 1 - u, extra: { k: 1 - 0.55 * u, dx: 0, dy: 60 * u, rot: 0.05 * u }, pen: false });
+      const u = easeInOut(wl / 18);
+      await drawFootage(lastF, { alpha: 1 - u, extra: { k: 1 - 0.42 * u, dx: 0, dy: 40 * u, rot: 0.03 * u }, pen: false });
     }
     await drawWall(wl, 0);
     if (fr.clip === "wall") {
       captionBand();
       info.event = fr.local === 0 ? "wall" : null;
       // the tiles landing (for the sound)
-      info.tiles = wallTiles.map((_, i) => 2 + (Math.floor(i / WALL_COLS) + (i % WALL_COLS)) * 2.2 + (i % 2) * 0.6).filter((d) => Math.floor(d) === fr.local).length;
+      info.tiles = wallTiles.map((_, i) => tileDelay(i)).filter((d) => Math.floor(d) === fr.local).length;
     }
     if (fr.clip === "end") {
       const lt = fr.local / FPS;
-      const sweepU = clamp(lt / 0.42);
+      const sweepU = clamp(lt / 0.62);
       drawSweep(sweepU);
       if (sweepU >= 1) {
         ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -780,7 +810,7 @@ async function renderFrame(f) {
           ctx.fill();
         }
       }
-      const w0 = 0.42, w1 = 2.0;
+      const w0 = 0.62, w1 = 2.3;
       const at = drawTitle(clamp((lt - w0) / (w1 - w0)));
       if (at && lt > w0 - 0.3 && lt < w1 + 0.5) {
         const a = Math.min(clamp((lt - (w0 - 0.3)) / 0.22), 1 - clamp((lt - w1 - 0.12) / 0.3));
@@ -788,16 +818,16 @@ async function renderFrame(f) {
         info.pen = { x: at.x, y: at.y, down: at.down && lt > w0 && lt < w1, video: true };
       }
       const show = (el, t0, dy = 22) => {
-        const v = easeOut((lt - t0) / 0.4);
+        const v = easeOut((lt - t0) / 0.55);
         el.style.opacity = String(v);
         el.style.transform = `translateY(${(1 - v) * dy}px)`;
       };
-      show(endEls[0], 0.3);
-      show(endEls[1], 1.85);
-      show(endEls[2], 2.1);
-      show(endEls[3], 2.35);
-      show(endEls[4], 2.6);
-      const shine = clamp((lt - 3.0) / 0.55);
+      show(endEls[0], 0.45);
+      show(endEls[1], 2.15);
+      show(endEls[2], 2.45);
+      show(endEls[3], 2.75);
+      show(endEls[4], 3.05);
+      const shine = clamp((lt - 3.7) / 0.7);
       endEls[3].style.backgroundImage = shine > 0 && shine < 1 ? `linear-gradient(105deg, transparent ${shine * 140 - 40}%, rgba(255,255,255,0.16) ${shine * 140 - 25}%, transparent ${shine * 140 - 10}%)` : "none";
       info.event = fr.local === 0 ? "end" : null;
     }
@@ -812,7 +842,7 @@ async function renderFrame(f) {
   info.ink = fr.ink ?? null;
   info.tap = !!fr.tap;
   const startEvent = fr.local === 0 && clip.in ? clip.in : null;
-  const cutEvent = fr.cut ? fr.cut.type : null;
+  const cutEvent = fr.cut && !fr.step ? "cut" : null;
   info.event = startEvent ?? cutEvent;
   if (fr.step && fr.stepLocal === 0) info.event = "step";
   captionBand();
